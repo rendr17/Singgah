@@ -1,0 +1,25 @@
+type: object
+required:
+  - error
+additionalProperties: false
+properties:
+  error:
+    type: object
+    required:
+      - code
+      - message
+    additionalProperties: false
+    properties:
+      code:
+        type: string
+        description: Machine-readable error code, e.g. NOT_FOUND, PROVIDER_STALE
+        example: NOT_FOUND
+      message:
+        type: string
+        description: Human-readable explanation of the actual degraded state
+      requestId:
+        type: string
+        description: Correlates with the X-Request-ID response header
+      details:
+        type: object
+        additionalProperties: true

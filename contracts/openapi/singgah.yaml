@@ -1,9 +1,22 @@
 openapi: 3.1.0
 info:
   title: Singgah API
-  version: 0.0.0
-  description: >
-    Public API contract for Singgah — the source of truth between the Go
-    server and the generated TypeScript client (docs/34_API_SPEC.md).
-    Paths and schemas land with the API-foundation change.
-paths: {}
+  version: 0.1.0
+  description: >-
+    Singgah backend contract (docs/34_API_SPEC.md). JSON UTF-8; timestamps are
+    ISO-8601 with offset/UTC. Error responses share the ErrorEnvelope schema.
+servers:
+  - url: http://localhost:8080
+    description: Local development
+paths:
+  /health:
+    $ref: './paths/health.yaml'
+  /version:
+    $ref: './paths/version.yaml'
+components:
+  schemas:
+    ErrorEnvelope:
+      $ref: './schemas/error.yaml'
+tags:
+  - name: meta
+    description: Process/infrastructure endpoints

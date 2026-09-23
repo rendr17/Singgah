@@ -9,6 +9,13 @@ pnpm check
 pnpm test
 pnpm build
 
+pnpm contract:validate
+pnpm client:generate
+if [ -n "$(git status --porcelain -- packages/api-client/src/generated)" ]; then
+	echo "generated client drift — run 'pnpm client:generate' and commit the output" >&2
+	exit 1
+fi
+
 test -z "$(gofmt -l services)"
 
 for mod in services/*/go.mod; do

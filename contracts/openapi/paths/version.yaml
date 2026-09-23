@@ -1,0 +1,26 @@
+get:
+  operationId: getVersion
+  summary: Build version
+  description: Returns the API build version injected at build time.
+  tags:
+    - meta
+  responses:
+    '200':
+      description: Build version
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - version
+            additionalProperties: false
+            properties:
+              version:
+                type: string
+                example: dev
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

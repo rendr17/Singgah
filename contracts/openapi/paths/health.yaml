@@ -1,0 +1,27 @@
+get:
+  operationId: getHealth
+  summary: Service liveness
+  description: Returns 200 while the API process is serving requests.
+  tags:
+    - meta
+  responses:
+    '200':
+      description: Service is healthy
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - status
+            additionalProperties: false
+            properties:
+              status:
+                type: string
+                enum:
+                  - ok
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

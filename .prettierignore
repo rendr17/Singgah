@@ -6,6 +6,7 @@ README.txt
 
 # Lockfiles and generated output
 pnpm-lock.yaml
+packages/api-client/src/generated/
 package-lock.json
 yarn.lock
 **/node_modules/
