@@ -1,0 +1,7 @@
+* text=auto
+
+# gofmt rejects CRLF; bash refuses CRLF scripts. Pin LF regardless of
+# the contributor's core.autocrlf.
+*.go  text eol=lf
+*.sh  text eol=lf
+*.sql text eol=lf

@@ -27,6 +27,12 @@ func (w *statusWriter) Write(b []byte) (int, error) {
 	return w.ResponseWriter.Write(b)
 }
 
+// Unwrap keeps http.ResponseController (Flush/Hijack/ReaderFrom) working
+// through the wrapper — required once SSE/websocket endpoints exist.
+func (w *statusWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
 // Logging emits one structured slog line per completed request.
 func Logging(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {

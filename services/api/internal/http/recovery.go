@@ -3,6 +3,7 @@ package http
 import (
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 
 	"singgah/services/api/internal/http/middleware"
 	"singgah/services/api/internal/http/response"
@@ -21,6 +22,7 @@ func recovery(logger *slog.Logger) func(http.Handler) http.Handler {
 						slog.Any("panic", rec),
 						slog.String("request_id", middleware.RequestIDFrom(r.Context())),
 						slog.String("path", r.URL.Path),
+						slog.String("stack", string(debug.Stack())),
 					)
 					response.Error(w, r, http.StatusInternalServerError, "INTERNAL", "Internal server error")
 				}
