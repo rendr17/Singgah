@@ -23,6 +23,8 @@ Product direction, architecture, and delivery rules live in [`docs/`](docs/00_ST
 ```bash
 pnpm install
 pnpm dev        # SvelteKit dev server (apps/web)
+
+cd services/api && go run ./cmd/api   # API on :8080 — /health, /version
 ```
 
 Quality gates (run from repo root):
@@ -43,9 +45,9 @@ go vet ./... && go test ./... && go build ./...
 
 ```text
 apps/web                SvelteKit client (@singgah/web)
-packages/ui             shared Svelte UI primitives (filled by design-foundations)
-packages/design-tokens  CSS design tokens (filled by design-foundations)
-services/api            Go HTTP API module (minimal placeholder for now)
+packages/ui             shared Svelte UI primitives (@singgah/ui)
+packages/design-tokens  CSS design tokens (@singgah/design-tokens)
+services/api            Go HTTP API — chi router, /health, /version
 contracts/openapi       OpenAPI contract — singgah.yaml skeleton, grows with the API
 database/               goose migrations + sqlc queries (added with the DB foundation)
 scripts/                repo helpers — check.sh runs all local quality gates
