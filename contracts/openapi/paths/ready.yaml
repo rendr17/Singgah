@@ -1,0 +1,29 @@
+get:
+  operationId: getReady
+  summary: Readiness probe
+  description: >-
+    200 when dependencies are usable (today: database). 503 with the error
+    envelope when the database is unconfigured or unreachable.
+  tags:
+    - meta
+  responses:
+    '200':
+      description: All dependencies ready
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - status
+            additionalProperties: false
+            properties:
+              status:
+                type: string
+                enum:
+                  - ok
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

@@ -24,7 +24,14 @@ Product direction, architecture, and delivery rules live in [`docs/`](docs/00_ST
 pnpm install
 pnpm dev        # SvelteKit dev server (apps/web)
 
-cd services/api && go run ./cmd/api   # API on :8080 — /health, /version
+cd services/api && go run ./cmd/api   # API on :8080 — /health, /ready, /version
+```
+
+Database (Postgres + PostGIS, needs Docker):
+
+```bash
+docker compose -f infrastructure/local/compose.yaml up -d
+bash scripts/db-migrate.sh           # goose up against local compose
 ```
 
 Quality gates (run from repo root):
@@ -47,9 +54,11 @@ go vet ./... && go test ./... && go build ./...
 apps/web                SvelteKit client (@singgah/web)
 packages/ui             shared Svelte UI primitives (@singgah/ui)
 packages/design-tokens  CSS design tokens (@singgah/design-tokens)
-services/api            Go HTTP API — chi router, /health, /version
-contracts/openapi       OpenAPI contract — singgah.yaml skeleton, grows with the API
-database/               goose migrations + sqlc queries (added with the DB foundation)
+services/api            Go HTTP API — chi router, /health, /ready, /version
+packages/api-client     generated TypeScript client (@singgah/api-client)
+contracts/openapi       OpenAPI contract — singgah.yaml + paths/, schemas/
+database/               goose migrations + sqlc queries → services/api/db/generated
+infrastructure/local    Docker compose: Postgres + PostGIS (dev only)
 scripts/                repo helpers — check.sh runs all local quality gates
 docs/                   development blueprint (local reference, not committed)
 .github/                CI workflow + PR template

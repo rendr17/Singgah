@@ -13,6 +13,10 @@ type Config struct {
 	Env  string
 	Addr string
 
+	// DatabaseURL is optional: the API still serves non-DB endpoints when it
+	// is unset, and /ready reports the database as not configured.
+	DatabaseURL string
+
 	ReadHeaderTimeout time.Duration
 	ReadTimeout       time.Duration
 	WriteTimeout      time.Duration
@@ -34,6 +38,8 @@ func Load() (Config, error) {
 	if v := os.Getenv("APP_ENV"); v != "" {
 		cfg.Env = v
 	}
+
+	cfg.DatabaseURL = os.Getenv("DATABASE_URL")
 
 	if v := os.Getenv("PORT"); v != "" {
 		port, err := strconv.Atoi(v)

@@ -1,0 +1,26 @@
+name: singgah
+
+# Local development only — production Postgres is managed (Supabase free tier
+# per docs/28_INFRASTRUCTURE_COST.md). Credentials here are throwaway dev
+# values, never real secrets.
+services:
+  postgres:
+    image: postgis/postgis:17-3.5
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: singgah
+      POSTGRES_PASSWORD: singgah
+      POSTGRES_DB: singgah
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01-test-db.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U singgah -d singgah']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

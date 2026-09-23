@@ -9,8 +9,10 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"singgah/services/api/internal/config"
+	"singgah/services/api/internal/db"
 	httpapi "singgah/services/api/internal/http"
 )
 
@@ -27,9 +29,26 @@ func main() {
 	logger := newLogger(cfg.Env)
 	slog.SetDefault(logger)
 
+	deps := httpapi.Deps{Logger: logger, Version: version}
+
+	if cfg.DatabaseURL != "" {
+		connectCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		pool, err := db.Connect(connectCtx, cfg.DatabaseURL)
+		cancel()
+		if err != nil {
+			logger.Error("database connect", "error", err)
+			os.Exit(1)
+		}
+		defer pool.Close()
+		deps.DB = pool
+		logger.Info("database connected")
+	} else {
+		logger.Warn("DATABASE_URL unset — database endpoints report unavailable")
+	}
+
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpapi.NewRouter(logger, version),
+		Handler:           httpapi.NewRouter(deps),
 		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 		ReadTimeout:       cfg.ReadTimeout,
 		WriteTimeout:      cfg.WriteTimeout,

@@ -1,19 +1,24 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"singgah/services/api/internal/health"
 	"singgah/services/api/internal/http/middleware"
 )
 
 func testRouter() http.Handler {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewRouter(logger, "test-123")
+	return NewRouter(Deps{
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Version: "test-123",
+	})
 }
 
 func TestHealth(t *testing.T) {
@@ -71,6 +76,45 @@ func TestNotFoundUsesErrorEnvelope(t *testing.T) {
 	if rec.Header().Get(middleware.RequestIDHeader) != body.Error.RequestID {
 		t.Error("envelope requestId does not match X-Request-ID header")
 	}
+}
+
+type fakePinger struct{ err error }
+
+func (p fakePinger) Ping(context.Context) error { return p.err }
+
+func TestReady(t *testing.T) {
+	router := func(db health.Pinger) http.Handler {
+		return NewRouter(Deps{
+			Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+			Version: "test-123",
+			DB:      db,
+		})
+	}
+
+	t.Run("ok when database pings", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		router(fakePinger{}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ready", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rec.Code)
+		}
+	})
+
+	t.Run("503 when database unconfigured", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		router(nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ready", nil))
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503", rec.Code)
+		}
+	})
+
+	t.Run("503 when database unreachable", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		router(fakePinger{err: errors.New("conn refused")}).
+			ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ready", nil))
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503", rec.Code)
+		}
+	})
 }
 
 func TestRequestIDEchoesInboundHeader(t *testing.T) {

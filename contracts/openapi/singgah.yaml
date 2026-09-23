@@ -11,6 +11,8 @@ servers:
 paths:
   /health:
     $ref: './paths/health.yaml'
+  /ready:
+    $ref: './paths/ready.yaml'
   /version:
     $ref: './paths/version.yaml'
 components:

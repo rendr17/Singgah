@@ -13,15 +13,24 @@ import (
 	"singgah/services/api/internal/http/response"
 )
 
-func NewRouter(logger *slog.Logger, version string) http.Handler {
+// Deps carries the router's runtime dependencies — constructed once in main.
+type Deps struct {
+	Logger  *slog.Logger
+	Version string
+	// DB may be nil when DATABASE_URL is unset; /ready reports that honestly.
+	DB health.Pinger
+}
+
+func NewRouter(deps Deps) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
-	r.Use(middleware.Logging(logger))
-	r.Use(recovery(logger))
+	r.Use(middleware.Logging(deps.Logger))
+	r.Use(recovery(deps.Logger))
 
 	r.Get("/health", health.Handler)
-	r.Get("/version", health.VersionHandler(version))
+	r.Get("/ready", health.ReadyHandler(deps.DB))
+	r.Get("/version", health.VersionHandler(deps.Version))
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, r, http.StatusNotFound, "NOT_FOUND", "Resource not found")
