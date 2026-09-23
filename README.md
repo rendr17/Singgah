@@ -42,13 +42,21 @@ go vet ./... && go test ./... && go build ./...
 ## Layout
 
 ```text
-apps/web          SvelteKit client (@singgah/web)
-services/api      Go HTTP API module (minimal placeholder for now)
-contracts/        OpenAPI contract (added with the API foundation)
-packages/         shared client packages (added when real)
-docs/             development blueprint — read docs/00_START_HERE.md first
-.github/          CI workflow + PR template
+apps/web                SvelteKit client (@singgah/web)
+packages/ui             shared Svelte UI primitives (filled by design-foundations)
+packages/design-tokens  CSS design tokens (filled by design-foundations)
+services/api            Go HTTP API module (minimal placeholder for now)
+contracts/openapi       OpenAPI contract — singgah.yaml skeleton, grows with the API
+database/               goose migrations + sqlc queries (added with the DB foundation)
+scripts/                repo helpers — check.sh runs all local quality gates
+docs/                   development blueprint (local reference, not committed)
+.github/                CI workflow + PR template
 ```
+
+The full target tree and the incremental-growth rule live in
+`docs/64_FOLDER_STRUCTURE.md`.
+
+Run everything CI runs locally with `bash scripts/check.sh`.
 
 ## Rules of the house
 
