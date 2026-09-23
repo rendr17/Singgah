@@ -1,0 +1,18 @@
+{
+	"$schema": "https://turborepo.com/schema",
+	"tasks": {
+		"build": {
+			"dependsOn": ["^build"],
+			"outputs": ["build/**", "dist/**", ".svelte-kit/output/**"]
+		},
+		"check": {},
+		"lint": {},
+		"test": {
+			"dependsOn": ["^build"]
+		},
+		"dev": {
+			"cache": false,
+			"persistent": true
+		}
+	}
+}

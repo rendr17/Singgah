@@ -1,0 +1,18 @@
+# Authored blueprint pack — formatted by their authors, not CI
+docs/
+assets/
+source/
+README.txt
+
+# Lockfiles and generated output
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+**/node_modules/
+**/.svelte-kit/
+**/.turbo/
+**/build/
+**/dist/
+**/.output/
+**/coverage/
+**/static/

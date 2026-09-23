@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Builds / generated output
+.svelte-kit/
+build/
+dist/
+.output/
+coverage/
+.turbo/
+
+# Env — never commit real values
+.env
+.env.*
+!.env.example
+!.env.test
+
+# IDE-synced agent rules — canonical copy lives in docs/AGENTS.md
+/AGENTS.md
+
+# Go build artifacts
+*.exe
+*.test
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# Vite timestamp artifacts
+vite.config.*.timestamp-*
