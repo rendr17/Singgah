@@ -1,0 +1,9 @@
+/* Radius — docs/09_DESIGN_SYSTEM.md.
+   Pill is reserved for semantic status/chips, not general decoration. */
+:root {
+	--sg-radius-button: 8px;
+	--sg-radius-input: 10px;
+	--sg-radius-card: 12px;
+	--sg-radius-sheet: 16px;
+	--sg-radius-pill: 999px;
+}

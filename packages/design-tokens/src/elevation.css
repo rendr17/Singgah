@@ -1,0 +1,12 @@
+/* Elevation + layering. Shadows stay minimal — calm UI uses whitespace,
+   dividers and route color instead of stacking cards. */
+:root {
+	--sg-z-sticky: 10;
+	--sg-z-sheet: 30;
+	--sg-z-overlay: 40;
+	--sg-z-toast: 50;
+
+	--sg-shadow-card: 0 1px 2px rgb(20 23 25 / 0.06);
+	--sg-shadow-sheet: 0 -4px 16px rgb(20 23 25 / 0.12);
+	--sg-shadow-overlay: 0 8px 24px rgb(20 23 25 / 0.16);
+}

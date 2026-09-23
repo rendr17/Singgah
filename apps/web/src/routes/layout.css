@@ -1,1 +1,72 @@
+/* Fonts — Fontsource self-hosted. Inter Variable carries the opsz axis, so
+   font-optical-sizing:auto gives Display cuts at large sizes automatically. */
+@import '@fontsource-variable/inter/index.css';
+@import '@fontsource-variable/inter/opsz.css';
+@import '@fontsource/lato/400.css';
+@import '@fontsource/lato/400-italic.css';
+@import '@fontsource/lato/700.css';
+
+@import '@singgah/design-tokens';
 @import 'tailwindcss';
+
+/* Base — native semantics stay meaningful on top of Tailwind preflight. */
+body {
+	font-family: var(--sg-font-body);
+	font-size: var(--sg-text-body);
+	line-height: var(--sg-leading-normal);
+	color: var(--sg-text);
+	background-color: var(--sg-canvas);
+	font-optical-sizing: auto;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+	font-family: var(--sg-font-display);
+	font-weight: var(--sg-weight-semibold);
+	line-height: var(--sg-leading-tight);
+}
+
+code,
+kbd,
+samp,
+pre {
+	font-family: var(--sg-font-mono);
+}
+
+:focus-visible {
+	outline: var(--sg-focus-ring-width) solid var(--sg-focus-ring);
+	outline-offset: var(--sg-focus-ring-offset);
+}
+
+/* Departure times and countdowns use tabular numerals — docs/09. */
+.sg-tabular {
+	font-variant-numeric: tabular-nums;
+}
+
+.sg-sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	white-space: nowrap;
+	border: 0;
+}
+
+/* Token durations already collapse under reduced-motion (motion.css); this
+   guard covers any animation that bypasses the tokens. */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+	}
+}

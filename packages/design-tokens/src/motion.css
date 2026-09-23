@@ -1,0 +1,24 @@
+/* Motion — docs/11_MOTION_ANIMATION.md.
+   Duration tokens collapse to 0 under prefers-reduced-motion, so any
+   transition using these tokens complies automatically. */
+:root {
+	--sg-motion-instant: 100ms;
+	--sg-motion-fast: 140ms;
+	--sg-motion-base: 190ms;
+	--sg-motion-panel: 240ms;
+	--sg-motion-route: 320ms;
+
+	--sg-ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+	--sg-ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+	--sg-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	:root {
+		--sg-motion-instant: 0ms;
+		--sg-motion-fast: 0ms;
+		--sg-motion-base: 0ms;
+		--sg-motion-panel: 0ms;
+		--sg-motion-route: 0ms;
+	}
+}

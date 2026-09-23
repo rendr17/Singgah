@@ -1,0 +1,18 @@
+/* Core palette — docs/09_DESIGN_SYSTEM.md.
+   App chrome stays neutral; transit colors live in transit.css. */
+:root {
+	--sg-canvas: #f6f7f7;
+	--sg-surface: #ffffff;
+	--sg-surface-muted: #eef1f2;
+	--sg-text: #141719;
+	--sg-text-muted: #626a70;
+	--sg-border: #dde1e3;
+
+	--sg-brand: #0f6b4f;
+	--sg-brand-strong: #0a543e;
+	--sg-warm: #ff8a3d;
+
+	--sg-success: #287a55;
+	--sg-warning: #a66a16;
+	--sg-danger: #b44343;
+}

@@ -1,0 +1,15 @@
+/* Theme-level assignments — interaction states, focus, brand tints.
+   Light theme only for now; a dark token set needs its own contrast audit
+   (docs/09_DESIGN_SYSTEM.md keeps map dark style separate from UI tokens). */
+:root {
+	color-scheme: light;
+
+	--sg-brand-contrast: #ffffff;
+	--sg-brand-subtle: #e4efea;
+	--sg-warm-subtle: #fdeadf;
+
+	/* visible keyboard focus — docs/13_ACCESSIBILITY.md */
+	--sg-focus-ring: var(--sg-brand);
+	--sg-focus-ring-width: 2px;
+	--sg-focus-ring-offset: 2px;
+}

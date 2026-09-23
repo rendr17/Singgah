@@ -1,0 +1,23 @@
+/* Transit semantics — operator/line colors are information, not decoration
+   (docs/09_DESIGN_SYSTEM.md). Values approximate the brand board; canonical
+   per-line colors arrive with transit data. */
+:root {
+	--sg-line-krl: #c62f38;
+	--sg-line-mrt: #1d4ed8;
+	--sg-line-lrt: #1e3a5f;
+	--sg-line-tj: #e07b2a;
+	--sg-line-default: #626a70;
+
+	/* Data-truth states — docs/08_UX_PRINCIPLES.md. Never call scheduled
+	   data "live"; styling must stay distinguishable without color alone. */
+	--sg-status-live: #287a55;
+	--sg-status-live-bg: #e4efea;
+	--sg-status-estimated: #a66a16;
+	--sg-status-estimated-bg: #f9ecdd;
+	--sg-status-scheduled: #5f6b73;
+	--sg-status-scheduled-bg: #eef1f2;
+	--sg-status-stale: #78716c;
+	--sg-status-stale-bg: #eceae8;
+	--sg-status-disruption: #b44343;
+	--sg-status-disruption-bg: #f6e6e6;
+}

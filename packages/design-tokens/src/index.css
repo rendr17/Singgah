@@ -1,2 +1,8 @@
-/* Singgah design tokens live here (docs/09_DESIGN_SYSTEM.md).
-   Populated by the design-foundations change; intentionally empty for now. */
+@import './colors.css';
+@import './typography.css';
+@import './spacing.css';
+@import './radius.css';
+@import './motion.css';
+@import './elevation.css';
+@import './transit.css';
+@import './theme.css';
