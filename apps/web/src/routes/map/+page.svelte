@@ -38,10 +38,10 @@
 </script>
 
 <BackNav href="/" label="Pencarian" />
-<h1>Peta jaringan</h1>
+<h1 class="sg-page-title">Peta jaringan</h1>
 
 {#if error}
-	<p role="alert">{error}</p>
+	<p class="sg-error" role="alert">{error}</p>
 {/if}
 
 <div class="map-wrap">
@@ -55,7 +55,7 @@
 	{/if}
 </div>
 
-<p class="hint">
+<p class="sg-meta">
 	Stasiun dimuat mengikuti area yang terlihat. Klik titik untuk membuka detail stasiun.
 </p>
 
@@ -63,11 +63,7 @@
 	.map-wrap {
 		height: min(70vh, 36rem);
 		border: 1px solid var(--sg-border);
-		border-radius: var(--sg-radius-card, 12px);
+		border-radius: var(--sg-radius-card);
 		overflow: hidden;
-	}
-	.hint {
-		color: var(--sg-text-muted);
-		font-size: 0.875rem;
 	}
 </style>

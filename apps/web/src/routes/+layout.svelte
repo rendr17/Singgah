@@ -25,8 +25,8 @@
 		top: -100%;
 		z-index: 10;
 		padding: var(--sg-space-2) var(--sg-space-3);
-		border-radius: var(--sg-radius-sm);
-		background: var(--sg-accent);
+		border-radius: var(--sg-radius-button);
+		background: var(--sg-brand);
 		color: #fff;
 	}
 

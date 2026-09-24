@@ -9,18 +9,18 @@
 </script>
 
 {#if route === null}
-	<p role="alert">{data.error}</p>
+	<p class="sg-error" role="alert">{data.error}</p>
 	<BackNav href="/routes" label="Semua rute" />
 {:else}
 	<BackNav href="/routes" label="Semua rute" />
 
-	<h1>
+	<h1 class="sg-page-title">
 		{#if route.color}
-			<span class="dot" style:background-color={'#' + route.color}></span>
+			<span class="sg-dot" style:background-color={'#' + route.color}></span>
 		{/if}
 		{route.shortName || route.longName}
 	</h1>
-	<p class="meta">
+	<p class="sg-meta">
 		{#if route.longName && route.shortName}{route.longName} ·
 		{/if}
 		{route.mode}{#if route.agencyName}
@@ -30,9 +30,9 @@
 	<section>
 		<SectionHeading>Stasiun yang dilayani</SectionHeading>
 		{#if route.stops.length === 0}
-			<p>Belum ada stasiun tercatat untuk rute ini.</p>
+			<p class="sg-meta">Belum ada stasiun tercatat untuk rute ini.</p>
 		{:else}
-			<ul>
+			<ul class="sg-list">
 				{#each route.stops as stop (stop.id)}
 					<li>
 						{#if stop.stationNumber}<span class="num muted">{stop.stationNumber}</span>{/if}
@@ -44,7 +44,7 @@
 		{/if}
 	</section>
 
-	<p class="source">
+	<p class="sg-meta source">
 		Sumber: {route.source.provider}
 		{#if route.source.fetchedAt}
 			· diambil {new Date(route.source.fetchedAt).toLocaleString('id-ID')}
@@ -53,32 +53,13 @@
 {/if}
 
 <style>
-	.meta,
-	.source,
 	.muted {
 		color: var(--sg-text-muted);
-		font-size: 0.875rem;
-	}
-	ul {
-		list-style: none;
-		padding: 0;
-		display: flex;
-		flex-direction: column;
-		gap: var(--sg-space-1);
-	}
-	a {
-		color: var(--sg-text);
+		font-size: var(--sg-text-secondary);
 	}
 	.num {
 		display: inline-block;
 		min-width: 2.25rem;
 		font-variant-numeric: tabular-nums;
-	}
-	.dot {
-		display: inline-block;
-		width: 0.875rem;
-		height: 0.875rem;
-		border-radius: 50%;
-		margin-inline-end: var(--sg-space-1);
 	}
 </style>

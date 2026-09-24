@@ -30,40 +30,29 @@
 
 <BackNav href="/" label="Pencarian" />
 
-<h1>Penyedia data</h1>
-<p class="muted">Sumber data transit, lisensi, dan kesegaran ingest.</p>
+<h1 class="sg-page-title">Penyedia data</h1>
+<p class="sg-meta">Sumber data transit, lisensi, dan kesegaran ingest.</p>
 
 {#if data.error}
-	<p role="alert">{data.error}</p>
+	<p class="sg-error" role="alert">{data.error}</p>
 {:else}
 	{#each data.providers as p (p.code)}
 		{@const failed = failedAttempt(p)}
 		<Surface>
 			<SectionHeading>{p.name}</SectionHeading>
-			<p class="meta">
+			<p class="sg-meta">
 				<code>{p.code}</code>
-				{#if !p.isActive}<span class="stale">· nonaktif</span>{/if}
+				{#if !p.isActive}<span class="sg-warn">· nonaktif</span>{/if}
 			</p>
 			<p>{ageLabel(p.lastSuccessAt)}</p>
-			{#if failed}<p class="stale">{failed}</p>{/if}
+			{#if failed}<p class="sg-warn">{failed}</p>{/if}
 			{#if p.licenseName}<p>Lisensi: {p.licenseName}</p>{/if}
 			{#if p.attributionText}<p>{p.attributionText}</p>{/if}
-			{#if p.allowedUse}<p class="muted">{p.allowedUse}</p>{/if}
-			{#if p.refreshCadence}<p class="muted">Jadwal refresh: {p.refreshCadence}</p>{/if}
+			{#if p.allowedUse}<p class="sg-meta">{p.allowedUse}</p>{/if}
+			{#if p.refreshCadence}<p class="sg-meta">Jadwal refresh: {p.refreshCadence}</p>{/if}
 			{#if p.knownLimitations}
-				<p class="muted">Keterbatasan: {p.knownLimitations}</p>
+				<p class="sg-meta">Keterbatasan: {p.knownLimitations}</p>
 			{/if}
 		</Surface>
 	{/each}
 {/if}
-
-<style>
-	.meta,
-	.muted {
-		color: var(--sg-text-muted);
-		font-size: 0.875rem;
-	}
-	.stale {
-		color: var(--sg-status-estimated, #a66a16);
-	}
-</style>

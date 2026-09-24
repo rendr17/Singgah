@@ -41,8 +41,8 @@
 	});
 </script>
 
-<h1>Singgah</h1>
-<p>Pergi boleh spontan. Rute jangan.</p>
+<h1 class="sg-page-title">Singgah</h1>
+<p class="sg-meta">Pergi boleh spontan. Rute jangan.</p>
 <p>
 	<a href={resolve('/plan')}>Rencana perjalanan →</a> ·
 	<a href={resolve('/map')}>Peta jaringan →</a> ·
@@ -59,13 +59,13 @@
 </div>
 
 {#if loading}
-	<p role="status">Mencari…</p>
+	<p class="sg-meta" role="status">Mencari…</p>
 {:else if error}
-	<p role="alert">{error}</p>
+	<p class="sg-error" role="alert">{error}</p>
 {:else if query.trim() !== '' && stations.length === 0}
-	<p>Tidak ada stasiun yang cocok dengan “{query.trim()}”.</p>
+	<p class="sg-meta">Tidak ada stasiun yang cocok dengan “{query.trim()}”.</p>
 {:else if stations.length > 0}
-	<ul class="results">
+	<ul class="sg-list">
 		{#each stations as station (station.id)}
 			<li>
 				<a href={resolve('/stations/[id]', { id: station.id })}>
@@ -87,33 +87,12 @@
 		max-width: 32rem;
 		margin-block: var(--sg-space-4);
 	}
-	.results {
-		list-style: none;
-		padding: 0;
-		margin: 0;
-		display: flex;
-		flex-direction: column;
-		gap: var(--sg-space-1);
-		max-width: 32rem;
-	}
-	.results a {
-		display: flex;
-		align-items: baseline;
-		gap: var(--sg-space-2);
-		padding: var(--sg-space-2) var(--sg-space-3);
-		border-radius: var(--sg-radius-input);
-		color: var(--sg-text);
-		text-decoration: none;
-	}
-	.results a:hover {
-		background-color: var(--sg-surface-muted, var(--sg-surface));
-	}
 	.name {
-		font-weight: 600;
+		font-weight: var(--sg-weight-semibold);
 	}
 	.code,
 	.kind {
 		color: var(--sg-text-muted);
-		font-size: var(--sg-text-sm, 0.875rem);
+		font-size: var(--sg-text-secondary);
 	}
 </style>
