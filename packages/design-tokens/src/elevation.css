@@ -2,6 +2,7 @@
    dividers and route color instead of stacking cards. */
 :root {
 	--sg-z-sticky: 10;
+	--sg-z-dropdown: 20;
 	--sg-z-sheet: 30;
 	--sg-z-overlay: 40;
 	--sg-z-toast: 50;
