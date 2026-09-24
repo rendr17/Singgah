@@ -2,8 +2,8 @@ get:
   operationId: getRoute
   summary: Route detail
   description: >-
-    One canonical route with the stops it serves. Stops are sorted by name —
-    ordered trip/line-shape data lands with a later ingest.
+    One canonical route with the stops it serves, in the provider's declared
+    segment order. A route with no ingested sequence returns an empty list.
   tags:
     - catalog
   parameters:

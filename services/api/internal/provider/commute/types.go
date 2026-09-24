@@ -80,6 +80,35 @@ type ExternalStationRef struct {
 	OperatorName string `json:"operatorName"`
 }
 
+// LineDetail is the provider's /lines/{operator}/{lineCode} response — the
+// declared stop sequence per line. Segments model trunk/branch topology:
+// TRUNK is the main run; BRANCH rejoins at joinsAtCode.
+type LineDetail struct {
+	Operator OperatorRef `json:"operator"`
+	Line     Line        `json:"line"`
+	Segments []Segment   `json:"segments"`
+}
+
+type OperatorRef struct {
+	Code string `json:"code"`
+	Name string `json:"name"`
+}
+
+type Segment struct {
+	Kind        string           `json:"kind"` // TRUNK | BRANCH
+	JoinsAtCode string           `json:"joinsAtCode"`
+	Stations    []SegmentStation `json:"stations"`
+}
+
+type SegmentStation struct {
+	ID            string   `json:"id"` // "{operator}-{code}"
+	Code          string   `json:"code"`
+	Name          string   `json:"name"`
+	StationNumber string   `json:"stationNumber"` // "M01" — empty for some operators
+	IsInterchange bool     `json:"isInterchange"`
+	OtherLines    []string `json:"otherLines"` // "{operator}:{lineCode}"
+}
+
 // FarePlan is the provider's /fares/{from}/{to} response — a computed
 // station-to-station itinerary with legs, fare segments, and totals. Leg types
 // observed: TRANSFER (walk between stops) and RIDE (line ride with an ordered

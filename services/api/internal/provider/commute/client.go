@@ -46,8 +46,11 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 			Message string `json:"message"`
 		}
 		if err := dec.Decode(&env); err == nil && json.Unmarshal(env.Error, &e) == nil && e.Message != "" {
-			if e.Code == "UNKNOWN_STATION" {
+			switch e.Code {
+			case "UNKNOWN_STATION":
 				return ErrStationUnknown
+			case "NO_TOPOLOGY":
+				return ErrNoTopology
 			}
 			return fmt.Errorf("commute: %s: %s", path, e.Message)
 		}
@@ -85,6 +88,23 @@ func (c *Client) Transfers(ctx context.Context, operatorCode, stationCode string
 	}
 	return env.Data, nil
 }
+
+// LineDetail returns a line's declared segments — the ordered stop sequence
+// ingest persists into route_stops. One call per line (~111 per full ingest).
+func (c *Client) LineDetail(ctx context.Context, operatorCode, lineCode string) (*LineDetail, error) {
+	var env envelope[LineDetail]
+	path := fmt.Sprintf("/lines/%s/%s", url.PathEscape(operatorCode), url.PathEscape(lineCode))
+	if err := c.get(ctx, path, &env); err != nil {
+		return nil, err
+	}
+	return &env.Data, nil
+}
+
+// ErrNoTopology reports the provider's 404 NO_TOPOLOGY — it publishes no
+// declared stop sequence for this line (common for BRT corridors). Ingest
+// treats this as honest absence, not failure: the route keeps an empty
+// sequence rather than failing the whole run.
+var ErrNoTopology = errors.New("commute: no topology for line")
 
 // ErrStationUnknown reports the provider's 404 UNKNOWN_STATION — the pair is
 // syntactically valid but unresolvable upstream (e.g. a stop we rejected at

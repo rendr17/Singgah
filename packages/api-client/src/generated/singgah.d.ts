@@ -131,7 +131,7 @@ export interface paths {
         };
         /**
          * Route detail
-         * @description One canonical route with the stops it serves. Stops are sorted by name — ordered trip/line-shape data lands with a later ingest.
+         * @description One canonical route with the stops it serves, in the provider's declared segment order. A route with no ingested sequence returns an empty list.
          */
         get: operations["getRoute"];
         put?: never;
@@ -277,9 +277,24 @@ export interface components {
         RouteSummary: components["schemas"]["RouteRef"] & {
             providerCode: string;
         };
+        /** @description StopRef plus its position on the route. seq is the flattened provider order across segments; segmentKind preserves TRUNK/BRANCH topology. */
+        RouteStop: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            code?: string;
+            lat: number;
+            lon: number;
+            /** @description 1-based position across the route's flattened segments */
+            seq: number;
+            /** @description Operator-facing number when published (M01, C07…) */
+            stationNumber?: string;
+            /** @description Provider segment kind: TRUNK | BRANCH | upstream value */
+            segmentKind?: string;
+        };
         RouteDetail: components["schemas"]["RouteSummary"] & {
-            /** @description Served stops sorted by name — authoritative stop ordering arrives with line/trip ingest, so this list is not a sequence diagram yet. */
-            stops: components["schemas"]["StopRef"][];
+            /** @description Stops in the provider's declared line order (route_stops.seq). A route with no ingested sequence returns an empty list rather than an invented order. */
+            stops: components["schemas"]["RouteStop"][];
             source: components["schemas"]["SourceMeta"];
         };
         /** @description Data-provider registry row with its ingest freshness signal. lastSuccessAt absent means registered but never successfully ingested. */

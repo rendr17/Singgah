@@ -4,6 +4,7 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -20,6 +21,15 @@ type Source interface {
 	Operators(ctx context.Context) ([]commute.Operator, error)
 	Stations(ctx context.Context) ([]commute.Station, error)
 	Transfers(ctx context.Context, operatorCode, stationCode string) ([]commute.Transfer, error)
+	LineDetail(ctx context.Context, operatorCode, lineCode string) (*commute.LineDetail, error)
+}
+
+// routeKey carries a route's canonical id into the sequencing pass, which
+// can only run after the stop map exists (routes upsert before stations).
+type routeKey struct {
+	operator string
+	lineCode string
+	routeID  pgtype.UUID
 }
 
 // Report summarizes one ingest run — processed counts plus every rejected
@@ -28,6 +38,7 @@ type Report struct {
 	Operators  int
 	Stops      int
 	Routes     int
+	RouteStops int
 	Transfers  int
 	Rejections []commute.Rejection
 	FetchedAt  time.Time
@@ -70,6 +81,7 @@ func Commute(ctx context.Context, pool *pgxpool.Pool, src Source) (Report, error
 	// resolve their targets within the same ingest run.
 	stopIDs := make(map[string]pgtype.UUID, len(stations))
 	stationCodes := make(map[string]string, len(stations)) // id -> operator code, for transfer fetches
+	var routeKeys []routeKey                               // routes wait for the stop map before sequencing
 
 	for _, op := range operators {
 		params := commute.NormalizeOperator(op, fetchedAt)
@@ -83,9 +95,15 @@ func Commute(ctx context.Context, pool *pgxpool.Pool, src Source) (Report, error
 		for _, line := range op.Lines {
 			rp := commute.NormalizeLine(op, line, agency.ID, fetchedAt)
 			rp.ProviderID = provider.ID
-			if _, err := q.UpsertRoute(ctx, rp); err != nil {
+			route, err := q.UpsertRoute(ctx, rp)
+			if err != nil {
 				return report, fmt.Errorf("ingest: route %s:%s: %w", op.Code, line.LineCode, err)
 			}
+			routeKeys = append(routeKeys, routeKey{
+				operator: op.Code,
+				lineCode: line.LineCode,
+				routeID:  route.ID,
+			})
 			report.Routes++
 		}
 	}
@@ -104,6 +122,57 @@ func Commute(ctx context.Context, pool *pgxpool.Pool, src Source) (Report, error
 		stopIDs[st.ID] = stop.ID
 		stationCodes[st.ID] = st.Operator
 		report.Stops++
+	}
+
+	// Ordered stop sequences come from /lines/{op}/{code} — one call per
+	// route (~111 per full run). NO_TOPOLOGY is tolerated (declared absence);
+	// any other fetch error fails the run like transfers do. Delete-then-
+	// insert keeps re-ingest idempotent inside this transaction.
+	for _, rk := range routeKeys {
+		detail, err := src.LineDetail(ctx, rk.operator, rk.lineCode)
+		if errors.Is(err, commute.ErrNoTopology) {
+			// Upstream publishes no sequence (typical for BRT corridors).
+			// Wipe any previously ingested one — absence must not leave a
+			// stale order behind — then keep going.
+			if err := q.DeleteRouteStops(ctx, rk.routeID); err != nil {
+				return report, fmt.Errorf("ingest: clear route_stops %s:%s: %w", rk.operator, rk.lineCode, err)
+			}
+			report.Rejections = append(report.Rejections, commute.Rejection{
+				EntityID: rk.operator + ":" + rk.lineCode,
+				Reason:   "no stop topology published upstream",
+			})
+			continue
+		}
+		if err != nil {
+			return report, fmt.Errorf("ingest: line detail %s:%s: %w", rk.operator, rk.lineCode, err)
+		}
+		if err := q.DeleteRouteStops(ctx, rk.routeID); err != nil {
+			return report, fmt.Errorf("ingest: clear route_stops %s:%s: %w", rk.operator, rk.lineCode, err)
+		}
+		seq := int32(0)
+		for _, seg := range detail.Segments {
+			for _, stn := range seg.Stations {
+				stopID, ok := stopIDs[stn.ID]
+				if !ok {
+					report.Rejections = append(report.Rejections, commute.Rejection{
+						EntityID: stn.ID,
+						Reason:   fmt.Sprintf("segment station not in ingested stops (%s:%s)", rk.operator, rk.lineCode),
+					})
+					continue
+				}
+				seq++
+				if err := q.InsertRouteStop(ctx, generated.InsertRouteStopParams{
+					RouteID:       rk.routeID,
+					StopID:        stopID,
+					Seq:           seq,
+					SegmentKind:   pgtype.Text{String: seg.Kind, Valid: seg.Kind != ""},
+					StationNumber: pgtype.Text{String: stn.StationNumber, Valid: stn.StationNumber != ""},
+				}); err != nil {
+					return report, fmt.Errorf("ingest: route_stop %s:%s seq %d: %w", rk.operator, rk.lineCode, seq, err)
+				}
+				report.RouteStops++
+			}
+		}
 	}
 
 	// Transfers are fetched per station — the provider has no bulk endpoint.

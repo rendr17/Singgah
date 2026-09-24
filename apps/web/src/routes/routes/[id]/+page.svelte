@@ -32,10 +32,10 @@
 		{#if route.stops.length === 0}
 			<p>Belum ada stasiun tercatat untuk rute ini.</p>
 		{:else}
-			<p class="muted">Urutan abjad — urutan perjalanan menyusul saat data jadwal masuk.</p>
 			<ul>
 				{#each route.stops as stop (stop.id)}
 					<li>
+						{#if stop.stationNumber}<span class="num muted">{stop.stationNumber}</span>{/if}
 						<a href={resolve('/stations/[id]', { id: stop.id })}>{stop.name}</a>
 						{#if stop.code}<span class="muted">· {stop.code}</span>{/if}
 					</li>
@@ -68,6 +68,11 @@
 	}
 	a {
 		color: var(--sg-text);
+	}
+	.num {
+		display: inline-block;
+		min-width: 2.25rem;
+		font-variant-numeric: tabular-nums;
 	}
 	.dot {
 		display: inline-block;

@@ -235,10 +235,17 @@ func (h *Handler) getRoute(w http.ResponseWriter, r *http.Request) {
 			ProviderCode: route.ProviderCode,
 		},
 		Source: sourceMeta(route.ProviderCode, route.FetchedAt, route.SourceUpdatedAt),
-		Stops:  make([]StopRef, 0, len(stops)),
+		Stops:  make([]RouteStop, 0, len(stops)),
 	}
 	for _, s := range stops {
-		detail.Stops = append(detail.Stops, stopRef(s.ID, s.Name, s.Code, s.Lon, s.Lat))
+		rs := RouteStop{StopRef: stopRef(s.ID, s.Name, s.Code, s.Lon, s.Lat), Seq: s.Seq}
+		if s.StationNumber.Valid {
+			rs.StationNumber = s.StationNumber.String
+		}
+		if s.SegmentKind.Valid {
+			rs.SegmentKind = s.SegmentKind.String
+		}
+		detail.Stops = append(detail.Stops, rs)
 	}
 	response.JSON(w, http.StatusOK, map[string]any{"route": detail})
 }

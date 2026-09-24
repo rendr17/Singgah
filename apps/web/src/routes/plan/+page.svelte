@@ -1,5 +1,8 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import { replaceState } from '$app/navigation';
+	import { page } from '$app/state';
+	import { onMount } from 'svelte';
 	import { api } from '$lib/api';
 	import BackNav from '$lib/components/app-shell/BackNav.svelte';
 	import { unwrap } from '@singgah/api-client';
@@ -19,9 +22,17 @@
 		let query = $state('');
 		let results = $state<Station[]>([]);
 		let timer: ReturnType<typeof setTimeout>;
+		// A programmatic pick writes the chosen name into the field — the
+		// resulting query change must not re-open the options dropdown.
+		let suppressNext = false;
 		$effect(() => {
 			const q = query.trim();
 			clearTimeout(timer);
+			if (suppressNext) {
+				suppressNext = false;
+				results = [];
+				return;
+			}
 			if (q === '') {
 				results = [];
 				return;
@@ -50,6 +61,9 @@
 			},
 			set results(v) {
 				results = v;
+			},
+			suppressSearch() {
+				suppressNext = true;
 			}
 		};
 	}
@@ -60,10 +74,12 @@
 	function pick(which: 'from' | 'to', s: Station) {
 		if (which === 'from') {
 			fromStation = s;
+			from.suppressSearch();
 			from.query = s.name;
 			from.results = [];
 		} else {
 			toStation = s;
+			to.suppressSearch();
 			to.query = s.name;
 			to.results = [];
 		}
@@ -80,12 +96,38 @@
 					params: { query: { from: fromStation.id, to: toStation.id } }
 				})
 			);
+			// Keep the plan shareable: the URL is the snapshot, not app state.
+			replaceState(resolve(`/plan?from=${fromStation.id}&to=${toStation.id}`), page.state);
 		} catch (e) {
 			planError = e instanceof Error ? e.message : 'Pencarian rute gagal.';
 		} finally {
 			planning = false;
 		}
 	}
+
+	// Shared links arrive as /plan?from=<uuid>&to=<uuid> — resolve each to its
+	// station so the fields show real names, then plan automatically.
+	onMount(async () => {
+		const fromId = page.url.searchParams.get('from');
+		const toId = page.url.searchParams.get('to');
+		let ready = true;
+		for (const [which, id] of [
+			['from', fromId],
+			['to', toId]
+		] as const) {
+			if (!id) {
+				ready = false;
+				continue;
+			}
+			try {
+				const data = await unwrap(api.GET('/api/v1/stations/{id}', { params: { path: { id } } }));
+				pick(which, data.station);
+			} catch {
+				ready = false; // dead link params degrade to an empty field, not an error page
+			}
+		}
+		if (ready) await submit();
+	});
 </script>
 
 <BackNav href="/" label="Pencarian" />

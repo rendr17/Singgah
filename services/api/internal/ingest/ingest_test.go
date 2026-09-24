@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,12 +20,16 @@ type fixtureSource struct {
 	ops       []commute.Operator
 	stations  []commute.Station
 	transfers map[string][]commute.Transfer
+	lines     map[string]*commute.LineDetail
 }
 
 func (f fixtureSource) Operators(context.Context) ([]commute.Operator, error) { return f.ops, nil }
 func (f fixtureSource) Stations(context.Context) ([]commute.Station, error)   { return f.stations, nil }
 func (f fixtureSource) Transfers(_ context.Context, op, code string) ([]commute.Transfer, error) {
 	return f.transfers[op+"/"+code], nil
+}
+func (f fixtureSource) LineDetail(_ context.Context, op, code string) (*commute.LineDetail, error) {
+	return f.lines[op+"/"+code], nil
 }
 
 func loadFixtureSource(t *testing.T) fixtureSource {
@@ -52,6 +57,12 @@ func loadFixtureSource(t *testing.T) fixtureSource {
 	var tr []commute.Transfer
 	read("transfers-KCI-SUD.json", &tr)
 	src.transfers = map[string][]commute.Transfer{"KCI/SUD": tr}
+	src.lines = map[string]*commute.LineDetail{}
+	for _, key := range []string{"KCI-C", "KCI-TP", "MRTJ-M"} {
+		var ld commute.LineDetail
+		read("line-detail-"+key+".json", &ld)
+		src.lines[strings.Replace(key, "-", "/", 1)] = &ld
+	}
 	return src
 }
 
@@ -75,20 +86,33 @@ func TestCommuteIngestIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ingest run 1: %v", err)
 	}
-	if report.Operators != 2 || report.Stops != 4 || report.Routes != 3 || report.Transfers != 2 {
+	// RouteStops: KCI:C 2 + KCI:TP 1 (ghost rejected) + MRTJ:M 1.
+	if report.Operators != 2 || report.Stops != 4 || report.Routes != 3 ||
+		report.Transfers != 2 || report.RouteStops != 4 {
 		t.Errorf("counts: %+v", report)
 	}
-	// The EXTERNAL transfer must be reported, not silently dropped.
-	if len(report.Rejections) != 1 || report.Rejections[0].EntityID != "T-KCI-SUD-EXT-1" {
+	// The EXTERNAL transfer and the ghost segment station must be reported,
+	// not silently dropped.
+	if len(report.Rejections) != 2 {
+		t.Fatalf("rejections: %+v", report.Rejections)
+	}
+	seen := map[string]bool{}
+	for _, r := range report.Rejections {
+		seen[r.EntityID] = true
+	}
+	if !seen["T-KCI-SUD-EXT-1"] || !seen["KCI-GHOST"] {
 		t.Errorf("rejections: %+v", report.Rejections)
 	}
 
-	var stopsBefore, transfersBefore int
+	var stopsBefore, transfersBefore, routeStopsBefore int
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM stops").Scan(&stopsBefore); err != nil {
 		t.Fatalf("count stops: %v", err)
 	}
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM transfers").Scan(&transfersBefore); err != nil {
 		t.Fatalf("count transfers: %v", err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM route_stops").Scan(&routeStopsBefore); err != nil {
+		t.Fatalf("count route_stops: %v", err)
 	}
 
 	// Re-ingest: upserts must keep canonical IDs and not duplicate rows.
@@ -96,12 +120,26 @@ func TestCommuteIngestIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ingest run 2: %v", err)
 	}
-	var stopsAfter, transfersAfter int
+	var stopsAfter, transfersAfter, routeStopsAfter int
 	_ = pool.QueryRow(ctx, "SELECT count(*) FROM stops").Scan(&stopsAfter)
 	_ = pool.QueryRow(ctx, "SELECT count(*) FROM transfers").Scan(&transfersAfter)
-	if stopsAfter != stopsBefore || transfersAfter != transfersBefore {
-		t.Errorf("re-ingest duplicated rows: stops %d->%d transfers %d->%d",
-			stopsBefore, stopsAfter, transfersBefore, transfersAfter)
+	_ = pool.QueryRow(ctx, "SELECT count(*) FROM route_stops").Scan(&routeStopsAfter)
+	if stopsAfter != stopsBefore || transfersAfter != transfersBefore || routeStopsAfter != routeStopsBefore {
+		t.Errorf("re-ingest duplicated rows: stops %d->%d transfers %d->%d route_stops %d->%d",
+			stopsBefore, stopsAfter, transfersBefore, transfersAfter, routeStopsBefore, routeStopsAfter)
+	}
+
+	// Ordered sequence must survive: KCI:C serves SUD at seq 1 then AC.
+	var seqName string
+	if err := pool.QueryRow(ctx,
+		`SELECT s.name FROM route_stops rs JOIN stops s ON s.id = rs.stop_id
+		 JOIN routes r ON r.id = rs.route_id
+		 WHERE r.provider_entity_id = 'KCI:C' ORDER BY rs.seq LIMIT 1`,
+	).Scan(&seqName); err != nil {
+		t.Fatalf("route_stops order: %v", err)
+	}
+	if seqName != "Sudirman" {
+		t.Errorf("first KCI:C stop = %q, want Sudirman", seqName)
 	}
 
 	// Provenance: provider row carries the ODbL-1.0 registry fields and a

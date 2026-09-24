@@ -71,10 +71,20 @@ type StationDetail struct {
 	Source       SourceMeta    `json:"source"`
 }
 
+// RouteStop is a StopRef plus its position on the route — seq is the
+// flattened provider order across segments; stationNumber is the operator's
+// own number (M01…) when published; segmentKind keeps TRUNK/BRANCH topology.
+type RouteStop struct {
+	StopRef
+	Seq           int32  `json:"seq"`
+	StationNumber string `json:"stationNumber,omitempty"`
+	SegmentKind   string `json:"segmentKind,omitempty"`
+}
+
 type RouteDetail struct {
 	RouteSummary
-	Stops  []StopRef  `json:"stops"`
-	Source SourceMeta `json:"source"`
+	Stops  []RouteStop `json:"stops"`
+	Source SourceMeta  `json:"source"`
 }
 
 // ProviderHealth is the registry row plus its ingest freshness signal.

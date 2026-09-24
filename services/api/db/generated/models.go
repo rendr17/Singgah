@@ -52,6 +52,14 @@ type Route struct {
 	SourceUpdatedAt  pgtype.Timestamptz `json:"source_updated_at"`
 }
 
+type RouteStop struct {
+	RouteID       pgtype.UUID `json:"route_id"`
+	StopID        pgtype.UUID `json:"stop_id"`
+	Seq           int32       `json:"seq"`
+	SegmentKind   pgtype.Text `json:"segment_kind"`
+	StationNumber pgtype.Text `json:"station_number"`
+}
+
 type Stop struct {
 	ID               pgtype.UUID        `json:"id"`
 	ProviderID       pgtype.UUID        `json:"provider_id"`

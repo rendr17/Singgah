@@ -174,6 +174,40 @@ StationDetail:
         source:
           $ref: '#/SourceMeta'
 
+RouteStop:
+  type: object
+  description: >-
+    StopRef plus its position on the route. seq is the flattened provider
+    order across segments; segmentKind preserves TRUNK/BRANCH topology.
+  required:
+    - id
+    - name
+    - lat
+    - lon
+    - seq
+  additionalProperties: false
+  properties:
+    id:
+      type: string
+      format: uuid
+    name:
+      type: string
+    code:
+      type: string
+    lat:
+      type: number
+    lon:
+      type: number
+    seq:
+      type: integer
+      description: 1-based position across the route's flattened segments
+    stationNumber:
+      type: string
+      description: Operator-facing number when published (M01, C07…)
+    segmentKind:
+      type: string
+      description: 'Provider segment kind: TRUNK | BRANCH | upstream value'
+
 RouteDetail:
   allOf:
     - $ref: '#/RouteSummary'
@@ -186,10 +220,11 @@ RouteDetail:
         stops:
           type: array
           description: >-
-            Served stops sorted by name — authoritative stop ordering arrives
-            with line/trip ingest, so this list is not a sequence diagram yet.
+            Stops in the provider's declared line order (route_stops.seq).
+            A route with no ingested sequence returns an empty list rather
+            than an invented order.
           items:
-            $ref: '#/StopRef'
+            $ref: '#/RouteStop'
         source:
           $ref: '#/SourceMeta'
 

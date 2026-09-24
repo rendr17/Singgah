@@ -11,6 +11,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteRouteStops = `-- name: DeleteRouteStops :exec
+DELETE FROM route_stops
+WHERE route_id = $1
+`
+
+// Route sequence is replaced atomically inside the ingest transaction:
+// delete-then-insert keeps re-ingest idempotent with no stale positions.
+func (q *Queries) DeleteRouteStops(ctx context.Context, routeID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteRouteStops, routeID)
+	return err
+}
+
 const getRoute = `-- name: GetRoute :one
 SELECT
 	r.id,
@@ -144,6 +156,30 @@ func (q *Queries) GetStop(ctx context.Context, id pgtype.UUID) (GetStopRow, erro
 		&i.ProviderCode,
 	)
 	return i, err
+}
+
+const insertRouteStop = `-- name: InsertRouteStop :exec
+INSERT INTO route_stops (route_id, stop_id, seq, segment_kind, station_number)
+VALUES ($1, $2, $3, $4, $5)
+`
+
+type InsertRouteStopParams struct {
+	RouteID       pgtype.UUID `json:"route_id"`
+	StopID        pgtype.UUID `json:"stop_id"`
+	Seq           int32       `json:"seq"`
+	SegmentKind   pgtype.Text `json:"segment_kind"`
+	StationNumber pgtype.Text `json:"station_number"`
+}
+
+func (q *Queries) InsertRouteStop(ctx context.Context, arg InsertRouteStopParams) error {
+	_, err := q.db.Exec(ctx, insertRouteStop,
+		arg.RouteID,
+		arg.StopID,
+		arg.Seq,
+		arg.SegmentKind,
+		arg.StationNumber,
+	)
+	return err
 }
 
 const listProviders = `-- name: ListProviders :many
@@ -518,32 +554,33 @@ SELECT
 	s.code,
 	s.name,
 	st_x(s.location::geometry) AS lon,
-	st_y(s.location::geometry) AS lat
-FROM routes r
-JOIN stops s ON s.provider_id = r.provider_id
-WHERE
-	r.id = $1
-	AND EXISTS (
-		SELECT 1
-		FROM jsonb_array_elements_text(s.metadata->'lines') AS line_key
-		WHERE line_key = r.provider_entity_id
-	)
-ORDER BY s.name
+	st_y(s.location::geometry) AS lat,
+	rs.seq,
+	rs.station_number,
+	rs.segment_kind
+FROM route_stops rs
+JOIN stops s ON s.id = rs.stop_id
+WHERE rs.route_id = $1
+ORDER BY rs.seq
 `
 
 type ListStopsOnRouteRow struct {
-	ID   pgtype.UUID `json:"id"`
-	Kind string      `json:"kind"`
-	Code pgtype.Text `json:"code"`
-	Name string      `json:"name"`
-	Lon  float64     `json:"lon"`
-	Lat  float64     `json:"lat"`
+	ID            pgtype.UUID `json:"id"`
+	Kind          string      `json:"kind"`
+	Code          pgtype.Text `json:"code"`
+	Name          string      `json:"name"`
+	Lon           float64     `json:"lon"`
+	Lat           float64     `json:"lat"`
+	Seq           int32       `json:"seq"`
+	StationNumber pgtype.Text `json:"station_number"`
+	SegmentKind   pgtype.Text `json:"segment_kind"`
 }
 
-// Stops whose provider line keys include this route's entity id. Ordering is
-// unknown until line-detail/trip ingest lands — sorted by name for now.
-func (q *Queries) ListStopsOnRoute(ctx context.Context, id pgtype.UUID) ([]ListStopsOnRouteRow, error) {
-	rows, err := q.db.Query(ctx, listStopsOnRoute, id)
+// Real provider order via route_stops.seq — the relation ingest replaces
+// atomically per route. Falls back to nothing when the route has no
+// ingested sequence (station list then honestly empty, not faked).
+func (q *Queries) ListStopsOnRoute(ctx context.Context, routeID pgtype.UUID) ([]ListStopsOnRouteRow, error) {
+	rows, err := q.db.Query(ctx, listStopsOnRoute, routeID)
 	if err != nil {
 		return nil, err
 	}
@@ -558,6 +595,9 @@ func (q *Queries) ListStopsOnRoute(ctx context.Context, id pgtype.UUID) ([]ListS
 			&i.Name,
 			&i.Lon,
 			&i.Lat,
+			&i.Seq,
+			&i.StationNumber,
+			&i.SegmentKind,
 		); err != nil {
 			return nil, err
 		}

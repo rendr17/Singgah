@@ -1,0 +1,37 @@
+{
+	"status": 200,
+	"data": {
+		"operator": { "code": "KCI", "name": "KAI Commuter" },
+		"line": {
+			"name": "Cikarang Loop Line",
+			"colorCode": "#0064aa",
+			"lineCode": "C",
+			"mode": "RAIL",
+			"searchable": true
+		},
+		"segments": [
+			{
+				"kind": "TRUNK",
+				"joinsAtCode": null,
+				"stations": [
+					{
+						"id": "KCI-SUD",
+						"code": "SUD",
+						"name": "Sudirman",
+						"stationNumber": "C01",
+						"isInterchange": true,
+						"otherLines": ["KCI:TP"]
+					},
+					{
+						"id": "KCI-AC",
+						"code": "AC",
+						"name": "Ancol",
+						"stationNumber": "C02",
+						"isInterchange": false,
+						"otherLines": []
+					}
+				]
+			}
+		]
+	}
+}

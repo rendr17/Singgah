@@ -1,0 +1,29 @@
+{
+	"status": 200,
+	"data": {
+		"operator": { "code": "MRTJ", "name": "MRT Jakarta" },
+		"line": {
+			"name": "Lin Utara Selatan",
+			"colorCode": "#ca2a51",
+			"lineCode": "M",
+			"mode": "SUBWAY",
+			"searchable": true
+		},
+		"segments": [
+			{
+				"kind": "TRUNK",
+				"joinsAtCode": null,
+				"stations": [
+					{
+						"id": "MRTJ-DKA",
+						"code": "DKA",
+						"name": "Dukuh Atas BNI",
+						"stationNumber": "M12",
+						"isInterchange": true,
+						"otherLines": ["KCI:C"]
+					}
+				]
+			}
+		]
+	}
+}

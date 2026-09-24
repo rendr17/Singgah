@@ -98,3 +98,12 @@ CREATE TABLE transfers (
 	fetched_at timestamptz,
 	UNIQUE (from_stop_id, to_stop_id)
 );
+
+CREATE TABLE route_stops (
+	route_id uuid NOT NULL REFERENCES routes (id),
+	stop_id uuid NOT NULL REFERENCES stops (id),
+	seq integer NOT NULL,
+	segment_kind text,
+	station_number text,
+	PRIMARY KEY (route_id, seq)
+);
