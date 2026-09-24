@@ -10,7 +10,9 @@
 
 	type Station = components['schemas']['StationSummary'];
 
-	const STYLE_URL = env.PUBLIC_MAP_STYLE_URL ?? 'https://demotiles.maplibre.org/style.json';
+	// OpenFreeMap: free public OpenMapTiles hosting, no key — fine for dev and
+	// early production; self-hosting a style is a later infra decision.
+	const STYLE_URL = env.PUBLIC_MAP_STYLE_URL ?? 'https://tiles.openfreemap.org/styles/positron';
 
 	let stations = $state<Station[]>([]);
 	let error = $state('');

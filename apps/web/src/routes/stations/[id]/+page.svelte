@@ -6,7 +6,7 @@
 	import { SectionHeading } from '@singgah/ui';
 	import { TransitMap, stationsToGeoJSON } from '@singgah/map';
 
-	const STYLE_URL = env.PUBLIC_MAP_STYLE_URL ?? 'https://demotiles.maplibre.org/style.json';
+	const STYLE_URL = env.PUBLIC_MAP_STYLE_URL ?? 'https://tiles.openfreemap.org/styles/positron';
 
 	let { data }: PageProps = $props();
 	const station = $derived(data.station);
