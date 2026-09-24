@@ -41,8 +41,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("ingest ok: %d operators, %d stops, %d routes, %d transfers; %d rejected\n",
-		report.Operators, report.Stops, report.Routes, report.Transfers, len(report.Rejections))
+	fmt.Printf("ingest ok: %d operators, %d stops, %d routes, %d transfers; %d rejected; tombstoned %d stops %d routes\n",
+		report.Operators, report.Stops, report.Routes, report.Transfers, len(report.Rejections),
+		report.RemovedStops, report.RemovedRoutes)
 	for _, r := range report.Rejections {
 		fmt.Printf("  rejected %s: %s\n", r.EntityID, r.Reason)
 	}
