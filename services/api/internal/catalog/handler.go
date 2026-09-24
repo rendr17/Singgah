@@ -175,6 +175,9 @@ func (h *Handler) getStation(w http.ResponseWriter, r *http.Request) {
 		},
 		OfficialName: officialName(stop.Metadata),
 		Source:       sourceMeta(stop.ProviderCode, stop.FetchedAt, stop.SourceUpdatedAt),
+		// Arrays are part of the contract — never emit null.
+		Lines:     make([]RouteRef, 0, len(lines)),
+		Transfers: make([]TransferDTO, 0, len(transfers)),
 	}
 	for _, l := range lines {
 		detail.Lines = append(detail.Lines, routeRef(l.ID, l.ShortName, l.LongName, l.Mode, l.Color, l.AgencyCode, pgtype.Text{String: l.AgencyName, Valid: l.AgencyName != ""}))
@@ -237,6 +240,7 @@ func (h *Handler) getRoute(w http.ResponseWriter, r *http.Request) {
 			ProviderCode: route.ProviderCode,
 		},
 		Source: sourceMeta(route.ProviderCode, route.FetchedAt, route.SourceUpdatedAt),
+		Stops:  make([]StopRef, 0, len(stops)),
 	}
 	for _, s := range stops {
 		detail.Stops = append(detail.Stops, stopRef(s.ID, s.Name, s.Code, s.Lon, s.Lat))

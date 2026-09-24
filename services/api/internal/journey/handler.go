@@ -121,6 +121,7 @@ func (h *Handler) normalize(ctx context.Context, plan *commute.FarePlan) (*Itine
 	itin := &Itinerary{
 		Status:         "scheduled",
 		TotalDistanceM: plan.TotalDistance,
+		Legs:           make([]Leg, 0, len(plan.Legs)),
 	}
 	for _, leg := range plan.Legs {
 		l := Leg{From: ref(leg.From), To: ref(leg.To), DistanceM: leg.DistanceM}
@@ -152,7 +153,7 @@ func (h *Handler) normalize(ctx context.Context, plan *commute.FarePlan) (*Itine
 		itin.Legs = append(itin.Legs, l)
 	}
 	if len(plan.Segments) > 0 || plan.TotalFare != nil {
-		fare := &Fare{Currency: "IDR", Total: plan.TotalFare}
+		fare := &Fare{Currency: "IDR", Total: plan.TotalFare, Segments: make([]FareSegment, 0, len(plan.Segments))}
 		for _, seg := range plan.Segments {
 			fare.Segments = append(fare.Segments, FareSegment{
 				Operator: seg.Operator,
