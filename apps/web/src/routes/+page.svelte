@@ -5,7 +5,7 @@
 	import { api } from '$lib/api';
 	import { unwrap } from '@singgah/api-client';
 	import type { components } from '@singgah/api-client';
-	import { SearchField } from '@singgah/ui';
+	import { SearchField, StateBlock } from '@singgah/ui';
 
 	type Station = components['schemas']['StationSummary'];
 
@@ -59,11 +59,16 @@
 </div>
 
 {#if loading}
-	<p class="sg-meta" role="status">Mencari…</p>
+	<span class="sg-sr-only" role="status">Mencari…</span>
+	<ul class="sg-list" aria-hidden="true">
+		{#each [0, 1, 2] as i (i)}
+			<li><span class="sg-skeleton" style:inline-size="{55 - i * 12}%"></span></li>
+		{/each}
+	</ul>
 {:else if error}
-	<p class="sg-error" role="alert">{error}</p>
+	<StateBlock kind="error">{error}</StateBlock>
 {:else if query.trim() !== '' && stations.length === 0}
-	<p class="sg-meta">Tidak ada stasiun yang cocok dengan “{query.trim()}”.</p>
+	<StateBlock kind="empty">Tidak ada stasiun yang cocok dengan “{query.trim()}”.</StateBlock>
 {:else if stations.length > 0}
 	<ul class="sg-list">
 		{#each stations as station (station.id)}

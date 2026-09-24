@@ -8,6 +8,7 @@
 	import { unwrap } from '@singgah/api-client';
 	import type { components } from '@singgah/api-client';
 	import { TransitMap, stationsToGeoJSON } from '@singgah/map';
+	import { StateBlock } from '@singgah/ui';
 
 	type Station = components['schemas']['StationSummary'];
 
@@ -41,7 +42,7 @@
 <h1 class="sg-page-title">Peta jaringan</h1>
 
 {#if error}
-	<p class="sg-error" role="alert">{error}</p>
+	<StateBlock kind="error">{error}</StateBlock>
 {/if}
 
 <div class="map-wrap">

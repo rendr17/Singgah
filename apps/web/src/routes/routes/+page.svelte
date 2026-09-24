@@ -2,6 +2,7 @@
 	import type { PageProps } from './$types';
 	import { resolve } from '$app/paths';
 	import BackNav from '$lib/components/app-shell/BackNav.svelte';
+	import { StateBlock } from '@singgah/ui';
 
 	let { data }: PageProps = $props();
 </script>
@@ -10,9 +11,9 @@
 <h1 class="sg-page-title">Rute</h1>
 
 {#if data.error}
-	<p class="sg-error" role="alert">{data.error}</p>
+	<StateBlock kind="error">{data.error}</StateBlock>
 {:else if data.routes.length === 0}
-	<p class="sg-meta">Belum ada rute yang tercatat.</p>
+	<StateBlock kind="empty">Belum ada rute yang tercatat.</StateBlock>
 {:else}
 	<ul class="sg-list">
 		{#each data.routes as route (route.id)}

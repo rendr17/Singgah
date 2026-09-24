@@ -4,7 +4,7 @@
 	import { browser } from '$app/environment';
 	import { env } from '$env/dynamic/public';
 	import BackNav from '$lib/components/app-shell/BackNav.svelte';
-	import { SectionHeading } from '@singgah/ui';
+	import { SectionHeading, StateBlock } from '@singgah/ui';
 	import { TransitMap, stationsToGeoJSON } from '@singgah/map';
 
 	const STYLE_URL = env.PUBLIC_MAP_STYLE_URL ?? 'https://tiles.openfreemap.org/styles/positron';
@@ -31,7 +31,7 @@
 </script>
 
 {#if station === null}
-	<p class="sg-error" role="alert">{data.error}</p>
+	<StateBlock kind="error">{data.error}</StateBlock>
 	<BackNav href="/" label="Kembali ke pencarian" />
 {:else}
 	<BackNav href="/" label="Pencarian" />
@@ -63,7 +63,7 @@
 	<section>
 		<SectionHeading>Rute yang melayani</SectionHeading>
 		{#if station.lines.length === 0}
-			<p class="sg-meta">Belum ada rute tercatat untuk stasiun ini.</p>
+			<StateBlock kind="empty">Belum ada rute tercatat untuk stasiun ini.</StateBlock>
 		{:else}
 			<ul class="sg-list">
 				{#each station.lines as line (line.id)}
@@ -84,7 +84,7 @@
 	<section>
 		<SectionHeading>Transit</SectionHeading>
 		{#if station.transfers.length === 0}
-			<p class="sg-meta">Tidak ada transfer tercatat.</p>
+			<StateBlock kind="empty">Tidak ada transfer tercatat.</StateBlock>
 		{:else}
 			<ul class="sg-list">
 				{#each station.transfers as transfer (transfer.toStop.id)}

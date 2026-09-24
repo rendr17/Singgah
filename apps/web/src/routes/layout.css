@@ -121,6 +121,22 @@ main > section {
 	margin-block-start: var(--sg-space-6);
 }
 
+/* Loading placeholder — subtle pulse; the global reduced-motion guard below
+   flattens it for users who ask for stillness. */
+.sg-skeleton {
+	display: block;
+	min-height: 1em;
+	border-radius: var(--sg-radius-button);
+	background-color: var(--sg-surface-muted);
+	animation: sg-skeleton-pulse 1.4s var(--sg-ease-standard) infinite;
+}
+
+@keyframes sg-skeleton-pulse {
+	50% {
+		opacity: 0.55;
+	}
+}
+
 .sg-sr-only {
 	position: absolute;
 	width: 1px;

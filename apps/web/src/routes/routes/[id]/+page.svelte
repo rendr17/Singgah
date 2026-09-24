@@ -2,14 +2,14 @@
 	import type { PageProps } from './$types';
 	import { resolve } from '$app/paths';
 	import BackNav from '$lib/components/app-shell/BackNav.svelte';
-	import { SectionHeading } from '@singgah/ui';
+	import { SectionHeading, StateBlock } from '@singgah/ui';
 
 	let { data }: PageProps = $props();
 	const route = $derived(data.route);
 </script>
 
 {#if route === null}
-	<p class="sg-error" role="alert">{data.error}</p>
+	<StateBlock kind="error">{data.error}</StateBlock>
 	<BackNav href="/routes" label="Semua rute" />
 {:else}
 	<BackNav href="/routes" label="Semua rute" />
@@ -30,7 +30,7 @@
 	<section>
 		<SectionHeading>Stasiun yang dilayani</SectionHeading>
 		{#if route.stops.length === 0}
-			<p class="sg-meta">Belum ada stasiun tercatat untuk rute ini.</p>
+			<StateBlock kind="empty">Belum ada stasiun tercatat untuk rute ini.</StateBlock>
 		{:else}
 			<ul class="sg-list">
 				{#each route.stops as stop (stop.id)}

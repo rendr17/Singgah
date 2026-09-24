@@ -2,7 +2,7 @@
 	import type { PageProps } from './$types';
 	import type { components } from '@singgah/api-client';
 	import BackNav from '$lib/components/app-shell/BackNav.svelte';
-	import { SectionHeading, Surface } from '@singgah/ui';
+	import { SectionHeading, StateBlock, Surface } from '@singgah/ui';
 
 	type Provider = components['schemas']['Provider'];
 
@@ -34,7 +34,7 @@
 <p class="sg-meta">Sumber data transit, lisensi, dan kesegaran ingest.</p>
 
 {#if data.error}
-	<p class="sg-error" role="alert">{data.error}</p>
+	<StateBlock kind="error">{data.error}</StateBlock>
 {:else}
 	{#each data.providers as p (p.code)}
 		{@const failed = failedAttempt(p)}

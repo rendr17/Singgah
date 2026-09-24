@@ -6,6 +6,7 @@
 		StatusBadge,
 		Surface,
 		SectionHeading,
+		StateBlock,
 		TextField
 	} from '@singgah/ui';
 
@@ -70,6 +71,14 @@
 			<p class="meta">450 m dari kamu · KRL</p>
 			<p class="meta sg-tabular">3 mnt ke Manggarai · 8 mnt ke Jakarta Kota</p>
 		</Surface>
+	</section>
+
+	<section>
+		<h3>States</h3>
+		<StateBlock kind="loading">Mencari rute…</StateBlock>
+		<StateBlock kind="empty">Tidak ada stasiun yang cocok.</StateBlock>
+		<StateBlock kind="error">Data stasiun gagal dimuat.</StateBlock>
+		<StateBlock kind="offline">Tidak ada koneksi — data mungkin tersimpan lama.</StateBlock>
 	</section>
 </div>
 
