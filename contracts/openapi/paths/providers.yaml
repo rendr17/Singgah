@@ -1,0 +1,31 @@
+get:
+  operationId: listProviders
+  summary: List data providers with ingest freshness
+  description: >-
+    The provider registry as a health surface: `lastSuccessAt` is the stamp of
+    the most recent successful ingest — its absence means the provider is
+    registered but has never been ingested. License, attribution, and known
+    limitations travel with the registry (docs/35, docs/37).
+  tags:
+    - catalog
+  responses:
+    '200':
+      description: Registered providers
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - providers
+            additionalProperties: false
+            properties:
+              providers:
+                type: array
+                items:
+                  $ref: '../schemas/catalog.yaml#/Provider'
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

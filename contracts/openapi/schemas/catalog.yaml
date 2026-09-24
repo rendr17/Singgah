@@ -128,6 +128,24 @@ Transfer:
     notes:
       type: string
 
+Facility:
+  type: object
+  description: >-
+    Provider-declared amenity. accessibilityRelevant classifies the type only —
+    presence says nothing about whether the facility works today (docs/41).
+  required:
+    - type
+  additionalProperties: false
+  properties:
+    type:
+      type: string
+      description: 'Canonical lowercase amenity type, e.g. toilet, elevator_paid, toilet_accessible'
+    text:
+      type: string
+      description: Provider location note, e.g. "Concourse"
+    accessibilityRelevant:
+      type: boolean
+
 StationDetail:
   allOf:
     - $ref: '#/StationSummary'
@@ -135,6 +153,7 @@ StationDetail:
       required:
         - lines
         - transfers
+        - facilities
         - source
       additionalProperties: false
       properties:
@@ -148,6 +167,10 @@ StationDetail:
           type: array
           items:
             $ref: '#/Transfer'
+        facilities:
+          type: array
+          items:
+            $ref: '#/Facility'
         source:
           $ref: '#/SourceMeta'
 
@@ -169,6 +192,39 @@ RouteDetail:
             $ref: '#/StopRef'
         source:
           $ref: '#/SourceMeta'
+
+Provider:
+  type: object
+  description: >-
+    Data-provider registry row with its ingest freshness signal.
+    lastSuccessAt absent means registered but never successfully ingested.
+  required:
+    - code
+    - name
+    - isActive
+  additionalProperties: false
+  properties:
+    code:
+      type: string
+    name:
+      type: string
+    licenseName:
+      type: string
+    attributionText:
+      type: string
+    allowedUse:
+      type: string
+    refreshCadence:
+      type: string
+    owner:
+      type: string
+    knownLimitations:
+      type: string
+    isActive:
+      type: boolean
+    lastSuccessAt:
+      type: string
+      format: date-time
 
 JourneyStopRef:
   type: object

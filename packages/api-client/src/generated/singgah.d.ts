@@ -142,6 +142,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List data providers with ingest freshness
+         * @description The provider registry as a health surface: `lastSuccessAt` is the stamp of the most recent successful ingest — its absence means the provider is registered but has never been ingested. License, attribution, and known limitations travel with the registry (docs/35, docs/37).
+         */
+        get: operations["listProviders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/journeys": {
         parameters: {
             query?: never;
@@ -224,6 +244,14 @@ export interface components {
             walkDistanceM?: number;
             notes?: string;
         };
+        /** @description Provider-declared amenity. accessibilityRelevant classifies the type only — presence says nothing about whether the facility works today (docs/41). */
+        Facility: {
+            /** @description Canonical lowercase amenity type, e.g. toilet, elevator_paid, toilet_accessible */
+            type: string;
+            /** @description Provider location note, e.g. "Concourse" */
+            text?: string;
+            accessibilityRelevant?: boolean;
+        };
         /** @description Provenance of the upstream provider row. */
         SourceMeta: {
             /** @description Canonical provider code, e.g. commute */
@@ -243,6 +271,7 @@ export interface components {
             officialName?: string;
             lines: components["schemas"]["RouteRef"][];
             transfers: components["schemas"]["Transfer"][];
+            facilities: components["schemas"]["Facility"][];
             source: components["schemas"]["SourceMeta"];
         };
         RouteSummary: components["schemas"]["RouteRef"] & {
@@ -252,6 +281,20 @@ export interface components {
             /** @description Served stops sorted by name — authoritative stop ordering arrives with line/trip ingest, so this list is not a sequence diagram yet. */
             stops: components["schemas"]["StopRef"][];
             source: components["schemas"]["SourceMeta"];
+        };
+        /** @description Data-provider registry row with its ingest freshness signal. lastSuccessAt absent means registered but never successfully ingested. */
+        Provider: {
+            code: string;
+            name: string;
+            licenseName?: string;
+            attributionText?: string;
+            allowedUse?: string;
+            refreshCadence?: string;
+            owner?: string;
+            knownLimitations?: string;
+            isActive: boolean;
+            /** Format: date-time */
+            lastSuccessAt?: string;
         };
         /** @description Stop reference inside an itinerary. `id` is absent when the upstream station ref cannot be resolved to a canonical stop (external service). */
         JourneyStopRef: {
@@ -549,6 +592,37 @@ export interface operations {
                 content: {
                     "application/json": {
                         route: components["schemas"]["RouteDetail"];
+                    };
+                };
+            };
+            /** @description Error envelope — shared by all endpoints */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    listProviders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Registered providers */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        providers: components["schemas"]["Provider"][];
                     };
                 };
             };

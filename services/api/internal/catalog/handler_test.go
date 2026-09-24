@@ -31,6 +31,8 @@ type fakeStore struct {
 	getRoute            generated.GetRouteRow
 	getRouteErr         error
 	stopsOnRoute        []generated.ListStopsOnRouteRow
+	providers           []generated.ListProvidersRow
+	providersErr        error
 	gotSearchParams     generated.SearchStopsParams
 	gotListRoutesParams generated.ListRoutesParams
 	gotBBoxParams       generated.ListStopsInBBoxParams
@@ -67,6 +69,9 @@ func (f *fakeStore) GetRoute(_ context.Context, _ pgtype.UUID) (generated.GetRou
 }
 func (f *fakeStore) ListStopsOnRoute(_ context.Context, _ pgtype.UUID) ([]generated.ListStopsOnRouteRow, error) {
 	return f.stopsOnRoute, nil
+}
+func (f *fakeStore) ListProviders(_ context.Context) ([]generated.ListProvidersRow, error) {
+	return f.providers, f.providersErr
 }
 
 func serve(t *testing.T, store Store, target string) *httptest.ResponseRecorder {
@@ -238,7 +243,10 @@ func TestGetStationDetail(t *testing.T) {
 		getStop: generated.GetStopRow{
 			ID: stopID, Kind: "station", Code: pgtype.Text{String: "SUD", Valid: true},
 			Name: "Sudirman", Lon: 106.823, Lat: -6.202,
-			Metadata:     []byte(`{"official_name":"Stasiun Sudirman"}`),
+			Metadata: []byte(`{"official_name":"Stasiun Sudirman","amenities":[` +
+				`{"type":"TOILET","text":"Concourse"},` +
+				`{"type":"ELEVATOR_PAID","text":""},` +
+				`{"type":"TOILET_ACCESSIBLE","text":""}]}`),
 			FetchedAt:    pgtype.Timestamptz{Time: fetched, Valid: true},
 			ProviderCode: "commute",
 		},
@@ -279,6 +287,21 @@ func TestGetStationDetail(t *testing.T) {
 	if tr["walkDistanceM"].(float64) != 350 || tr["notes"] != "via skybridge" {
 		t.Fatalf("transfer fields = %v", tr)
 	}
+	facs := station["facilities"].([]any)
+	if len(facs) != 3 {
+		t.Fatalf("facilities = %v", facs)
+	}
+	if facs[0].(map[string]any)["type"] != "toilet" || facs[0].(map[string]any)["text"] != "Concourse" {
+		t.Fatalf("facility[0] = %v", facs[0])
+	}
+	if facs[0].(map[string]any)["accessibilityRelevant"] != nil {
+		t.Fatal("plain toilet must not be accessibility-relevant")
+	}
+	for _, i := range []int{1, 2} {
+		if facs[i].(map[string]any)["accessibilityRelevant"] != true {
+			t.Fatalf("facility[%d] should be accessibility-relevant: %v", i, facs[i])
+		}
+	}
 }
 
 func TestGetRouteNotFound(t *testing.T) {
@@ -308,6 +331,62 @@ func TestListRoutes(t *testing.T) {
 	routes := decode(t, rec)["routes"].([]any)
 	if len(routes) != 1 || routes[0].(map[string]any)["shortName"] != "C" {
 		t.Fatalf("routes = %v", routes)
+	}
+}
+
+func TestGetStationFacilitiesEmpty(t *testing.T) {
+	var stopID pgtype.UUID
+	if err := stopID.Scan("b7f4b2a0-1f3d-4e5a-9c6b-2a1d3e4f5a6b"); err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeStore{getStop: generated.GetStopRow{
+		ID: stopID, Kind: "station", Name: "NoMeta", Metadata: []byte(`{}`), ProviderCode: "commute",
+	}}
+	rec := serve(t, store, "/stations/b7f4b2a0-1f3d-4e5a-9c6b-2a1d3e4f5a6b")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	station := decode(t, rec)["station"].(map[string]any)
+	if facs := station["facilities"].([]any); len(facs) != 0 {
+		t.Fatalf("facilities = %v, want []", facs)
+	}
+}
+
+func TestListProviders(t *testing.T) {
+	success := time.Date(2026, 9, 24, 8, 0, 0, 0, time.UTC)
+	store := &fakeStore{providers: []generated.ListProvidersRow{{
+		Code: "commute", Name: "Commute Data Platform", IsActive: true,
+		LicenseName:      pgtype.Text{String: "ODbL-1.0", Valid: true},
+		AttributionText:  pgtype.Text{String: "Data transit oleh Commute Data Platform", Valid: true},
+		RefreshCadence:   pgtype.Text{String: "daily", Valid: true},
+		KnownLimitations: pgtype.Text{String: "no realtime", Valid: true},
+		LastSuccessAt:    pgtype.Timestamptz{Time: success, Valid: true},
+	}}}
+	rec := serve(t, store, "/providers")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	providers := decode(t, rec)["providers"].([]any)
+	if len(providers) != 1 {
+		t.Fatalf("providers = %v", providers)
+	}
+	p := providers[0].(map[string]any)
+	if p["code"] != "commute" || p["licenseName"] != "ODbL-1.0" || p["lastSuccessAt"] != "2026-09-24T08:00:00Z" {
+		t.Fatalf("provider = %v", p)
+	}
+}
+
+func TestListProvidersNeverIngested(t *testing.T) {
+	store := &fakeStore{providers: []generated.ListProvidersRow{{
+		Code: "gtfs-x", Name: "Future Feed", IsActive: false,
+	}}}
+	rec := serve(t, store, "/providers")
+	p := decode(t, rec)["providers"].([]any)[0].(map[string]any)
+	if _, ok := p["lastSuccessAt"]; ok {
+		t.Fatalf("never-ingested provider must omit lastSuccessAt: %v", p)
+	}
+	if p["isActive"] != false {
+		t.Fatal("isActive should be false")
 	}
 }
 

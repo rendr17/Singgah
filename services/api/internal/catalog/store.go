@@ -22,4 +22,5 @@ type Store interface {
 	ListRoutes(ctx context.Context, arg generated.ListRoutesParams) ([]generated.ListRoutesRow, error)
 	GetRoute(ctx context.Context, id pgtype.UUID) (generated.GetRouteRow, error)
 	ListStopsOnRoute(ctx context.Context, id pgtype.UUID) ([]generated.ListStopsOnRouteRow, error)
+	ListProviders(ctx context.Context) ([]generated.ListProvidersRow, error)
 }

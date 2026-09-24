@@ -340,3 +340,20 @@ FROM stops
 WHERE st_dwithin(location, wgs84_point($1, $2), $3)
 ORDER BY distance_m
 LIMIT $4;
+
+-- name: ListProviders :many
+-- Provider registry as the health surface: last_success_at is the freshest
+-- ingest stamp; NULL means registered but never successfully ingested.
+SELECT
+	code,
+	name,
+	license_name,
+	attribution_text,
+	allowed_use,
+	refresh_cadence,
+	owner,
+	known_limitations,
+	is_active,
+	last_success_at
+FROM providers
+ORDER BY code;

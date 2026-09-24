@@ -46,7 +46,8 @@
 <p>
 	<a href={resolve('/plan')}>Rencana perjalanan →</a> ·
 	<a href={resolve('/map')}>Peta jaringan →</a> ·
-	<a href={resolve('/routes')}>Semua rute →</a>
+	<a href={resolve('/routes')}>Semua rute →</a> ·
+	<a href={resolve('/providers')}>Penyedia data →</a>
 </p>
 
 <div class="search">

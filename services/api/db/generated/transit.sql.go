@@ -146,6 +146,68 @@ func (q *Queries) GetStop(ctx context.Context, id pgtype.UUID) (GetStopRow, erro
 	return i, err
 }
 
+const listProviders = `-- name: ListProviders :many
+SELECT
+	code,
+	name,
+	license_name,
+	attribution_text,
+	allowed_use,
+	refresh_cadence,
+	owner,
+	known_limitations,
+	is_active,
+	last_success_at
+FROM providers
+ORDER BY code
+`
+
+type ListProvidersRow struct {
+	Code             string             `json:"code"`
+	Name             string             `json:"name"`
+	LicenseName      pgtype.Text        `json:"license_name"`
+	AttributionText  pgtype.Text        `json:"attribution_text"`
+	AllowedUse       pgtype.Text        `json:"allowed_use"`
+	RefreshCadence   pgtype.Text        `json:"refresh_cadence"`
+	Owner            pgtype.Text        `json:"owner"`
+	KnownLimitations pgtype.Text        `json:"known_limitations"`
+	IsActive         bool               `json:"is_active"`
+	LastSuccessAt    pgtype.Timestamptz `json:"last_success_at"`
+}
+
+// Provider registry as the health surface: last_success_at is the freshest
+// ingest stamp; NULL means registered but never successfully ingested.
+func (q *Queries) ListProviders(ctx context.Context) ([]ListProvidersRow, error) {
+	rows, err := q.db.Query(ctx, listProviders)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListProvidersRow
+	for rows.Next() {
+		var i ListProvidersRow
+		if err := rows.Scan(
+			&i.Code,
+			&i.Name,
+			&i.LicenseName,
+			&i.AttributionText,
+			&i.AllowedUse,
+			&i.RefreshCadence,
+			&i.Owner,
+			&i.KnownLimitations,
+			&i.IsActive,
+			&i.LastSuccessAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRoutes = `-- name: ListRoutes :many
 SELECT
 	r.id,

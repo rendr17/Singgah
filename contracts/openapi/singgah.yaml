@@ -23,6 +23,8 @@ paths:
     $ref: './paths/routes.yaml'
   /api/v1/routes/{id}:
     $ref: './paths/route-detail.yaml'
+  /api/v1/providers:
+    $ref: './paths/providers.yaml'
   /api/v1/journeys:
     $ref: './paths/journeys.yaml'
 components:

@@ -54,11 +54,20 @@ type TransferDTO struct {
 	Notes         string  `json:"notes,omitempty"`
 }
 
+// Facility is a provider-declared amenity. accessibilityRelevant classifies
+// the type only — presence says nothing about whether it works today.
+type Facility struct {
+	Type                  string `json:"type"`
+	Text                  string `json:"text,omitempty"`
+	AccessibilityRelevant bool   `json:"accessibilityRelevant,omitempty"`
+}
+
 type StationDetail struct {
 	StationSummary
 	OfficialName string        `json:"officialName,omitempty"`
 	Lines        []RouteRef    `json:"lines"`
 	Transfers    []TransferDTO `json:"transfers"`
+	Facilities   []Facility    `json:"facilities"`
 	Source       SourceMeta    `json:"source"`
 }
 
@@ -66,6 +75,20 @@ type RouteDetail struct {
 	RouteSummary
 	Stops  []StopRef  `json:"stops"`
 	Source SourceMeta `json:"source"`
+}
+
+// ProviderHealth is the registry row plus its ingest freshness signal.
+type ProviderHealth struct {
+	Code             string     `json:"code"`
+	Name             string     `json:"name"`
+	LicenseName      string     `json:"licenseName,omitempty"`
+	AttributionText  string     `json:"attributionText,omitempty"`
+	AllowedUse       string     `json:"allowedUse,omitempty"`
+	RefreshCadence   string     `json:"refreshCadence,omitempty"`
+	Owner            string     `json:"owner,omitempty"`
+	KnownLimitations string     `json:"knownLimitations,omitempty"`
+	IsActive         bool       `json:"isActive"`
+	LastSuccessAt    *time.Time `json:"lastSuccessAt,omitempty"`
 }
 
 func sourceMeta(provider string, fetchedAt, sourceUpdatedAt pgtype.Timestamptz) SourceMeta {

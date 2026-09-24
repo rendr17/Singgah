@@ -33,6 +33,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/stations/{id}", h.getStation)
 	r.Get("/routes", h.listRoutes)
 	r.Get("/routes/{id}", h.getRoute)
+	r.Get("/providers", h.listProviders)
 }
 
 func (h *Handler) Routes() http.Handler {
@@ -175,6 +176,7 @@ func (h *Handler) getStation(w http.ResponseWriter, r *http.Request) {
 		},
 		OfficialName: officialName(stop.Metadata),
 		Source:       sourceMeta(stop.ProviderCode, stop.FetchedAt, stop.SourceUpdatedAt),
+		Facilities:   facilities(stop.Metadata),
 		// Arrays are part of the contract — never emit null.
 		Lines:     make([]RouteRef, 0, len(lines)),
 		Transfers: make([]TransferDTO, 0, len(transfers)),
@@ -304,4 +306,55 @@ func officialName(metadata []byte) string {
 	}
 	s, _ := m["official_name"].(string)
 	return s
+}
+
+// facilities reads the adapter-stored amenities out of stop metadata. Types
+// arrive UPPER_SNAKE and are emitted lowercase; accessibilityRelevant marks
+// amenity types that matter for step-free decisions — it classifies the type,
+// not the working state (doc 41: unknown stays unknown).
+func facilities(metadata []byte) []Facility {
+	var m struct {
+		Amenities []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"amenities"`
+	}
+	if err := json.Unmarshal(metadata, &m); err != nil || len(m.Amenities) == 0 {
+		return []Facility{}
+	}
+	out := make([]Facility, 0, len(m.Amenities))
+	for _, a := range m.Amenities {
+		t := strings.ToLower(a.Type)
+		f := Facility{Type: t, Text: a.Text}
+		if strings.Contains(t, "elevator") || strings.Contains(t, "accessible") {
+			f.AccessibilityRelevant = true
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// GET /providers — registry + ingest freshness, the honest health surface.
+func (h *Handler) listProviders(w http.ResponseWriter, r *http.Request) {
+	rows, err := h.store.ListProviders(r.Context())
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	providers := make([]ProviderHealth, 0, len(rows))
+	for _, p := range rows {
+		ph := ProviderHealth{Code: p.Code, Name: p.Name, IsActive: p.IsActive}
+		ph.LicenseName = p.LicenseName.String
+		ph.AttributionText = p.AttributionText.String
+		ph.AllowedUse = p.AllowedUse.String
+		ph.RefreshCadence = p.RefreshCadence.String
+		ph.Owner = p.Owner.String
+		ph.KnownLimitations = p.KnownLimitations.String
+		if p.LastSuccessAt.Valid {
+			t := p.LastSuccessAt.Time
+			ph.LastSuccessAt = &t
+		}
+		providers = append(providers, ph)
+	}
+	response.JSON(w, http.StatusOK, map[string]any{"providers": providers})
 }
