@@ -25,11 +25,14 @@ type Deps struct {
 	// simply unmounted (404) — /ready still reports the dependency honestly.
 	Catalog *catalog.Handler
 	Journey *journey.Handler
+	// CORSOrigin is the Access-Control-Allow-Origin value ("*" for local dev).
+	CORSOrigin string
 }
 
 func NewRouter(deps Deps) http.Handler {
 	r := chi.NewRouter()
 
+	r.Use(middleware.CORS(deps.CORSOrigin))
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Logging(deps.Logger))
 	r.Use(recovery(deps.Logger))

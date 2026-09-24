@@ -19,6 +19,11 @@ export default defineConfig({
 			adapter: adapter()
 		})
 	],
+	optimizeDeps: {
+		// maplibre-gl v6 ships a separate worker file; pre-bundling breaks its
+		// resolution and leaves the map grey (style loads, tiles never decode).
+		exclude: ['maplibre-gl']
+	},
 	test: {
 		expect: { requireAssertions: true },
 		projects: [

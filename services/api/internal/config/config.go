@@ -22,6 +22,10 @@ type Config struct {
 	// staging and fixture servers.
 	CommuteBaseURL string
 
+	// CORSOrigin is the single allowed cross-origin for browser clients.
+	// Defaults to "*" — acceptable while every endpoint is unauthenticated.
+	CORSOrigin string
+
 	ReadHeaderTimeout time.Duration
 	ReadTimeout       time.Duration
 	WriteTimeout      time.Duration
@@ -49,6 +53,11 @@ func Load() (Config, error) {
 	cfg.CommuteBaseURL = os.Getenv("COMMUTE_BASE_URL")
 	if cfg.CommuteBaseURL == "" {
 		cfg.CommuteBaseURL = commute.DefaultBaseURL
+	}
+
+	cfg.CORSOrigin = os.Getenv("CORS_ORIGIN")
+	if cfg.CORSOrigin == "" {
+		cfg.CORSOrigin = "*"
 	}
 
 	if v := os.Getenv("PORT"); v != "" {

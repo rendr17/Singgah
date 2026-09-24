@@ -33,7 +33,7 @@ func main() {
 	logger := newLogger(cfg.Env)
 	slog.SetDefault(logger)
 
-	deps := httpapi.Deps{Logger: logger, Version: version}
+	deps := httpapi.Deps{Logger: logger, Version: version, CORSOrigin: cfg.CORSOrigin}
 
 	if cfg.DatabaseURL != "" {
 		connectCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
