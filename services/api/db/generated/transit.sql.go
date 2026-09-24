@@ -572,7 +572,7 @@ SELECT
 	st_x(s2.location::geometry) AS to_lon,
 	st_y(s2.location::geometry) AS to_lat,
 	t.walk_distance_m,
-	(t.accessibility->>'notes')::text AS notes
+	COALESCE(t.accessibility->>'notes', '')::text AS notes
 FROM transfers t
 JOIN stops s2 ON s2.id = t.to_stop_id
 WHERE t.from_stop_id = $1
