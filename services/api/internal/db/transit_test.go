@@ -186,6 +186,72 @@ func TestUpsertTransferRequiresExistingStops(t *testing.T) {
 	}
 }
 
+// Row-local integrity: a stop cannot parent itself, a transfer cannot loop
+// back to the same stop or carry negative physical quantities.
+func TestIntegrityConstraints(t *testing.T) {
+	q, ctx := testQueries(t)
+	provider := upsertProvider(t, q, ctx, uniqueCode(t), "Provider D")
+
+	stop, err := q.UpsertStop(ctx, generated.UpsertStopParams{
+		ProviderID:       provider.ID,
+		ProviderEntityID: "s1",
+		Kind:             "station",
+		Name:             "Juanda",
+		Wgs84Point:       106.8505,
+		Wgs84Point_2:     -6.1768,
+		Metadata:         []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("UpsertStop: %v", err)
+	}
+
+	// Self-parent can't be expressed on insert (the id doesn't exist yet), so
+	// create the row first, then upsert it pointing at itself.
+	self, err := q.UpsertStop(ctx, generated.UpsertStopParams{
+		ProviderID:       provider.ID,
+		ProviderEntityID: "s3",
+		Kind:             "platform",
+		Name:             "Temp",
+		Wgs84Point:       106.8505,
+		Wgs84Point_2:     -6.1768,
+		Metadata:         []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("UpsertStop s3: %v", err)
+	}
+	if _, err := q.UpsertStop(ctx, generated.UpsertStopParams{
+		ProviderID:       provider.ID,
+		ProviderEntityID: "s3",
+		ParentStationID:  self.ID,
+		Kind:             "platform",
+		Name:             "Self parent",
+		Wgs84Point:       106.8505,
+		Wgs84Point_2:     -6.1768,
+		Metadata:         []byte("{}"),
+	}); err == nil {
+		t.Error("expected self-parent to be rejected")
+	}
+
+	if _, err := q.UpsertTransfer(ctx, generated.UpsertTransferParams{
+		FromStopID:    stop.ID,
+		ToStopID:      stop.ID,
+		Accessibility: []byte("{}"),
+		FareContext:   []byte("{}"),
+	}); err == nil {
+		t.Error("expected self-transfer to be rejected")
+	}
+
+	if _, err := q.UpsertTransfer(ctx, generated.UpsertTransferParams{
+		FromStopID:    stop.ID,
+		ToStopID:      self.ID,
+		WalkDistanceM: pgtype.Int4{Int32: -5, Valid: true},
+		Accessibility: []byte("{}"),
+		FareContext:   []byte("{}"),
+	}); err == nil {
+		t.Error("expected negative walk_distance_m to be rejected")
+	}
+}
+
 // The spatial index path: radius query returns real meter distances.
 func TestListStopsWithin(t *testing.T) {
 	q, ctx := testQueries(t)
