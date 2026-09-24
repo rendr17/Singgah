@@ -17,6 +17,31 @@
 	let plan = $state<Plan | null>(null);
 	let planning = $state(false);
 	let planError = $state('');
+	// True when the shown plan came from localStorage after a failed fetch —
+	// the banner must say so instead of letting stale data pass as fresh.
+	let planFromCache = $state(false);
+
+	// Recent plans persist per station pair — reopening a shared link while
+	// offline (or during a provider outage) shows the last fetched copy.
+	const PLAN_CACHE = 'singgah:plan:';
+
+	function loadCachedPlan(fromId: string, toId: string): Plan | null {
+		try {
+			const raw = localStorage.getItem(PLAN_CACHE + fromId + ':' + toId);
+			const cached = raw ? (JSON.parse(raw) as Plan) : null;
+			return cached?.source?.requestedAt ? cached : null;
+		} catch {
+			return null; // private mode / corrupt entry — cache is best-effort
+		}
+	}
+
+	function saveCachedPlan(fromId: string, toId: string, p: Plan) {
+		try {
+			localStorage.setItem(PLAN_CACHE + fromId + ':' + toId, JSON.stringify(p));
+		} catch {
+			// quota/private mode — the plan still renders, it just isn't persisted
+		}
+	}
 
 	function useStationSearch() {
 		let query = $state('');
@@ -90,16 +115,24 @@
 		planning = true;
 		planError = '';
 		plan = null;
+		planFromCache = false;
 		try {
 			plan = await unwrap(
 				api.GET('/api/v1/journeys', {
 					params: { query: { from: fromStation.id, to: toStation.id } }
 				})
 			);
+			saveCachedPlan(fromStation.id, toStation.id, plan);
 			// Keep the plan shareable: the URL is the snapshot, not app state.
 			replaceState(resolve(`/plan?from=${fromStation.id}&to=${toStation.id}`), page.state);
 		} catch (e) {
-			planError = e instanceof Error ? e.message : 'Pencarian rute gagal.';
+			const cached = loadCachedPlan(fromStation.id, toStation.id);
+			if (cached) {
+				plan = cached;
+				planFromCache = true;
+			} else {
+				planError = e instanceof Error ? e.message : 'Pencarian rute gagal.';
+			}
 		} finally {
 			planning = false;
 		}
@@ -126,7 +159,17 @@
 				ready = false; // dead link params degrade to an empty field, not an error page
 			}
 		}
-		if (ready) await submit();
+		if (ready) {
+			await submit();
+		} else if (fromId && toId) {
+			// Offline open of a shared link: station names can't be resolved,
+			// but the cached copy for this exact pair still renders.
+			const cached = loadCachedPlan(fromId, toId);
+			if (cached) {
+				plan = cached;
+				planFromCache = true;
+			}
+		}
 	});
 </script>
 
@@ -177,6 +220,11 @@
 {/if}
 
 {#if plan}
+	{#if planFromCache}
+		<p class="muted" role="status">
+			Rute tersimpan — data per {new Date(plan.source.requestedAt).toLocaleString('id-ID')}
+		</p>
+	{/if}
 	{#if plan.itinerary === null}
 		<p>Provider tidak menemukan rute antara {plan.from.name} dan {plan.to.name}.</p>
 	{:else}
