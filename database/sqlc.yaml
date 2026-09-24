@@ -2,8 +2,9 @@ version: '2'
 sql:
   - engine: postgresql
     queries: queries
+    # Declared catalog only — migrations/ contain goose Down DROPs, which sqlc
+    # would apply after the Up DDL and end with an empty catalog.
     schema:
-      - migrations
       - sqlc-catalog.sql
     gen:
       go:

@@ -6,7 +6,9 @@ codegen; reviewers review the SQL here, never the generated Go.
 ```text
 migrations/      goose SQL migrations — never edit an applied one
 queries/         sqlc query sources
-sqlc-catalog.sql function signatures for sqlc analysis only (not run)
+sqlc-catalog.sql declared schema for sqlc analysis only (not run) — mirror
+                 migrations/ DDL here; goose Down sections make migrations/
+                 unusable as sqlc's schema source
 sqlc.yaml        sqlc codegen config → services/api/db/generated
 ```
 

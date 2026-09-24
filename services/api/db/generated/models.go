@@ -3,3 +3,76 @@
 //   sqlc v1.31.1
 
 package generated
+
+import (
+	"github.com/jackc/pgx/v5/pgtype"
+)
+
+type Agency struct {
+	ID               pgtype.UUID        `json:"id"`
+	ProviderID       pgtype.UUID        `json:"provider_id"`
+	ProviderEntityID string             `json:"provider_entity_id"`
+	Code             pgtype.Text        `json:"code"`
+	Name             string             `json:"name"`
+	Timezone         string             `json:"timezone"`
+	FetchedAt        pgtype.Timestamptz `json:"fetched_at"`
+	SourceUpdatedAt  pgtype.Timestamptz `json:"source_updated_at"`
+}
+
+type Provider struct {
+	ID                 pgtype.UUID        `json:"id"`
+	Code               string             `json:"code"`
+	Name               string             `json:"name"`
+	SourceUrl          pgtype.Text        `json:"source_url"`
+	TermsUrl           pgtype.Text        `json:"terms_url"`
+	LicenseName        pgtype.Text        `json:"license_name"`
+	AttributionText    pgtype.Text        `json:"attribution_text"`
+	AllowedUse         pgtype.Text        `json:"allowed_use"`
+	RefreshCadence     pgtype.Text        `json:"refresh_cadence"`
+	RetentionPolicy    pgtype.Text        `json:"retention_policy"`
+	Owner              pgtype.Text        `json:"owner"`
+	FallbackProviderID pgtype.UUID        `json:"fallback_provider_id"`
+	KnownLimitations   pgtype.Text        `json:"known_limitations"`
+	IsActive           bool               `json:"is_active"`
+	LastSuccessAt      pgtype.Timestamptz `json:"last_success_at"`
+}
+
+type Route struct {
+	ID               pgtype.UUID        `json:"id"`
+	AgencyID         pgtype.UUID        `json:"agency_id"`
+	ProviderID       pgtype.UUID        `json:"provider_id"`
+	ProviderEntityID string             `json:"provider_entity_id"`
+	ShortName        pgtype.Text        `json:"short_name"`
+	LongName         pgtype.Text        `json:"long_name"`
+	Mode             string             `json:"mode"`
+	Color            pgtype.Text        `json:"color"`
+	TextColor        pgtype.Text        `json:"text_color"`
+	FetchedAt        pgtype.Timestamptz `json:"fetched_at"`
+	SourceUpdatedAt  pgtype.Timestamptz `json:"source_updated_at"`
+}
+
+type Stop struct {
+	ID               pgtype.UUID        `json:"id"`
+	ProviderID       pgtype.UUID        `json:"provider_id"`
+	ProviderEntityID string             `json:"provider_entity_id"`
+	ParentStationID  pgtype.UUID        `json:"parent_station_id"`
+	Kind             string             `json:"kind"`
+	Code             pgtype.Text        `json:"code"`
+	Name             string             `json:"name"`
+	Location         interface{}        `json:"location"`
+	Metadata         []byte             `json:"metadata"`
+	FetchedAt        pgtype.Timestamptz `json:"fetched_at"`
+	SourceUpdatedAt  pgtype.Timestamptz `json:"source_updated_at"`
+}
+
+type Transfer struct {
+	ID                 pgtype.UUID        `json:"id"`
+	FromStopID         pgtype.UUID        `json:"from_stop_id"`
+	ToStopID           pgtype.UUID        `json:"to_stop_id"`
+	WalkDistanceM      pgtype.Int4        `json:"walk_distance_m"`
+	MinTransferSeconds pgtype.Int4        `json:"min_transfer_seconds"`
+	Geometry           interface{}        `json:"geometry"`
+	Accessibility      []byte             `json:"accessibility"`
+	FareContext        []byte             `json:"fare_context"`
+	FetchedAt          pgtype.Timestamptz `json:"fetched_at"`
+}
