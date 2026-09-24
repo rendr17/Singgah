@@ -35,6 +35,7 @@ type Provider struct {
 	KnownLimitations   pgtype.Text        `json:"known_limitations"`
 	IsActive           bool               `json:"is_active"`
 	LastSuccessAt      pgtype.Timestamptz `json:"last_success_at"`
+	LastAttemptAt      pgtype.Timestamptz `json:"last_attempt_at"`
 }
 
 type Route struct {

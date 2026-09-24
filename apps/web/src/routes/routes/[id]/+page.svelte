@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { PageProps } from './$types';
 	import { resolve } from '$app/paths';
+	import BackNav from '$lib/components/app-shell/BackNav.svelte';
 	import { SectionHeading } from '@singgah/ui';
 
 	let { data }: PageProps = $props();
@@ -9,9 +10,9 @@
 
 {#if route === null}
 	<p role="alert">{data.error}</p>
-	<p><a href={resolve('/routes')}>← Semua rute</a></p>
+	<BackNav href="/routes" label="Semua rute" />
 {:else}
-	<nav><a href={resolve('/routes')}>← Semua rute</a></nav>
+	<BackNav href="/routes" label="Semua rute" />
 
 	<h1>
 		{#if route.color}

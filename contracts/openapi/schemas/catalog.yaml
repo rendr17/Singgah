@@ -225,6 +225,12 @@ Provider:
     lastSuccessAt:
       type: string
       format: date-time
+    lastAttemptAt:
+      type: string
+      format: date-time
+      description: >-
+        Stamp of the most recent ingest attempt — newer than lastSuccessAt
+        (or success absent) means the last run failed or is still running.
 
 JourneyStopRef:
   type: object

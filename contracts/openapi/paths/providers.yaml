@@ -4,7 +4,9 @@ get:
   description: >-
     The provider registry as a health surface: `lastSuccessAt` is the stamp of
     the most recent successful ingest — its absence means the provider is
-    registered but has never been ingested. License, attribution, and known
+    registered but has never been ingested. `lastAttemptAt` marks the most
+    recent run start; an attempt newer than the last success means the latest
+    ingest failed (or is still running). License, attribution, and known
     limitations travel with the registry (docs/35, docs/37).
   tags:
     - catalog

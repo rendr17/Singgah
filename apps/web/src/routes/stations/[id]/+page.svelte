@@ -3,6 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { browser } from '$app/environment';
 	import { env } from '$env/dynamic/public';
+	import BackNav from '$lib/components/app-shell/BackNav.svelte';
 	import { SectionHeading } from '@singgah/ui';
 	import { TransitMap, stationsToGeoJSON } from '@singgah/map';
 
@@ -31,9 +32,9 @@
 
 {#if station === null}
 	<p role="alert">{data.error}</p>
-	<p><a href={resolve('/')}>← Kembali ke pencarian</a></p>
+	<BackNav href="/" label="Kembali ke pencarian" />
 {:else}
-	<nav><a href={resolve('/')}>← Pencarian</a></nav>
+	<BackNav href="/" label="Pencarian" />
 
 	<h1>{station.name}</h1>
 	{#if station.officialName && station.officialName !== station.name}

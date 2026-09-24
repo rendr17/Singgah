@@ -300,6 +300,82 @@ func TestListStopsWithin(t *testing.T) {
 	}
 }
 
+// The alias path: a query that only matches the operator's official name —
+// not the display name or code — must still find the stop. The alias lives
+// in metadata.official_name, written by the adapter at ingest.
+func TestSearchStopsMatchesOfficialName(t *testing.T) {
+	q, ctx := testQueries(t)
+	provider := upsertProvider(t, q, ctx, uniqueCode(t), "Provider E")
+
+	stop, err := q.UpsertStop(ctx, generated.UpsertStopParams{
+		ProviderID:       provider.ID,
+		ProviderEntityID: "alias-1",
+		Kind:             "station",
+		Name:             "Dukuh Atas",
+		Code:             pgtype.Text{String: "DKA", Valid: true},
+		Wgs84Point:       106.8230,
+		Wgs84Point_2:     -6.2050,
+		Metadata:         []byte(`{"official_name":"BNI City","score":4.5}`),
+	})
+	if err != nil {
+		t.Fatalf("UpsertStop: %v", err)
+	}
+
+	rows, err := q.SearchStops(ctx, generated.SearchStopsParams{Name: "%bni city%", Limit: 10})
+	if err != nil {
+		t.Fatalf("SearchStops: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ID != stop.ID {
+		t.Fatalf("official-name alias search returned %d rows, want 1", len(rows))
+	}
+}
+
+// bbox + query runs inside one query: the alias must match there too, and
+// the spatial predicate must still hold.
+func TestListStopsInBBoxQueryFilter(t *testing.T) {
+	q, ctx := testQueries(t)
+	provider := upsertProvider(t, q, ctx, uniqueCode(t), "Provider F")
+	mk := func(eid, name, official string, lon, lat float64) pgtype.UUID {
+		meta := []byte(`{"official_name":"` + official + `"}`)
+		s, err := q.UpsertStop(ctx, generated.UpsertStopParams{
+			ProviderID: provider.ID, ProviderEntityID: eid, Kind: "station",
+			Name: name, Wgs84Point: lon, Wgs84Point_2: lat, Metadata: meta,
+		})
+		if err != nil {
+			t.Fatalf("UpsertStop %s: %v", eid, err)
+		}
+		return s.ID
+	}
+
+	// Surabaya bbox — far from committed Jakarta fixture rows.
+	want := mk("alias-in", "Tunjungan", "BNI City", 112.7400, -7.2600)
+	mk("other-in", "Gubeng", "Stasiun Gubeng", 112.7520, -7.2653)
+	mk("alias-out", "Luar Bbox", "BNI City", 106.8307, -6.1767)
+
+	rows, err := q.ListStopsInBBox(ctx, generated.ListStopsInBBoxParams{
+		Column1: 112.70, Column2: -7.30, Column3: 112.80, Column4: -7.20,
+		Name: "%bni city%", Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("ListStopsInBBox: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ID != want {
+		t.Fatalf("bbox+alias returned %d rows, want only the in-bbox alias match", len(rows))
+	}
+
+	// '%%' disables the text filter — both in-bbox stops come back.
+	rows, err = q.ListStopsInBBox(ctx, generated.ListStopsInBBoxParams{
+		Column1: 112.70, Column2: -7.30, Column3: 112.80, Column4: -7.20,
+		Name: "%%", Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("ListStopsInBBox %%: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("bbox with %%%% filter returned %d rows, want 2", len(rows))
+	}
+}
+
 func TestListStopsInBBox(t *testing.T) {
 	q, ctx := testQueries(t)
 	provider := upsertProvider(t, q, ctx, uniqueCode(t), "Provider D")
@@ -331,7 +407,7 @@ func TestListStopsInBBox(t *testing.T) {
 	// Surabaya viewport — far from the Jakarta fixture/ingest rows.
 	rows, err := q.ListStopsInBBox(ctx, generated.ListStopsInBBoxParams{
 		Column1: 112.70, Column2: -7.30, Column3: 112.80, Column4: -7.20,
-		Limit: 10,
+		Name: "%%", Limit: 10,
 	})
 	if err != nil {
 		t.Fatalf("ListStopsInBBox: %v", err)

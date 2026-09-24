@@ -40,7 +40,8 @@ CREATE TABLE providers (
 	fallback_provider_id uuid REFERENCES providers (id),
 	known_limitations text,
 	is_active boolean NOT NULL DEFAULT true,
-	last_success_at timestamptz
+	last_success_at timestamptz,
+	last_attempt_at timestamptz
 );
 
 CREATE TABLE agencies (

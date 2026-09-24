@@ -4,6 +4,7 @@
 	import { env } from '$env/dynamic/public';
 	import { browser } from '$app/environment';
 	import { api } from '$lib/api';
+	import BackNav from '$lib/components/app-shell/BackNav.svelte';
 	import { unwrap } from '@singgah/api-client';
 	import type { components } from '@singgah/api-client';
 	import { TransitMap, stationsToGeoJSON } from '@singgah/map';
@@ -36,7 +37,7 @@
 	}
 </script>
 
-<nav><a href={resolve('/')}>← Pencarian</a></nav>
+<BackNav href="/" label="Pencarian" />
 <h1>Peta jaringan</h1>
 
 {#if error}

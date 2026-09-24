@@ -134,6 +134,13 @@ ON CONFLICT (from_stop_id, to_stop_id) DO UPDATE SET
 	fetched_at = excluded.fetched_at
 RETURNING *;
 
+-- name: TouchProviderLastAttempt :exec
+-- Stamps the START of an ingest run — committed outside the ingest
+-- transaction so a failed run still shows up on the health surface.
+UPDATE providers
+SET last_attempt_at = now()
+WHERE code = $1;
+
 -- name: TouchProviderLastSuccess :exec
 -- Stamps a completed ingest run on the provider registry row.
 UPDATE providers
@@ -178,6 +185,8 @@ LIMIT $1;
 -- name: ListStopsInBBox :many
 -- Stops inside a WGS84 envelope (minLon,minLat,maxLon,maxLat) — the map's
 -- viewport-scoped fetch. The geography GiST index serves the && predicate.
+-- $5 is the same '%'-wrapped pattern as SearchStops: '%%' disables the text
+-- filter; otherwise name, code, and official_name alias all match.
 SELECT
 	s.id,
 	s.kind,
@@ -188,9 +197,15 @@ SELECT
 	p.code AS provider_code
 FROM stops s
 JOIN providers p ON p.id = s.provider_id
-WHERE s.location && st_makeenvelope($1::float8, $2::float8, $3::float8, $4::float8, 4326)::geography
+WHERE
+	s.location && st_makeenvelope($1::float8, $2::float8, $3::float8, $4::float8, 4326)::geography
+	AND (
+		s.name ILIKE $5
+		OR s.code ILIKE $5
+		OR s.metadata->>'official_name' ILIKE $5
+	)
 ORDER BY s.name
-LIMIT $5;
+LIMIT $6;
 
 -- name: SearchStops :many
 -- Text search across display name, station code, and the operator's official
@@ -210,7 +225,10 @@ WHERE
 	s.name ILIKE $1
 	OR s.code ILIKE $1
 	OR s.metadata->>'official_name' ILIKE $1
-ORDER BY (s.metadata->>'score')::float8 DESC NULLS LAST, s.name
+-- metadata->>'score' is only cast when it looks numeric — a non-numeric
+-- provider value must not turn ordering into a 500.
+ORDER BY (CASE WHEN s.metadata->>'score' ~ '^-?[0-9]+(\.[0-9]+)?$'
+	THEN (s.metadata->>'score')::float8 END) DESC NULLS LAST, s.name
 LIMIT $2;
 
 -- name: ListRoutesServingStop :many
@@ -354,6 +372,7 @@ SELECT
 	owner,
 	known_limitations,
 	is_active,
-	last_success_at
+	last_success_at,
+	last_attempt_at
 FROM providers
 ORDER BY code;

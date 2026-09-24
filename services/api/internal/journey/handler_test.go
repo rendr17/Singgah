@@ -189,3 +189,119 @@ func TestPlanProviderOutage(t *testing.T) {
 		t.Fatal("expected PROVIDER_UNAVAILABLE")
 	}
 }
+
+func TestPlanSameModeSingleRide(t *testing.T) {
+	store := baseStore(t)
+	store.stops[toUUID] = generated.GetStopRow{ID: mustUUID(t, toUUID), Name: "Manggarai", ProviderCode: "commute", ProviderEntityID: "KCI-MRI"}
+	store.routeID = mustUUID(t, routeUUID)
+	store.uuidRows = []generated.ListStopIDsByProviderEntityIDsRow{
+		{ID: mustUUID(t, fromUUID), ProviderEntityID: "KCI-SUD"},
+		{ID: mustUUID(t, toUUID), ProviderEntityID: "KCI-MRI"},
+	}
+	fare := int64(3000)
+	dist := 8100.0
+	planner := &fakePlanner{plan: &commute.FarePlan{
+		From: commute.FareStationRef{ID: "KCI-SUD", Name: "Sudirman"},
+		To:   commute.FareStationRef{ID: "KCI-MRI", Name: "Manggarai"},
+		Legs: []commute.FareLeg{
+			{Type: "RIDE", Line: "KCI:BOO", Operator: "KCI", From: commute.FareStationRef{ID: "KCI-SUD"}, To: commute.FareStationRef{ID: "KCI-MRI"}, StationCount: 5, Headsign: "Bogor", Stops: []commute.FareStationRef{{ID: "KCI-SUD"}, {ID: "KCI-MRI"}}, DistanceM: &dist},
+		},
+		Segments:      []commute.FareSegment{{Operator: "KCI", From: commute.FareStationRef{ID: "KCI-SUD"}, To: commute.FareStationRef{ID: "KCI-MRI"}, Fare: 3000}},
+		TotalFare:     &fare,
+		TotalDistance: 8100,
+	}}
+	rec := serve(t, store, planner, "/journeys?from="+fromUUID+"&to="+toUUID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	itin := decode(t, rec)["itinerary"].(map[string]any)
+	if itin["rideLegs"].(float64) != 1 || itin["walkTransfers"].(float64) != 0 {
+		t.Fatalf("leg counts = %v, want 1 ride 0 walks", itin)
+	}
+	legs := itin["legs"].([]any)
+	if len(legs) != 1 || legs[0].(map[string]any)["type"] != "ride" {
+		t.Fatalf("legs = %v, want single ride", legs)
+	}
+}
+
+func TestPlanFareUnknown(t *testing.T) {
+	// Upstream returned a route but no fare data — the fare block must be
+	// omitted entirely, never emitted as a zero-rupiah fare.
+	store := baseStore(t)
+	store.uuidRows = []generated.ListStopIDsByProviderEntityIDsRow{
+		{ID: mustUUID(t, fromUUID), ProviderEntityID: "KCI-SUD"},
+		{ID: mustUUID(t, toUUID), ProviderEntityID: "MRTJ-LBB"},
+	}
+	planner := &fakePlanner{plan: &commute.FarePlan{
+		From: commute.FareStationRef{ID: "KCI-SUD", Name: "Sudirman"},
+		To:   commute.FareStationRef{ID: "MRTJ-LBB", Name: "Lebak Bulus"},
+		Legs: []commute.FareLeg{
+			{Type: "RIDE", Line: "MRTJ:M", Operator: "MRTJ", From: commute.FareStationRef{ID: "KCI-SUD"}, To: commute.FareStationRef{ID: "MRTJ-LBB"}, StationCount: 13},
+		},
+	}}
+	rec := serve(t, store, planner, "/journeys?from="+fromUUID+"&to="+toUUID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	itin := decode(t, rec)["itinerary"].(map[string]any)
+	if f, ok := itin["fare"]; ok {
+		t.Fatalf("fare must be omitted when upstream has none, got %v", f)
+	}
+}
+
+func TestPlanProviderUnsupported(t *testing.T) {
+	store := baseStore(t)
+	store.stops[fromUUID] = generated.GetStopRow{ID: mustUUID(t, fromUUID), Name: "Sudirman", ProviderCode: "legacy-gtfs", ProviderEntityID: "X-SUD"}
+	rec := serve(t, store, &fakePlanner{}, "/journeys?from="+fromUUID+"&to="+toUUID)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", rec.Code)
+	}
+	if decode(t, rec)["error"].(map[string]any)["code"] != "PROVIDER_UNSUPPORTED" {
+		t.Fatal("expected PROVIDER_UNSUPPORTED")
+	}
+}
+
+func TestPlanUnknownLegTypePassesThrough(t *testing.T) {
+	// Provider adds a leg type we don't model yet — pass the raw type through
+	// instead of guessing, and don't count it as walk or ride.
+	store := baseStore(t)
+	store.uuidRows = []generated.ListStopIDsByProviderEntityIDsRow{
+		{ID: mustUUID(t, fromUUID), ProviderEntityID: "KCI-SUD"},
+		{ID: mustUUID(t, toUUID), ProviderEntityID: "MRTJ-LBB"},
+	}
+	planner := &fakePlanner{plan: &commute.FarePlan{
+		From: commute.FareStationRef{ID: "KCI-SUD", Name: "Sudirman"},
+		To:   commute.FareStationRef{ID: "MRTJ-LBB", Name: "Lebak Bulus"},
+		Legs: []commute.FareLeg{
+			{Type: "FUTURE_MODE", From: commute.FareStationRef{ID: "KCI-SUD"}, To: commute.FareStationRef{ID: "MRTJ-LBB"}},
+		},
+	}}
+	rec := serve(t, store, planner, "/journeys?from="+fromUUID+"&to="+toUUID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	itin := decode(t, rec)["itinerary"].(map[string]any)
+	leg := itin["legs"].([]any)[0].(map[string]any)
+	if leg["type"] != "FUTURE_MODE" {
+		t.Fatalf("leg type = %v, want raw passthrough", leg["type"])
+	}
+	if itin["rideLegs"].(float64) != 0 || itin["walkTransfers"].(float64) != 0 {
+		t.Fatalf("leg counts = %v, want 0/0", itin)
+	}
+}
+
+func TestPlanNormalizeStoreError(t *testing.T) {
+	store := baseStore(t)
+	store.uuidErr = errors.New("db down")
+	planner := &fakePlanner{plan: &commute.FarePlan{
+		From: commute.FareStationRef{ID: "KCI-SUD", Name: "Sudirman"},
+		To:   commute.FareStationRef{ID: "MRTJ-LBB", Name: "Lebak Bulus"},
+		Legs: []commute.FareLeg{
+			{Type: "RIDE", Line: "MRTJ:M", Operator: "MRTJ", From: commute.FareStationRef{ID: "KCI-SUD"}, To: commute.FareStationRef{ID: "MRTJ-LBB"}},
+		},
+	}}
+	rec := serve(t, store, planner, "/journeys?from="+fromUUID+"&to="+toUUID)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}

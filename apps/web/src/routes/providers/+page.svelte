@@ -1,7 +1,10 @@
 <script lang="ts">
 	import type { PageProps } from './$types';
-	import { resolve } from '$app/paths';
+	import type { components } from '@singgah/api-client';
+	import BackNav from '$lib/components/app-shell/BackNav.svelte';
 	import { SectionHeading, Surface } from '@singgah/ui';
+
+	type Provider = components['schemas']['Provider'];
 
 	let { data }: PageProps = $props();
 
@@ -13,9 +16,19 @@
 		if (days === 1) return `ingest kemarin · ${date}`;
 		return `ingest ${days} hari lalu · ${date}`;
 	}
+
+	// An attempt newer than the last success (or no success at all) means the
+	// latest ingest failed — say so instead of looking merely "stale".
+	function failedAttempt(p: Provider): string {
+		if (!p.lastAttemptAt) return '';
+		const failed =
+			!p.lastSuccessAt || new Date(p.lastAttemptAt).getTime() > new Date(p.lastSuccessAt).getTime();
+		if (!failed) return '';
+		return `ingest terakhir gagal · dicoba ${new Date(p.lastAttemptAt).toLocaleString('id-ID')}`;
+	}
 </script>
 
-<nav><a href={resolve('/')}>← Pencarian</a></nav>
+<BackNav href="/" label="Pencarian" />
 
 <h1>Penyedia data</h1>
 <p class="muted">Sumber data transit, lisensi, dan kesegaran ingest.</p>
@@ -24,6 +37,7 @@
 	<p role="alert">{data.error}</p>
 {:else}
 	{#each data.providers as p (p.code)}
+		{@const failed = failedAttempt(p)}
 		<Surface>
 			<SectionHeading>{p.name}</SectionHeading>
 			<p class="meta">
@@ -31,6 +45,7 @@
 				{#if !p.isActive}<span class="stale">· nonaktif</span>{/if}
 			</p>
 			<p>{ageLabel(p.lastSuccessAt)}</p>
+			{#if failed}<p class="stale">{failed}</p>{/if}
 			{#if p.licenseName}<p>Lisensi: {p.licenseName}</p>{/if}
 			{#if p.attributionText}<p>{p.attributionText}</p>{/if}
 			{#if p.allowedUse}<p class="muted">{p.allowedUse}</p>{/if}

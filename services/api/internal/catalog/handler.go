@@ -59,16 +59,14 @@ func (h *Handler) listStations(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		rows, err := h.store.ListStopsInBBox(r.Context(), generated.ListStopsInBBoxParams{
-			Column1: env[0], Column2: env[1], Column3: env[2], Column4: env[3], Limit: limit,
+			Column1: env[0], Column2: env[1], Column3: env[2], Column4: env[3],
+			Name: "%" + q + "%", Limit: limit,
 		})
 		if err != nil {
 			writeErr(w, r, err)
 			return
 		}
 		for _, row := range rows {
-			if q != "" && !matchesQuery(row.Name, textOrEmpty(row.Code), q) {
-				continue
-			}
 			stations = append(stations, stationSummary(row.ID, row.Name, row.Code, row.Kind, row.Lat, row.Lon, row.ProviderCode))
 		}
 	} else if q != "" {
@@ -135,11 +133,6 @@ func parseBBox(w http.ResponseWriter, r *http.Request, raw string) ([4]float64, 
 		return env, false
 	}
 	return env, true
-}
-
-func matchesQuery(name, code, q string) bool {
-	return strings.Contains(strings.ToLower(name), strings.ToLower(q)) ||
-		strings.Contains(strings.ToLower(code), strings.ToLower(q))
 }
 
 // GET /stations/{id} — detail with serving lines and transfers.
@@ -353,6 +346,10 @@ func (h *Handler) listProviders(w http.ResponseWriter, r *http.Request) {
 		if p.LastSuccessAt.Valid {
 			t := p.LastSuccessAt.Time
 			ph.LastSuccessAt = &t
+		}
+		if p.LastAttemptAt.Valid {
+			t := p.LastAttemptAt.Time
+			ph.LastAttemptAt = &t
 		}
 		providers = append(providers, ph)
 	}

@@ -34,6 +34,14 @@ docker compose -f infrastructure/local/compose.yaml up -d
 bash scripts/db-migrate.sh           # goose up against local compose
 ```
 
+Integration tests use `TEST_DATABASE_URL` (compose creates `singgah_test` —
+migrate it too; see `database/README.md`):
+
+```bash
+export TEST_DATABASE_URL=postgres://singgah:singgah@localhost:5432/singgah_test?sslmode=disable
+DATABASE_URL="$TEST_DATABASE_URL" bash scripts/db-migrate.sh
+```
+
 Quality gates (run from repo root):
 
 ```bash
@@ -60,7 +68,7 @@ contracts/openapi       OpenAPI contract — singgah.yaml + paths/, schemas/
 database/               goose migrations + sqlc queries → services/api/db/generated
 infrastructure/local    Docker compose: Postgres + PostGIS (dev only)
 scripts/                repo helpers — check.sh runs all local quality gates
-docs/                   development blueprint (local reference, not committed)
+docs/                   development blueprint — product + engineering source of truth
 .github/                CI workflow + PR template
 ```
 

@@ -80,6 +80,20 @@ func TestNormalizeStationRejectsMissingCoords(t *testing.T) {
 	}
 }
 
+// Identity fields are mandatory upstream: a station without id or name can
+// neither be deduplicated nor displayed — reject, never synthesize.
+func TestNormalizeStationRejectsMissingIdentity(t *testing.T) {
+	lat, lon := -6.2, 106.8
+	for _, st := range []Station{
+		{ID: "", Name: "No ID", Latitude: &lat, Longitude: &lon},
+		{ID: "KCI-X", Name: "", Latitude: &lat, Longitude: &lon},
+	} {
+		if _, rej := NormalizeStation(st, fetchedAt); rej == nil {
+			t.Errorf("expected rejection for %+v", st)
+		}
+	}
+}
+
 func TestNormalizeOperatorAndLine(t *testing.T) {
 	ops := loadFixture[[]Operator](t, "operators.json")
 	kci := ops[0]

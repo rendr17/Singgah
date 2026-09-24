@@ -1,11 +1,12 @@
 <script lang="ts">
 	import type { PageProps } from './$types';
 	import { resolve } from '$app/paths';
+	import BackNav from '$lib/components/app-shell/BackNav.svelte';
 
 	let { data }: PageProps = $props();
 </script>
 
-<nav><a href={resolve('/')}>← Pencarian</a></nav>
+<BackNav href="/" label="Pencarian" />
 <h1>Rute</h1>
 
 {#if data.error}

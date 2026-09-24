@@ -78,6 +78,8 @@ type RouteDetail struct {
 }
 
 // ProviderHealth is the registry row plus its ingest freshness signal.
+// LastAttemptAt is stamped before each ingest run — when it is newer than
+// LastSuccessAt (or success is absent), the last run failed or is running.
 type ProviderHealth struct {
 	Code             string     `json:"code"`
 	Name             string     `json:"name"`
@@ -89,6 +91,7 @@ type ProviderHealth struct {
 	KnownLimitations string     `json:"knownLimitations,omitempty"`
 	IsActive         bool       `json:"isActive"`
 	LastSuccessAt    *time.Time `json:"lastSuccessAt,omitempty"`
+	LastAttemptAt    *time.Time `json:"lastAttemptAt,omitempty"`
 }
 
 func sourceMeta(provider string, fetchedAt, sourceUpdatedAt pgtype.Timestamptz) SourceMeta {

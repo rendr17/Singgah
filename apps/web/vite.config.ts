@@ -26,6 +26,9 @@ export default defineConfig({
 	},
 	test: {
 		expect: { requireAssertions: true },
+		// no unit tests live in the app yet — keep the gate green until the
+		// first spec lands instead of failing on zero files.
+		passWithNoTests: true,
 		projects: [
 			{
 				extends: './vite.config.ts',

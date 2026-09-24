@@ -38,17 +38,24 @@ func Commute(ctx context.Context, pool *pgxpool.Pool, src Source) (Report, error
 	fetchedAt := pgtype.Timestamptz{Time: time.Now(), Valid: true}
 	report := Report{FetchedAt: fetchedAt.Time}
 
+	// Provider registration and the attempt stamp commit OUTSIDE the ingest
+	// transaction: a failed run must still leave a trace on the health
+	// surface, which only works if these two writes are not rolled back.
+	q0 := generated.New(pool)
+	provider, err := q0.UpsertProvider(ctx, commute.ProviderRegistration)
+	if err != nil {
+		return report, fmt.Errorf("ingest: provider registration: %w", err)
+	}
+	if err := q0.TouchProviderLastAttempt(ctx, commute.ProviderCode); err != nil {
+		return report, fmt.Errorf("ingest: last_attempt_at: %w", err)
+	}
+
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return report, fmt.Errorf("ingest: begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	q := generated.New(pool).WithTx(tx)
-
-	provider, err := q.UpsertProvider(ctx, commute.ProviderRegistration)
-	if err != nil {
-		return report, fmt.Errorf("ingest: provider registration: %w", err)
-	}
+	q := q0.WithTx(tx)
 
 	operators, err := src.Operators(ctx)
 	if err != nil {
@@ -106,6 +113,16 @@ func Commute(ctx context.Context, pool *pgxpool.Pool, src Source) (Report, error
 		opCode, ok := stationCodes[st.ID]
 		if !ok {
 			continue // station was rejected during normalize
+		}
+		if st.Code == "" {
+			// The transfers endpoint is keyed by station code — a missing
+			// code is a data issue, so reject this station's edges instead
+			// of letting a malformed upstream path fail the whole run.
+			report.Rejections = append(report.Rejections, commute.Rejection{
+				EntityID: st.ID,
+				Reason:   "missing station code — transfers not fetchable",
+			})
+			continue
 		}
 		transfers, err := src.Transfers(ctx, opCode, st.Code)
 		if err != nil {

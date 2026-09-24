@@ -151,7 +151,7 @@ export interface paths {
         };
         /**
          * List data providers with ingest freshness
-         * @description The provider registry as a health surface: `lastSuccessAt` is the stamp of the most recent successful ingest — its absence means the provider is registered but has never been ingested. License, attribution, and known limitations travel with the registry (docs/35, docs/37).
+         * @description The provider registry as a health surface: `lastSuccessAt` is the stamp of the most recent successful ingest — its absence means the provider is registered but has never been ingested. `lastAttemptAt` marks the most recent run start; an attempt newer than the last success means the latest ingest failed (or is still running). License, attribution, and known limitations travel with the registry (docs/35, docs/37).
          */
         get: operations["listProviders"];
         put?: never;
@@ -295,6 +295,11 @@ export interface components {
             isActive: boolean;
             /** Format: date-time */
             lastSuccessAt?: string;
+            /**
+             * Format: date-time
+             * @description Stamp of the most recent ingest attempt — newer than lastSuccessAt (or success absent) means the last run failed or is still running.
+             */
+            lastAttemptAt?: string;
         };
         /** @description Stop reference inside an itinerary. `id` is absent when the upstream station ref cannot be resolved to a canonical stop (external service). */
         JourneyStopRef: {

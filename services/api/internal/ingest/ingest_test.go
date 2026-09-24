@@ -122,3 +122,80 @@ func TestCommuteIngestIsIdempotent(t *testing.T) {
 	}
 	fmt.Printf("run2: %+v\n", report2)
 }
+
+// failingSource dies on the stations fetch — the run fails after the provider
+// row and attempt stamp were already committed.
+type failingSource struct{ fixtureSource }
+
+func (f failingSource) Stations(context.Context) ([]commute.Station, error) {
+	return nil, fmt.Errorf("upstream down")
+}
+
+// A run that dies mid-pipeline must still leave last_attempt_at — otherwise
+// "ingest keeps failing" is indistinguishable from "never ran" on the health
+// surface.
+func TestFailedIngestStillStampsAttempt(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set — start infrastructure/local compose and run migrations")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pool, err := db.Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer pool.Close()
+
+	if _, err := Commute(ctx, pool, failingSource{loadFixtureSource(t)}); err == nil {
+		t.Fatal("expected ingest to fail")
+	}
+	var attempt *time.Time
+	if err := pool.QueryRow(ctx,
+		"SELECT last_attempt_at FROM providers WHERE code=$1",
+		commute.ProviderCode).Scan(&attempt); err != nil {
+		t.Fatalf("provider row: %v", err)
+	}
+	if attempt == nil {
+		t.Error("last_attempt_at not stamped for a failed run")
+	}
+}
+
+// A station without an upstream code is valid data (code is optional), but
+// its transfers cannot be fetched — that edge is rejected, not run-fatal.
+func TestIngestSkipsTransfersForCodelessStation(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set — start infrastructure/local compose and run migrations")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pool, err := db.Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer pool.Close()
+
+	src := loadFixtureSource(t)
+	lat, lon := -6.2, 106.8
+	src.stations = append(src.stations, commute.Station{
+		ID: "KCI-NOCODE", Name: "Tanpa Kode", Operator: "KCI",
+		Latitude: &lat, Longitude: &lon,
+	})
+
+	report, err := Commute(ctx, pool, src)
+	if err != nil {
+		t.Fatalf("a codeless station must not fail the run: %v", err)
+	}
+	found := false
+	for _, r := range report.Rejections {
+		if r.EntityID == "KCI-NOCODE" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a missing-code rejection, got %+v", report.Rejections)
+	}
+}

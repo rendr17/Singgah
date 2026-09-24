@@ -128,27 +128,35 @@ func TestListStationsBBox(t *testing.T) {
 	if p.Column1 != 106.7 || p.Column2 != -6.3 || p.Column3 != 106.9 || p.Column4 != -6.1 {
 		t.Fatalf("bbox params = %+v", p)
 	}
+	if p.Name != "%%" {
+		t.Fatalf("bbox without query must pass %% wildcard, got %q", p.Name)
+	}
 	if n := len(decode(t, rec)["stations"].([]any)); n != 1 {
 		t.Fatalf("stations len = %d", n)
 	}
 }
 
-func TestListStationsBBoxQueryPostFilter(t *testing.T) {
+// bbox+query is filtered inside SQL (same alias-aware predicate as
+// SearchStops) — the handler only wraps the term in % wildcards. Filtering
+// after LIMIT silently dropped matches, and Go-side filtering could not see
+// the official_name alias.
+func TestListStationsBBoxQueryPushedToStore(t *testing.T) {
 	var id pgtype.UUID
 	if err := id.Scan("b7f4b2a0-1f3d-4e5a-9c6b-2a1d3e4f5a6b"); err != nil {
 		t.Fatal(err)
 	}
 	store := &fakeStore{stopsInBBox: []generated.ListStopsInBBoxRow{
 		{ID: id, Kind: "station", Name: "Sudirman", ProviderCode: "commute"},
-		{ID: id, Kind: "station", Name: "Pasar Minggu", ProviderCode: "commute"},
 	}}
 	rec := serve(t, store, "/stations?bbox=106.7,-6.3,106.9,-6.1&query=sudirman")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
-	stations := decode(t, rec)["stations"].([]any)
-	if len(stations) != 1 || stations[0].(map[string]any)["name"] != "Sudirman" {
-		t.Fatalf("stations = %v", stations)
+	if store.gotBBoxParams.Name != "%sudirman%" {
+		t.Fatalf("bbox name param = %q, want %%sudirman%%", store.gotBBoxParams.Name)
+	}
+	if n := len(decode(t, rec)["stations"].([]any)); n != 1 {
+		t.Fatalf("stations len = %d", n)
 	}
 }
 
@@ -361,6 +369,7 @@ func TestListProviders(t *testing.T) {
 		RefreshCadence:   pgtype.Text{String: "daily", Valid: true},
 		KnownLimitations: pgtype.Text{String: "no realtime", Valid: true},
 		LastSuccessAt:    pgtype.Timestamptz{Time: success, Valid: true},
+		LastAttemptAt:    pgtype.Timestamptz{Time: success, Valid: true},
 	}}}
 	rec := serve(t, store, "/providers")
 	if rec.Code != http.StatusOK {
@@ -374,6 +383,9 @@ func TestListProviders(t *testing.T) {
 	if p["code"] != "commute" || p["licenseName"] != "ODbL-1.0" || p["lastSuccessAt"] != "2026-09-24T08:00:00Z" {
 		t.Fatalf("provider = %v", p)
 	}
+	if p["lastAttemptAt"] != "2026-09-24T08:00:00Z" {
+		t.Fatalf("lastAttemptAt = %v", p)
+	}
 }
 
 func TestListProvidersNeverIngested(t *testing.T) {
@@ -385,8 +397,29 @@ func TestListProvidersNeverIngested(t *testing.T) {
 	if _, ok := p["lastSuccessAt"]; ok {
 		t.Fatalf("never-ingested provider must omit lastSuccessAt: %v", p)
 	}
+	if _, ok := p["lastAttemptAt"]; ok {
+		t.Fatalf("never-attempted provider must omit lastAttemptAt: %v", p)
+	}
 	if p["isActive"] != false {
 		t.Fatal("isActive should be false")
+	}
+}
+
+// A failed run is visible: attempt stamped, no success — the health surface
+// must distinguish "ingest failed" from "never ran".
+func TestListProvidersFailedAttempt(t *testing.T) {
+	attempt := time.Date(2026, 9, 24, 9, 0, 0, 0, time.UTC)
+	store := &fakeStore{providers: []generated.ListProvidersRow{{
+		Code: "commute", Name: "Commute Data Platform", IsActive: true,
+		LastAttemptAt: pgtype.Timestamptz{Time: attempt, Valid: true},
+	}}}
+	rec := serve(t, store, "/providers")
+	p := decode(t, rec)["providers"].([]any)[0].(map[string]any)
+	if p["lastAttemptAt"] != "2026-09-24T09:00:00Z" {
+		t.Fatalf("lastAttemptAt = %v", p)
+	}
+	if _, ok := p["lastSuccessAt"]; ok {
+		t.Fatalf("failed provider must not invent lastSuccessAt: %v", p)
 	}
 }
 

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { api } from '$lib/api';
+	import BackNav from '$lib/components/app-shell/BackNav.svelte';
 	import { unwrap } from '@singgah/api-client';
 	import type { components } from '@singgah/api-client';
 	import { SearchField, StatusBadge } from '@singgah/ui';
@@ -87,7 +88,7 @@
 	}
 </script>
 
-<nav><a href={resolve('/')}>← Pencarian</a></nav>
+<BackNav href="/" label="Pencarian" />
 <h1>Perjalanan</h1>
 <p class="muted">Rencana stasiun ke stasiun — data jadwal statis.</p>
 
@@ -140,7 +141,7 @@
 		{@const itin = plan.itinerary}
 		<section class="result">
 			<header class="result-head">
-				<StatusBadge status="scheduled" />
+				<StatusBadge status={itin.status} />
 				{#if itin.fare?.total != null}
 					<span class="fare">Rp{itin.fare.total.toLocaleString('id-ID')}</span>
 				{/if}

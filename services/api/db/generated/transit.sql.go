@@ -157,7 +157,8 @@ SELECT
 	owner,
 	known_limitations,
 	is_active,
-	last_success_at
+	last_success_at,
+	last_attempt_at
 FROM providers
 ORDER BY code
 `
@@ -173,6 +174,7 @@ type ListProvidersRow struct {
 	KnownLimitations pgtype.Text        `json:"known_limitations"`
 	IsActive         bool               `json:"is_active"`
 	LastSuccessAt    pgtype.Timestamptz `json:"last_success_at"`
+	LastAttemptAt    pgtype.Timestamptz `json:"last_attempt_at"`
 }
 
 // Provider registry as the health surface: last_success_at is the freshest
@@ -197,6 +199,7 @@ func (q *Queries) ListProviders(ctx context.Context) ([]ListProvidersRow, error)
 			&i.KnownLimitations,
 			&i.IsActive,
 			&i.LastSuccessAt,
+			&i.LastAttemptAt,
 		); err != nil {
 			return nil, err
 		}
@@ -439,9 +442,15 @@ SELECT
 	p.code AS provider_code
 FROM stops s
 JOIN providers p ON p.id = s.provider_id
-WHERE s.location && st_makeenvelope($1::float8, $2::float8, $3::float8, $4::float8, 4326)::geography
+WHERE
+	s.location && st_makeenvelope($1::float8, $2::float8, $3::float8, $4::float8, 4326)::geography
+	AND (
+		s.name ILIKE $5
+		OR s.code ILIKE $5
+		OR s.metadata->>'official_name' ILIKE $5
+	)
 ORDER BY s.name
-LIMIT $5
+LIMIT $6
 `
 
 type ListStopsInBBoxParams struct {
@@ -449,6 +458,7 @@ type ListStopsInBBoxParams struct {
 	Column2 float64 `json:"column_2"`
 	Column3 float64 `json:"column_3"`
 	Column4 float64 `json:"column_4"`
+	Name    string  `json:"name"`
 	Limit   int32   `json:"limit"`
 }
 
@@ -464,12 +474,15 @@ type ListStopsInBBoxRow struct {
 
 // Stops inside a WGS84 envelope (minLon,minLat,maxLon,maxLat) — the map's
 // viewport-scoped fetch. The geography GiST index serves the && predicate.
+// $5 is the same '%'-wrapped pattern as SearchStops: '%%' disables the text
+// filter; otherwise name, code, and official_name alias all match.
 func (q *Queries) ListStopsInBBox(ctx context.Context, arg ListStopsInBBoxParams) ([]ListStopsInBBoxRow, error) {
 	rows, err := q.db.Query(ctx, listStopsInBBox,
 		arg.Column1,
 		arg.Column2,
 		arg.Column3,
 		arg.Column4,
+		arg.Name,
 		arg.Limit,
 	)
 	if err != nil {
@@ -696,7 +709,8 @@ WHERE
 	s.name ILIKE $1
 	OR s.code ILIKE $1
 	OR s.metadata->>'official_name' ILIKE $1
-ORDER BY (s.metadata->>'score')::float8 DESC NULLS LAST, s.name
+ORDER BY (CASE WHEN s.metadata->>'score' ~ '^-?[0-9]+(\.[0-9]+)?$'
+	THEN (s.metadata->>'score')::float8 END) DESC NULLS LAST, s.name
 LIMIT $2
 `
 
@@ -718,6 +732,8 @@ type SearchStopsRow struct {
 // Text search across display name, station code, and the operator's official
 // name (kept in metadata). The gin_trgm index accelerates the ILIKE patterns.
 // Rows are ranked by the provider's footfall score when present.
+// metadata->>'score' is only cast when it looks numeric — a non-numeric
+// provider value must not turn ordering into a 500.
 func (q *Queries) SearchStops(ctx context.Context, arg SearchStopsParams) ([]SearchStopsRow, error) {
 	rows, err := q.db.Query(ctx, searchStops, arg.Name, arg.Limit)
 	if err != nil {
@@ -744,6 +760,19 @@ func (q *Queries) SearchStops(ctx context.Context, arg SearchStopsParams) ([]Sea
 		return nil, err
 	}
 	return items, nil
+}
+
+const touchProviderLastAttempt = `-- name: TouchProviderLastAttempt :exec
+UPDATE providers
+SET last_attempt_at = now()
+WHERE code = $1
+`
+
+// Stamps the START of an ingest run — committed outside the ingest
+// transaction so a failed run still shows up on the health surface.
+func (q *Queries) TouchProviderLastAttempt(ctx context.Context, code string) error {
+	_, err := q.db.Exec(ctx, touchProviderLastAttempt, code)
+	return err
 }
 
 const touchProviderLastSuccess = `-- name: TouchProviderLastSuccess :exec
@@ -841,7 +870,7 @@ ON CONFLICT (code) DO UPDATE SET
 	retention_policy = excluded.retention_policy,
 	owner = excluded.owner,
 	known_limitations = excluded.known_limitations
-RETURNING id, code, name, source_url, terms_url, license_name, attribution_text, allowed_use, refresh_cadence, retention_policy, owner, fallback_provider_id, known_limitations, is_active, last_success_at
+RETURNING id, code, name, source_url, terms_url, license_name, attribution_text, allowed_use, refresh_cadence, retention_policy, owner, fallback_provider_id, known_limitations, is_active, last_success_at, last_attempt_at
 `
 
 type UpsertProviderParams struct {
@@ -892,6 +921,7 @@ func (q *Queries) UpsertProvider(ctx context.Context, arg UpsertProviderParams) 
 		&i.KnownLimitations,
 		&i.IsActive,
 		&i.LastSuccessAt,
+		&i.LastAttemptAt,
 	)
 	return i, err
 }
