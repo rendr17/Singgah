@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api';
+	import { loadCachedPlan, saveCachedPlan } from '$lib/plan-cache';
 	import BackNav from '$lib/components/app-shell/BackNav.svelte';
 	import { unwrap } from '@singgah/api-client';
 	import type { components } from '@singgah/api-client';
@@ -21,27 +22,9 @@
 	// the banner must say so instead of letting stale data pass as fresh.
 	let planFromCache = $state(false);
 
-	// Recent plans persist per station pair — reopening a shared link while
-	// offline (or during a provider outage) shows the last fetched copy.
-	const PLAN_CACHE = 'singgah:plan:';
-
-	function loadCachedPlan(fromId: string, toId: string): Plan | null {
-		try {
-			const raw = localStorage.getItem(PLAN_CACHE + fromId + ':' + toId);
-			const cached = raw ? (JSON.parse(raw) as Plan) : null;
-			return cached?.source?.requestedAt ? cached : null;
-		} catch {
-			return null; // private mode / corrupt entry — cache is best-effort
-		}
-	}
-
-	function saveCachedPlan(fromId: string, toId: string, p: Plan) {
-		try {
-			localStorage.setItem(PLAN_CACHE + fromId + ':' + toId, JSON.stringify(p));
-		} catch {
-			// quota/private mode — the plan still renders, it just isn't persisted
-		}
-	}
+	const loadCached = (fromId: string, toId: string) => loadCachedPlan(localStorage, fromId, toId);
+	const saveCached = (fromId: string, toId: string, p: Plan) =>
+		saveCachedPlan(localStorage, fromId, toId, p);
 
 	function useStationSearch() {
 		let query = $state('');
@@ -122,11 +105,11 @@
 					params: { query: { from: fromStation.id, to: toStation.id } }
 				})
 			);
-			saveCachedPlan(fromStation.id, toStation.id, plan);
+			saveCached(fromStation.id, toStation.id, plan);
 			// Keep the plan shareable: the URL is the snapshot, not app state.
 			replaceState(resolve(`/plan?from=${fromStation.id}&to=${toStation.id}`), page.state);
 		} catch (e) {
-			const cached = loadCachedPlan(fromStation.id, toStation.id);
+			const cached = loadCached(fromStation.id, toStation.id);
 			if (cached) {
 				plan = cached;
 				planFromCache = true;
@@ -164,7 +147,7 @@
 		} else if (fromId && toId) {
 			// Offline open of a shared link: station names can't be resolved,
 			// but the cached copy for this exact pair still renders.
-			const cached = loadCachedPlan(fromId, toId);
+			const cached = loadCached(fromId, toId);
 			if (cached) {
 				plan = cached;
 				planFromCache = true;
