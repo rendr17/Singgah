@@ -250,6 +250,131 @@ func (q *Queries) ListRoutesServingStop(ctx context.Context, id pgtype.UUID) ([]
 	return items, nil
 }
 
+const listStops = `-- name: ListStops :many
+SELECT
+	s.id,
+	s.kind,
+	s.code,
+	s.name,
+	st_x(s.location::geometry) AS lon,
+	st_y(s.location::geometry) AS lat,
+	p.code AS provider_code
+FROM stops s
+JOIN providers p ON p.id = s.provider_id
+ORDER BY s.name
+LIMIT $1
+`
+
+type ListStopsRow struct {
+	ID           pgtype.UUID `json:"id"`
+	Kind         string      `json:"kind"`
+	Code         pgtype.Text `json:"code"`
+	Name         string      `json:"name"`
+	Lon          float64     `json:"lon"`
+	Lat          float64     `json:"lat"`
+	ProviderCode string      `json:"provider_code"`
+}
+
+// Unfiltered stop list — the catalog's reference set is small enough that a
+// plain bounded list beats a fake "match everything" search.
+func (q *Queries) ListStops(ctx context.Context, limit int32) ([]ListStopsRow, error) {
+	rows, err := q.db.Query(ctx, listStops, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListStopsRow
+	for rows.Next() {
+		var i ListStopsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.Code,
+			&i.Name,
+			&i.Lon,
+			&i.Lat,
+			&i.ProviderCode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStopsInBBox = `-- name: ListStopsInBBox :many
+SELECT
+	s.id,
+	s.kind,
+	s.code,
+	s.name,
+	st_x(s.location::geometry) AS lon,
+	st_y(s.location::geometry) AS lat,
+	p.code AS provider_code
+FROM stops s
+JOIN providers p ON p.id = s.provider_id
+WHERE s.location && st_makeenvelope($1::float8, $2::float8, $3::float8, $4::float8, 4326)::geography
+ORDER BY s.name
+LIMIT $5
+`
+
+type ListStopsInBBoxParams struct {
+	Column1 float64 `json:"column_1"`
+	Column2 float64 `json:"column_2"`
+	Column3 float64 `json:"column_3"`
+	Column4 float64 `json:"column_4"`
+	Limit   int32   `json:"limit"`
+}
+
+type ListStopsInBBoxRow struct {
+	ID           pgtype.UUID `json:"id"`
+	Kind         string      `json:"kind"`
+	Code         pgtype.Text `json:"code"`
+	Name         string      `json:"name"`
+	Lon          float64     `json:"lon"`
+	Lat          float64     `json:"lat"`
+	ProviderCode string      `json:"provider_code"`
+}
+
+// Stops inside a WGS84 envelope (minLon,minLat,maxLon,maxLat) — the map's
+// viewport-scoped fetch. The geography GiST index serves the && predicate.
+func (q *Queries) ListStopsInBBox(ctx context.Context, arg ListStopsInBBoxParams) ([]ListStopsInBBoxRow, error) {
+	rows, err := q.db.Query(ctx, listStopsInBBox,
+		arg.Column1,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListStopsInBBoxRow
+	for rows.Next() {
+		var i ListStopsInBBoxRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.Code,
+			&i.Name,
+			&i.Lon,
+			&i.Lat,
+			&i.ProviderCode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listStopsOnRoute = `-- name: ListStopsOnRoute :many
 SELECT
 	s.id,

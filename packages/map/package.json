@@ -1,0 +1,32 @@
+{
+	"name": "@singgah/map",
+	"private": true,
+	"version": "0.0.0",
+	"type": "module",
+	"exports": {
+		".": {
+			"svelte": "./src/index.ts",
+			"default": "./src/index.ts"
+		}
+	},
+	"scripts": {
+		"check": "svelte-check --tsconfig ./tsconfig.json",
+		"lint": "eslint .",
+		"test": "vitest run"
+	},
+	"peerDependencies": {
+		"svelte": "^5.56.1"
+	},
+	"dependencies": {
+		"maplibre-gl": "6.10.0"
+	},
+	"devDependencies": {
+		"@sveltejs/vite-plugin-svelte": "^7.1.2",
+		"@types/geojson": "^7946.0.16",
+		"svelte": "^5.56.1",
+		"svelte-check": "^4.6.0",
+		"typescript": "^6.0.3",
+		"vite": "^8.0.16",
+		"vitest": "^4.1.8"
+	}
+}

@@ -299,3 +299,44 @@ func TestListStopsWithin(t *testing.T) {
 		t.Errorf("distance_m = %v, want within (0, 5000]", rows[0].DistanceM)
 	}
 }
+
+func TestListStopsInBBox(t *testing.T) {
+	q, ctx := testQueries(t)
+	provider := upsertProvider(t, q, ctx, uniqueCode(t), "Provider D")
+
+	inside, err := q.UpsertStop(ctx, generated.UpsertStopParams{
+		ProviderID:       provider.ID,
+		ProviderEntityID: "inside",
+		Kind:             "station",
+		Name:             "Surabaya Gubeng",
+		Wgs84Point:       112.7521,
+		Wgs84Point_2:     -7.2653,
+		Metadata:         []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("UpsertStop inside: %v", err)
+	}
+	if _, err := q.UpsertStop(ctx, generated.UpsertStopParams{
+		ProviderID:       provider.ID,
+		ProviderEntityID: "outside",
+		Kind:             "station",
+		Name:             "Gambir",
+		Wgs84Point:       106.8307,
+		Wgs84Point_2:     -6.1767,
+		Metadata:         []byte("{}"),
+	}); err != nil {
+		t.Fatalf("UpsertStop outside: %v", err)
+	}
+
+	// Surabaya viewport — far from the Jakarta fixture/ingest rows.
+	rows, err := q.ListStopsInBBox(ctx, generated.ListStopsInBBoxParams{
+		Column1: 112.70, Column2: -7.30, Column3: 112.80, Column4: -7.20,
+		Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("ListStopsInBBox: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ID != inside.ID {
+		t.Fatalf("expected only the inside stop, got %d rows", len(rows))
+	}
+}

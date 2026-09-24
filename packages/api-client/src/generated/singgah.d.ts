@@ -70,10 +70,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Search stations and stops
-         * @description Case-insensitive search over display name, station code, and official name. An empty or missing `query` returns an empty list.
+         * List and search stations and stops
+         * @description Three modes: with `bbox` returns stops inside the viewport (minLon,minLat,maxLon,maxLat — the map's scoped fetch); with `query` alone, case-insensitive search over display name, station code, and official name; with neither, the unfiltered reference list. `bbox` and `query` combine as "search within the viewport".
          */
-        get: operations["searchStations"];
+        get: operations["listStations"];
         put?: never;
         post?: never;
         delete?: never;
@@ -338,10 +338,15 @@ export interface operations {
             };
         };
     };
-    searchStations: {
+    listStations: {
         parameters: {
             query?: {
                 query?: string;
+                /**
+                 * @description WGS84 viewport: minLon,minLat,maxLon,maxLat
+                 * @example 106.70,-6.30,106.95,-6.10
+                 */
+                bbox?: string;
                 limit?: number;
             };
             header?: never;
@@ -350,7 +355,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Matching stations, relevance-ordered by the query index */
+            /** @description Matching stations */
             200: {
                 headers: {
                     [name: string]: unknown;

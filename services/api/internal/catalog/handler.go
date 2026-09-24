@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -34,38 +35,104 @@ func (h *Handler) Routes() http.Handler {
 	return r
 }
 
-// GET /stations?query=&limit=
+// GET /stations?query=&bbox=&limit= — three modes: bbox viewport listing,
+// text search, or the unfiltered reference list. bbox + query combine as
+// "search within the viewport".
 func (h *Handler) listStations(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("query")
 	limit, ok := parseLimit(w, r, defaultLimit)
 	if !ok {
 		return
 	}
-	if q == "" {
-		response.JSON(w, http.StatusOK, map[string]any{"stations": []StationSummary{}})
-		return
-	}
-	rows, err := h.store.SearchStops(r.Context(), generated.SearchStopsParams{
-		Name:  "%" + q + "%",
-		Limit: limit,
-	})
-	if err != nil {
-		writeErr(w, r, err)
-		return
-	}
-	stations := make([]StationSummary, 0, len(rows))
-	for _, row := range rows {
-		stations = append(stations, StationSummary{
-			ID:           row.ID.String(),
-			Name:         row.Name,
-			Code:         textOrEmpty(row.Code),
-			Kind:         row.Kind,
-			Lat:          row.Lat,
-			Lon:          row.Lon,
-			ProviderCode: row.ProviderCode,
+
+	var stations []StationSummary
+	if bbox := r.URL.Query().Get("bbox"); bbox != "" {
+		env, ok := parseBBox(w, r, bbox)
+		if !ok {
+			return
+		}
+		rows, err := h.store.ListStopsInBBox(r.Context(), generated.ListStopsInBBoxParams{
+			Column1: env[0], Column2: env[1], Column3: env[2], Column4: env[3], Limit: limit,
 		})
+		if err != nil {
+			writeErr(w, r, err)
+			return
+		}
+		for _, row := range rows {
+			if q != "" && !matchesQuery(row.Name, textOrEmpty(row.Code), q) {
+				continue
+			}
+			stations = append(stations, stationSummary(row.ID, row.Name, row.Code, row.Kind, row.Lat, row.Lon, row.ProviderCode))
+		}
+	} else if q != "" {
+		rows, err := h.store.SearchStops(r.Context(), generated.SearchStopsParams{
+			Name:  "%" + q + "%",
+			Limit: limit,
+		})
+		if err != nil {
+			writeErr(w, r, err)
+			return
+		}
+		for _, row := range rows {
+			stations = append(stations, stationSummary(row.ID, row.Name, row.Code, row.Kind, row.Lat, row.Lon, row.ProviderCode))
+		}
+	} else {
+		rows, err := h.store.ListStops(r.Context(), limit)
+		if err != nil {
+			writeErr(w, r, err)
+			return
+		}
+		for _, row := range rows {
+			stations = append(stations, stationSummary(row.ID, row.Name, row.Code, row.Kind, row.Lat, row.Lon, row.ProviderCode))
+		}
+	}
+	if stations == nil {
+		stations = []StationSummary{}
 	}
 	response.JSON(w, http.StatusOK, map[string]any{"stations": stations})
+}
+
+func stationSummary(id pgtype.UUID, name string, code pgtype.Text, kind string, lat, lon float64, provider string) StationSummary {
+	return StationSummary{
+		ID:           id.String(),
+		Name:         name,
+		Code:         textOrEmpty(code),
+		Kind:         kind,
+		Lat:          lat,
+		Lon:          lon,
+		ProviderCode: provider,
+	}
+}
+
+// parseBBox reads "minLon,minLat,maxLon,maxLat" and enforces WGS84 ranges
+// before the envelope ever reaches PostGIS.
+func parseBBox(w http.ResponseWriter, r *http.Request, raw string) ([4]float64, bool) {
+	var env [4]float64
+	parts := strings.Split(raw, ",")
+	if len(parts) != 4 {
+		response.Error(w, r, http.StatusBadRequest, "BAD_REQUEST", "bbox must be minLon,minLat,maxLon,maxLat")
+		return env, false
+	}
+	for i, p := range parts {
+		v, err := strconv.ParseFloat(strings.TrimSpace(p), 64)
+		if err != nil {
+			response.Error(w, r, http.StatusBadRequest, "BAD_REQUEST", "bbox must be numeric")
+			return env, false
+		}
+		env[i] = v
+	}
+	if env[0] < -180 || env[0] > 180 || env[2] < -180 || env[2] > 180 ||
+		env[1] < -90 || env[1] > 90 || env[3] < -90 || env[3] > 90 ||
+		env[0] >= env[2] || env[1] >= env[3] {
+		response.Error(w, r, http.StatusBadRequest, "BAD_REQUEST", "bbox out of range or min >= max")
+		return env, false
+	}
+	return env, true
+}
+
+func matchesQuery(name, code, q string) bool {
+	return strings.Contains(strings.ToLower(name), strings.ToLower(q)) ||
+		strings.Contains(strings.ToLower(code), strings.ToLower(q))
 }
 
 // GET /stations/{id} — detail with serving lines and transfers.

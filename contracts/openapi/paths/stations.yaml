@@ -1,9 +1,12 @@
 get:
-  operationId: searchStations
-  summary: Search stations and stops
+  operationId: listStations
+  summary: List and search stations and stops
   description: >-
-    Case-insensitive search over display name, station code, and official
-    name. An empty or missing `query` returns an empty list.
+    Three modes: with `bbox` returns stops inside the viewport
+    (minLon,minLat,maxLon,maxLat — the map's scoped fetch); with `query`
+    alone, case-insensitive search over display name, station code, and
+    official name; with neither, the unfiltered reference list. `bbox` and
+    `query` combine as "search within the viewport".
   tags:
     - catalog
   parameters:
@@ -11,6 +14,13 @@ get:
       in: query
       schema:
         type: string
+    - name: bbox
+      in: query
+      schema:
+        type: string
+        pattern: '^-?\d+(\.\d+)?,-?\d+(\.\d+)?,-?\d+(\.\d+)?,-?\d+(\.\d+)?$'
+      description: 'WGS84 viewport: minLon,minLat,maxLon,maxLat'
+      example: '106.70,-6.30,106.95,-6.10'
     - name: limit
       in: query
       schema:
@@ -20,7 +30,7 @@ get:
         default: 20
   responses:
     '200':
-      description: Matching stations, relevance-ordered by the query index
+      description: Matching stations
       content:
         application/json:
           schema:

@@ -158,6 +158,39 @@ FROM stops s
 JOIN providers p ON p.id = s.provider_id
 WHERE s.id = $1;
 
+-- name: ListStops :many
+-- Unfiltered stop list — the catalog's reference set is small enough that a
+-- plain bounded list beats a fake "match everything" search.
+SELECT
+	s.id,
+	s.kind,
+	s.code,
+	s.name,
+	st_x(s.location::geometry) AS lon,
+	st_y(s.location::geometry) AS lat,
+	p.code AS provider_code
+FROM stops s
+JOIN providers p ON p.id = s.provider_id
+ORDER BY s.name
+LIMIT $1;
+
+-- name: ListStopsInBBox :many
+-- Stops inside a WGS84 envelope (minLon,minLat,maxLon,maxLat) — the map's
+-- viewport-scoped fetch. The geography GiST index serves the && predicate.
+SELECT
+	s.id,
+	s.kind,
+	s.code,
+	s.name,
+	st_x(s.location::geometry) AS lon,
+	st_y(s.location::geometry) AS lat,
+	p.code AS provider_code
+FROM stops s
+JOIN providers p ON p.id = s.provider_id
+WHERE s.location && st_makeenvelope($1::float8, $2::float8, $3::float8, $4::float8, 4326)::geography
+ORDER BY s.name
+LIMIT $5;
+
 -- name: SearchStops :many
 -- Text search across display name, station code, and the operator's official
 -- name (kept in metadata). The gin_trgm index accelerates the ILIKE patterns.

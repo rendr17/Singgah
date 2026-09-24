@@ -18,6 +18,10 @@ import (
 type fakeStore struct {
 	searchStops         []generated.SearchStopsRow
 	searchStopsErr      error
+	listStops           []generated.ListStopsRow
+	listStopsErr        error
+	stopsInBBox         []generated.ListStopsInBBoxRow
+	stopsInBBoxErr      error
 	getStop             generated.GetStopRow
 	getStopErr          error
 	linesServingStop    []generated.ListRoutesServingStopRow
@@ -29,11 +33,21 @@ type fakeStore struct {
 	stopsOnRoute        []generated.ListStopsOnRouteRow
 	gotSearchParams     generated.SearchStopsParams
 	gotListRoutesParams generated.ListRoutesParams
+	gotBBoxParams       generated.ListStopsInBBoxParams
+	gotListStopsLimit   int32
 }
 
 func (f *fakeStore) SearchStops(_ context.Context, arg generated.SearchStopsParams) ([]generated.SearchStopsRow, error) {
 	f.gotSearchParams = arg
 	return f.searchStops, f.searchStopsErr
+}
+func (f *fakeStore) ListStops(_ context.Context, limit int32) ([]generated.ListStopsRow, error) {
+	f.gotListStopsLimit = limit
+	return f.listStops, f.listStopsErr
+}
+func (f *fakeStore) ListStopsInBBox(_ context.Context, arg generated.ListStopsInBBoxParams) ([]generated.ListStopsInBBoxRow, error) {
+	f.gotBBoxParams = arg
+	return f.stopsInBBox, f.stopsInBBoxErr
 }
 func (f *fakeStore) GetStop(_ context.Context, _ pgtype.UUID) (generated.GetStopRow, error) {
 	return f.getStop, f.getStopErr
@@ -73,18 +87,78 @@ func decode(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 }
 
 func TestListStationsEmptyQuery(t *testing.T) {
-	store := &fakeStore{}
+	var id pgtype.UUID
+	if err := id.Scan("b7f4b2a0-1f3d-4e5a-9c6b-2a1d3e4f5a6b"); err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeStore{listStops: []generated.ListStopsRow{{
+		ID: id, Kind: "station", Name: "Sudirman", Lon: 106.823, Lat: -6.202, ProviderCode: "commute",
+	}}}
 	rec := serve(t, store, "/stations")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
-	body := decode(t, rec)
-	stations, ok := body["stations"].([]any)
-	if !ok || len(stations) != 0 {
-		t.Fatalf("expected empty stations array, got %v", body["stations"])
+	stations := decode(t, rec)["stations"].([]any)
+	if len(stations) != 1 || stations[0].(map[string]any)["name"] != "Sudirman" {
+		t.Fatalf("stations = %v", stations)
 	}
-	if store.gotSearchParams.Name != "" {
-		t.Fatal("store called despite empty query")
+	if store.gotListStopsLimit != defaultLimit || store.gotSearchParams.Name != "" {
+		t.Fatal("expected unfiltered ListStops with default limit")
+	}
+}
+
+func TestListStationsBBox(t *testing.T) {
+	var id pgtype.UUID
+	if err := id.Scan("b7f4b2a0-1f3d-4e5a-9c6b-2a1d3e4f5a6b"); err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeStore{stopsInBBox: []generated.ListStopsInBBoxRow{{
+		ID: id, Kind: "station", Name: "Sudirman", Lon: 106.823, Lat: -6.202, ProviderCode: "commute",
+	}}}
+	rec := serve(t, store, "/stations?bbox=106.7,-6.3,106.9,-6.1")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	p := store.gotBBoxParams
+	if p.Column1 != 106.7 || p.Column2 != -6.3 || p.Column3 != 106.9 || p.Column4 != -6.1 {
+		t.Fatalf("bbox params = %+v", p)
+	}
+	if n := len(decode(t, rec)["stations"].([]any)); n != 1 {
+		t.Fatalf("stations len = %d", n)
+	}
+}
+
+func TestListStationsBBoxQueryPostFilter(t *testing.T) {
+	var id pgtype.UUID
+	if err := id.Scan("b7f4b2a0-1f3d-4e5a-9c6b-2a1d3e4f5a6b"); err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeStore{stopsInBBox: []generated.ListStopsInBBoxRow{
+		{ID: id, Kind: "station", Name: "Sudirman", ProviderCode: "commute"},
+		{ID: id, Kind: "station", Name: "Pasar Minggu", ProviderCode: "commute"},
+	}}
+	rec := serve(t, store, "/stations?bbox=106.7,-6.3,106.9,-6.1&query=sudirman")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	stations := decode(t, rec)["stations"].([]any)
+	if len(stations) != 1 || stations[0].(map[string]any)["name"] != "Sudirman" {
+		t.Fatalf("stations = %v", stations)
+	}
+}
+
+func TestListStationsBadBBox(t *testing.T) {
+	for _, bbox := range []string{
+		"1,2,3",                 // wrong arity
+		"a,b,c,d",               // non-numeric
+		"200,-6,106,-5",         // lon out of range
+		"106.9,-6.3,106.7,-6.1", // minLon > maxLon
+		"106.7,-95,106.9,-6.1",  // lat out of range
+	} {
+		rec := serve(t, &fakeStore{}, "/stations?bbox="+bbox)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("bbox %q: status = %d, want 400", bbox, rec.Code)
+		}
 	}
 }
 

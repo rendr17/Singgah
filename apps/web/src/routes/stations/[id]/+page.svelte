@@ -1,7 +1,12 @@
 <script lang="ts">
 	import type { PageProps } from './$types';
 	import { resolve } from '$app/paths';
+	import { browser } from '$app/environment';
+	import { env } from '$env/dynamic/public';
 	import { SectionHeading } from '@singgah/ui';
+	import { TransitMap, stationsToGeoJSON } from '@singgah/map';
+
+	const STYLE_URL = env.PUBLIC_MAP_STYLE_URL ?? 'https://demotiles.maplibre.org/style.json';
 
 	let { data }: PageProps = $props();
 	const station = $derived(data.station);
@@ -23,6 +28,19 @@
 		<span>{station.kind}</span> ·
 		<span>{station.lat.toFixed(5)}, {station.lon.toFixed(5)}</span>
 	</p>
+
+	{#if browser}
+		<div class="mini-map">
+			<TransitMap
+				styleUrl={STYLE_URL}
+				data={stationsToGeoJSON([station])}
+				center={[station.lon, station.lat]}
+				zoom={14}
+				interactive={false}
+				fitToData
+			/>
+		</div>
+	{/if}
 
 	<section>
 		<SectionHeading>Rute yang melayani</SectionHeading>
@@ -93,6 +111,13 @@
 	}
 	a {
 		color: var(--sg-text);
+	}
+	.mini-map {
+		height: 14rem;
+		max-width: 32rem;
+		border: 1px solid var(--sg-border);
+		border-radius: var(--sg-radius-card, 12px);
+		overflow: hidden;
 	}
 	.dot {
 		display: inline-block;

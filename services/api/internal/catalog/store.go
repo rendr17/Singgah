@@ -14,6 +14,8 @@ import (
 // *generated.Queries, faked in unit tests.
 type Store interface {
 	SearchStops(ctx context.Context, arg generated.SearchStopsParams) ([]generated.SearchStopsRow, error)
+	ListStops(ctx context.Context, limit int32) ([]generated.ListStopsRow, error)
+	ListStopsInBBox(ctx context.Context, arg generated.ListStopsInBBoxParams) ([]generated.ListStopsInBBoxRow, error)
 	GetStop(ctx context.Context, id pgtype.UUID) (generated.GetStopRow, error)
 	ListRoutesServingStop(ctx context.Context, id pgtype.UUID) ([]generated.ListRoutesServingStopRow, error)
 	ListTransfersFromStop(ctx context.Context, fromStopID pgtype.UUID) ([]generated.ListTransfersFromStopRow, error)
