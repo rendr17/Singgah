@@ -7,7 +7,15 @@
 		error?: string;
 	}
 
-	let { label, hint, error, id, class: className, ...rest }: Props = $props();
+	let {
+		label,
+		hint,
+		error,
+		id,
+		class: className,
+		value = $bindable(),
+		...rest
+	}: Props = $props();
 
 	const uid = $props.id();
 	const fieldId = $derived(id ?? `sg-field-${uid}`);
@@ -23,6 +31,7 @@
 		class="sg-field__input"
 		aria-invalid={error ? true : undefined}
 		aria-describedby={describedBy}
+		bind:value
 		{...rest}
 	/>
 	{#if error}
