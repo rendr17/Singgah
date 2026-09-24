@@ -1,0 +1,78 @@
+package commute
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"time"
+)
+
+// DefaultBaseURL is the public Commute Data Platform API.
+const DefaultBaseURL = "https://api.commute.shiorilabs.id"
+
+// Client fetches provider payloads. It is deliberately thin — normalization
+// lives in normalize.go and is exercised against fixtures, not the network.
+type Client struct {
+	baseURL string
+	http    *http.Client
+}
+
+func NewClient(baseURL string) *Client {
+	return &Client{
+		baseURL: baseURL,
+		http:    &http.Client{Timeout: 30 * time.Second},
+	}
+}
+
+func (c *Client) get(ctx context.Context, path string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return fmt.Errorf("commute: build request: %w", err)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("commute: %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+
+	dec := json.NewDecoder(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		var env envelope[json.RawMessage]
+		if err := dec.Decode(&env); err == nil && env.Error != "" {
+			return fmt.Errorf("commute: %s: %s", path, env.Error)
+		}
+		return fmt.Errorf("commute: %s: HTTP %d", path, resp.StatusCode)
+	}
+	if err := dec.Decode(out); err != nil {
+		return fmt.Errorf("commute: %s: decode: %w", path, err)
+	}
+	return nil
+}
+
+func (c *Client) Operators(ctx context.Context) ([]Operator, error) {
+	var env envelope[[]Operator]
+	if err := c.get(ctx, "/operators", &env); err != nil {
+		return nil, err
+	}
+	return env.Data, nil
+}
+
+func (c *Client) Stations(ctx context.Context) ([]Station, error) {
+	var env envelope[[]Station]
+	if err := c.get(ctx, "/stations", &env); err != nil {
+		return nil, err
+	}
+	return env.Data, nil
+}
+
+// Transfers lists outgoing transfers from one station — the provider only
+// exposes this per station, so ingest calls it once per known station.
+func (c *Client) Transfers(ctx context.Context, operatorCode, stationCode string) ([]Transfer, error) {
+	var env envelope[[]Transfer]
+	path := fmt.Sprintf("/stations/%s/%s/transfers", operatorCode, stationCode)
+	if err := c.get(ctx, path, &env); err != nil {
+		return nil, err
+	}
+	return env.Data, nil
+}

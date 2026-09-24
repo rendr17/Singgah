@@ -128,6 +128,18 @@ func (q *Queries) ListStopsWithin(ctx context.Context, arg ListStopsWithinParams
 	return items, nil
 }
 
+const touchProviderLastSuccess = `-- name: TouchProviderLastSuccess :exec
+UPDATE providers
+SET last_success_at = now()
+WHERE code = $1
+`
+
+// Stamps a completed ingest run on the provider registry row.
+func (q *Queries) TouchProviderLastSuccess(ctx context.Context, code string) error {
+	_, err := q.db.Exec(ctx, touchProviderLastSuccess, code)
+	return err
+}
+
 const upsertAgency = `-- name: UpsertAgency :one
 INSERT INTO agencies (
 	provider_id,

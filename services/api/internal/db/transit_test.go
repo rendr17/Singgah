@@ -253,6 +253,8 @@ func TestIntegrityConstraints(t *testing.T) {
 }
 
 // The spatial index path: radius query returns real meter distances.
+// The anchor is Surabaya — far from the Jakarta fixture data that the ingest
+// test commits to the shared test database.
 func TestListStopsWithin(t *testing.T) {
 	q, ctx := testQueries(t)
 	provider := upsertProvider(t, q, ctx, uniqueCode(t), "Provider C")
@@ -261,9 +263,9 @@ func TestListStopsWithin(t *testing.T) {
 		ProviderID:       provider.ID,
 		ProviderEntityID: "near",
 		Kind:             "station",
-		Name:             "Gambir",
-		Wgs84Point:       106.8307,
-		Wgs84Point_2:     -6.1767,
+		Name:             "Surabaya Gubeng",
+		Wgs84Point:       112.7521,
+		Wgs84Point_2:     -7.2653,
 		Metadata:         []byte("{}"),
 	})
 	if err != nil {
@@ -273,17 +275,17 @@ func TestListStopsWithin(t *testing.T) {
 		ProviderID:       provider.ID,
 		ProviderEntityID: "far",
 		Kind:             "station",
-		Name:             "Surabaya Gubeng",
-		Wgs84Point:       112.7521,
-		Wgs84Point_2:     -7.2653,
+		Name:             "Gambir",
+		Wgs84Point:       106.8307,
+		Wgs84Point_2:     -6.1767,
 		Metadata:         []byte("{}"),
 	}); err != nil {
 		t.Fatalf("UpsertStop far: %v", err)
 	}
 
 	rows, err := q.ListStopsWithin(ctx, generated.ListStopsWithinParams{
-		Wgs84Point:   106.8300,
-		Wgs84Point_2: -6.1760,
+		Wgs84Point:   112.7520,
+		Wgs84Point_2: -7.2650,
 		StDwithin:    5000,
 		Limit:        10,
 	})

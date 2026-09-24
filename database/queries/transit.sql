@@ -134,6 +134,12 @@ ON CONFLICT (from_stop_id, to_stop_id) DO UPDATE SET
 	fetched_at = excluded.fetched_at
 RETURNING *;
 
+-- name: TouchProviderLastSuccess :exec
+-- Stamps a completed ingest run on the provider registry row.
+UPDATE providers
+SET last_success_at = now()
+WHERE code = $1;
+
 -- name: GetStop :one
 -- location is returned as lon/lat floats — callers never handle raw geography.
 SELECT

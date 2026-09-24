@@ -1,0 +1,43 @@
+{
+	"status": 200,
+	"data": [
+		{
+			"id": "T-KCI-SUD-MRTJ-DKA",
+			"dataType": "INTERNAL",
+			"toStation": {
+				"id": "MRTJ-DKA",
+				"name": "Dukuh Atas BNI",
+				"officialName": "Stasiun Dukuh Atas",
+				"code": "DKA",
+				"operator": "MRTJ",
+				"lines": ["MRTJ:M"]
+			},
+			"distanceM": 90,
+			"notes": "Keluar lewat pintu B, lalu jalan lewat Terowongan Kendal dan belok kanan"
+		},
+		{
+			"id": "T-KCI-SUD-LRTJBDB-DKA",
+			"dataType": "INTERNAL",
+			"toStation": {
+				"id": "LRTJBDB-DKA",
+				"name": "Dukuh Atas Bank Syariah Indonesia",
+				"officialName": "Dukuh Atas",
+				"code": "DKA",
+				"operator": "LRTJBDB",
+				"lines": ["LRTJBDB:BK", "LRTJBDB:CB"]
+			},
+			"distanceM": 310,
+			"notes": null
+		},
+		{
+			"id": "T-KCI-SUD-EXT-1",
+			"dataType": "EXTERNAL",
+			"toStation": {
+				"name": "Halte Dukuh Atas",
+				"operatorName": "TransJakarta"
+			},
+			"distanceM": 80,
+			"notes": null
+		}
+	]
+}

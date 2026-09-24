@@ -1,0 +1,33 @@
+{
+	"status": 200,
+	"data": [
+		{
+			"code": "KCI",
+			"name": "Commuter Line",
+			"url": "https://www.krl.co.id",
+			"timezone": "Asia/Jakarta",
+			"lang": "id",
+			"mode": "RAIL",
+			"lines": [
+				{ "name": "Lin Cikarang", "lineCode": "C", "colorCode": "#0083D0", "mode": "RAIL" },
+				{ "name": "Lin Tanjung Priuk", "lineCode": "TP", "colorCode": "#E8002D" }
+			]
+		},
+		{
+			"code": "MRTJ",
+			"name": "MRT Jakarta",
+			"url": "https://www.jakartamrt.co.id",
+			"timezone": "Asia/Jakarta",
+			"lang": "id",
+			"mode": "SUBWAY",
+			"lines": [
+				{
+					"name": "Lin Lebak Bulus–Bundaran HI",
+					"lineCode": "M",
+					"colorCode": "#7B1F3D",
+					"mode": "SUBWAY"
+				}
+			]
+		}
+	]
+}
