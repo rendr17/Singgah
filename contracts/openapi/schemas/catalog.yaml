@@ -1,0 +1,171 @@
+SourceMeta:
+  type: object
+  description: Provenance of the upstream provider row.
+  required:
+    - provider
+  additionalProperties: false
+  properties:
+    provider:
+      type: string
+      description: Canonical provider code, e.g. commute
+    fetchedAt:
+      type: string
+      format: date-time
+      description: When the provider row was ingested
+    sourceUpdatedAt:
+      type: string
+      format: date-time
+      description: Upstream update timestamp reported by the provider
+
+StationSummary:
+  type: object
+  required:
+    - id
+    - name
+    - kind
+    - lat
+    - lon
+    - providerCode
+  additionalProperties: false
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Canonical Singgah UUID
+    name:
+      type: string
+    code:
+      type: string
+      description: Public station code, e.g. SUD
+    kind:
+      type: string
+      enum:
+        - station
+        - stop
+        - platform
+        - entrance
+    lat:
+      type: number
+    lon:
+      type: number
+    providerCode:
+      type: string
+
+RouteRef:
+  type: object
+  required:
+    - id
+    - mode
+  additionalProperties: false
+  properties:
+    id:
+      type: string
+      format: uuid
+    shortName:
+      type: string
+    longName:
+      type: string
+    mode:
+      type: string
+      enum:
+        - rail
+        - subway
+        - tram
+        - bus
+        - ferry
+        - other
+    color:
+      type: string
+      description: Hex color without leading '#'
+    agencyCode:
+      type: string
+    agencyName:
+      type: string
+
+RouteSummary:
+  allOf:
+    - $ref: '#/RouteRef'
+    - type: object
+      required:
+        - providerCode
+      additionalProperties: false
+      properties:
+        providerCode:
+          type: string
+
+StopRef:
+  type: object
+  description: Lightweight stop reference embedded in other resources.
+  required:
+    - id
+    - name
+    - lat
+    - lon
+  additionalProperties: false
+  properties:
+    id:
+      type: string
+      format: uuid
+    name:
+      type: string
+    code:
+      type: string
+    lat:
+      type: number
+    lon:
+      type: number
+
+Transfer:
+  type: object
+  required:
+    - toStop
+  additionalProperties: false
+  properties:
+    toStop:
+      $ref: '#/StopRef'
+    walkDistanceM:
+      type: integer
+    notes:
+      type: string
+
+StationDetail:
+  allOf:
+    - $ref: '#/StationSummary'
+    - type: object
+      required:
+        - lines
+        - transfers
+        - source
+      additionalProperties: false
+      properties:
+        officialName:
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: '#/RouteRef'
+        transfers:
+          type: array
+          items:
+            $ref: '#/Transfer'
+        source:
+          $ref: '#/SourceMeta'
+
+RouteDetail:
+  allOf:
+    - $ref: '#/RouteSummary'
+    - type: object
+      required:
+        - stops
+        - source
+      additionalProperties: false
+      properties:
+        stops:
+          type: array
+          description: >-
+            Served stops sorted by name — authoritative stop ordering arrives
+            with line/trip ingest, so this list is not a sequence diagram yet.
+          items:
+            $ref: '#/StopRef'
+        source:
+          $ref: '#/SourceMeta'

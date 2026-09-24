@@ -1,0 +1,41 @@
+get:
+  operationId: listRoutes
+  summary: List transit routes
+  description: >-
+    Routes across all agencies; `query` filters short/long name
+    case-insensitively. Without a query returns up to `limit` routes.
+  tags:
+    - catalog
+  parameters:
+    - name: query
+      in: query
+      schema:
+        type: string
+    - name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 200
+  responses:
+    '200':
+      description: Matching routes
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - routes
+            additionalProperties: false
+            properties:
+              routes:
+                type: array
+                items:
+                  $ref: '../schemas/catalog.yaml#/RouteSummary'
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

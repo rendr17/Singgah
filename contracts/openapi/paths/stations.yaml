@@ -1,0 +1,41 @@
+get:
+  operationId: searchStations
+  summary: Search stations and stops
+  description: >-
+    Case-insensitive search over display name, station code, and official
+    name. An empty or missing `query` returns an empty list.
+  tags:
+    - catalog
+  parameters:
+    - name: query
+      in: query
+      schema:
+        type: string
+    - name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 20
+  responses:
+    '200':
+      description: Matching stations, relevance-ordered by the query index
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - stations
+            additionalProperties: false
+            properties:
+              stations:
+                type: array
+                items:
+                  $ref: '../schemas/catalog.yaml#/StationSummary'
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

@@ -1,0 +1,34 @@
+get:
+  operationId: getStation
+  summary: Station detail
+  description: >-
+    One canonical station/stop with the routes serving it and its internal
+    transfers, plus ingest provenance.
+  tags:
+    - catalog
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    '200':
+      description: Station detail
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - station
+            additionalProperties: false
+            properties:
+              station:
+                $ref: '../schemas/catalog.yaml#/StationDetail'
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	generated "singgah/services/api/db/generated"
+	"singgah/services/api/internal/catalog"
 	"singgah/services/api/internal/config"
 	"singgah/services/api/internal/db"
 	httpapi "singgah/services/api/internal/http"
@@ -41,6 +43,7 @@ func main() {
 		}
 		defer pool.Close()
 		deps.DB = pool
+		deps.Catalog = catalog.NewHandler(generated.New(pool))
 		logger.Info("database connected")
 	} else {
 		logger.Warn("DATABASE_URL unset — database endpoints report unavailable")

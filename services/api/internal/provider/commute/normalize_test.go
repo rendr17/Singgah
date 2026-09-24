@@ -91,7 +91,7 @@ func TestNormalizeOperatorAndLine(t *testing.T) {
 
 	var agencyID pgtype.UUID
 	line := NormalizeLine(kci, kci.Lines[0], agencyID, fetchedAt)
-	if line.ProviderEntityID != "KCI:C" || line.Mode != "rail" || line.Color.String != "#0083D0" {
+	if line.ProviderEntityID != "KCI:C" || line.Mode != "rail" || line.Color.String != "0083D0" {
 		t.Errorf("route params: %+v", line)
 	}
 

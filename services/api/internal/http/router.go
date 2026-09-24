@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"singgah/services/api/internal/catalog"
 	"singgah/services/api/internal/health"
 	"singgah/services/api/internal/http/middleware"
 	"singgah/services/api/internal/http/response"
@@ -19,6 +20,8 @@ type Deps struct {
 	Version string
 	// DB may be nil when DATABASE_URL is unset; /ready reports that honestly.
 	DB health.Pinger
+	// Catalog is nil without a database; its routes then report unavailable.
+	Catalog *catalog.Handler
 }
 
 func NewRouter(deps Deps) http.Handler {
@@ -31,6 +34,10 @@ func NewRouter(deps Deps) http.Handler {
 	r.Get("/health", health.Handler)
 	r.Get("/ready", health.ReadyHandler(deps.DB))
 	r.Get("/version", health.VersionHandler(deps.Version))
+
+	if deps.Catalog != nil {
+		r.Mount("/api/v1", deps.Catalog.Routes())
+	}
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, r, http.StatusNotFound, "NOT_FOUND", "Resource not found")

@@ -11,20 +11,83 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getRoute = `-- name: GetRoute :one
+SELECT
+	r.id,
+	r.agency_id,
+	r.provider_id,
+	r.provider_entity_id,
+	r.short_name,
+	r.long_name,
+	r.mode,
+	r.color,
+	r.text_color,
+	r.fetched_at,
+	r.source_updated_at,
+	a.code AS agency_code,
+	a.name AS agency_name,
+	p.code AS provider_code
+FROM routes r
+LEFT JOIN agencies a ON a.id = r.agency_id
+JOIN providers p ON p.id = r.provider_id
+WHERE r.id = $1
+`
+
+type GetRouteRow struct {
+	ID               pgtype.UUID        `json:"id"`
+	AgencyID         pgtype.UUID        `json:"agency_id"`
+	ProviderID       pgtype.UUID        `json:"provider_id"`
+	ProviderEntityID string             `json:"provider_entity_id"`
+	ShortName        pgtype.Text        `json:"short_name"`
+	LongName         pgtype.Text        `json:"long_name"`
+	Mode             string             `json:"mode"`
+	Color            pgtype.Text        `json:"color"`
+	TextColor        pgtype.Text        `json:"text_color"`
+	FetchedAt        pgtype.Timestamptz `json:"fetched_at"`
+	SourceUpdatedAt  pgtype.Timestamptz `json:"source_updated_at"`
+	AgencyCode       pgtype.Text        `json:"agency_code"`
+	AgencyName       pgtype.Text        `json:"agency_name"`
+	ProviderCode     string             `json:"provider_code"`
+}
+
+func (q *Queries) GetRoute(ctx context.Context, id pgtype.UUID) (GetRouteRow, error) {
+	row := q.db.QueryRow(ctx, getRoute, id)
+	var i GetRouteRow
+	err := row.Scan(
+		&i.ID,
+		&i.AgencyID,
+		&i.ProviderID,
+		&i.ProviderEntityID,
+		&i.ShortName,
+		&i.LongName,
+		&i.Mode,
+		&i.Color,
+		&i.TextColor,
+		&i.FetchedAt,
+		&i.SourceUpdatedAt,
+		&i.AgencyCode,
+		&i.AgencyName,
+		&i.ProviderCode,
+	)
+	return i, err
+}
+
 const getStop = `-- name: GetStop :one
 SELECT
-	id,
-	parent_station_id,
-	kind,
-	code,
-	name,
-	st_x(location::geometry) AS lon,
-	st_y(location::geometry) AS lat,
-	metadata,
-	fetched_at,
-	source_updated_at
-FROM stops
-WHERE id = $1
+	s.id,
+	s.parent_station_id,
+	s.kind,
+	s.code,
+	s.name,
+	st_x(s.location::geometry) AS lon,
+	st_y(s.location::geometry) AS lat,
+	s.metadata,
+	s.fetched_at,
+	s.source_updated_at,
+	p.code AS provider_code
+FROM stops s
+JOIN providers p ON p.id = s.provider_id
+WHERE s.id = $1
 `
 
 type GetStopRow struct {
@@ -38,6 +101,7 @@ type GetStopRow struct {
 	Metadata        []byte             `json:"metadata"`
 	FetchedAt       pgtype.Timestamptz `json:"fetched_at"`
 	SourceUpdatedAt pgtype.Timestamptz `json:"source_updated_at"`
+	ProviderCode    string             `json:"provider_code"`
 }
 
 // location is returned as lon/lat floats — callers never handle raw geography.
@@ -55,8 +119,193 @@ func (q *Queries) GetStop(ctx context.Context, id pgtype.UUID) (GetStopRow, erro
 		&i.Metadata,
 		&i.FetchedAt,
 		&i.SourceUpdatedAt,
+		&i.ProviderCode,
 	)
 	return i, err
+}
+
+const listRoutes = `-- name: ListRoutes :many
+SELECT
+	r.id,
+	r.short_name,
+	r.long_name,
+	r.mode,
+	r.color,
+	a.code AS agency_code,
+	a.name AS agency_name,
+	p.code AS provider_code
+FROM routes r
+LEFT JOIN agencies a ON a.id = r.agency_id
+JOIN providers p ON p.id = r.provider_id
+WHERE $1::text = '' OR r.short_name ILIKE '%' || $1 || '%' OR r.long_name ILIKE '%' || $1 || '%'
+ORDER BY r.short_name NULLS LAST, r.long_name
+LIMIT $2
+`
+
+type ListRoutesParams struct {
+	Column1 string `json:"column_1"`
+	Limit   int32  `json:"limit"`
+}
+
+type ListRoutesRow struct {
+	ID           pgtype.UUID `json:"id"`
+	ShortName    pgtype.Text `json:"short_name"`
+	LongName     pgtype.Text `json:"long_name"`
+	Mode         string      `json:"mode"`
+	Color        pgtype.Text `json:"color"`
+	AgencyCode   pgtype.Text `json:"agency_code"`
+	AgencyName   pgtype.Text `json:"agency_name"`
+	ProviderCode string      `json:"provider_code"`
+}
+
+// Optional name/code filter; returns every route when $1 is empty.
+func (q *Queries) ListRoutes(ctx context.Context, arg ListRoutesParams) ([]ListRoutesRow, error) {
+	rows, err := q.db.Query(ctx, listRoutes, arg.Column1, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRoutesRow
+	for rows.Next() {
+		var i ListRoutesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ShortName,
+			&i.LongName,
+			&i.Mode,
+			&i.Color,
+			&i.AgencyCode,
+			&i.AgencyName,
+			&i.ProviderCode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRoutesServingStop = `-- name: ListRoutesServingStop :many
+SELECT
+	r.id,
+	r.short_name,
+	r.long_name,
+	r.mode,
+	r.color,
+	a.code AS agency_code,
+	a.name AS agency_name
+FROM stops s
+JOIN routes r ON r.provider_id = s.provider_id
+JOIN agencies a ON a.id = r.agency_id
+WHERE
+	s.id = $1
+	AND EXISTS (
+		SELECT 1
+		FROM jsonb_array_elements_text(s.metadata->'lines') AS line_key
+		WHERE line_key = r.provider_entity_id
+	)
+ORDER BY r.short_name
+`
+
+type ListRoutesServingStopRow struct {
+	ID         pgtype.UUID `json:"id"`
+	ShortName  pgtype.Text `json:"short_name"`
+	LongName   pgtype.Text `json:"long_name"`
+	Mode       string      `json:"mode"`
+	Color      pgtype.Text `json:"color"`
+	AgencyCode pgtype.Text `json:"agency_code"`
+	AgencyName string      `json:"agency_name"`
+}
+
+// Lines serving a stop: the stop's provider line keys (metadata.lines) match
+// routes.provider_entity_id as ingested ("{operator}:{lineCode}").
+func (q *Queries) ListRoutesServingStop(ctx context.Context, id pgtype.UUID) ([]ListRoutesServingStopRow, error) {
+	rows, err := q.db.Query(ctx, listRoutesServingStop, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRoutesServingStopRow
+	for rows.Next() {
+		var i ListRoutesServingStopRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ShortName,
+			&i.LongName,
+			&i.Mode,
+			&i.Color,
+			&i.AgencyCode,
+			&i.AgencyName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStopsOnRoute = `-- name: ListStopsOnRoute :many
+SELECT
+	s.id,
+	s.kind,
+	s.code,
+	s.name,
+	st_x(s.location::geometry) AS lon,
+	st_y(s.location::geometry) AS lat
+FROM routes r
+JOIN stops s ON s.provider_id = r.provider_id
+WHERE
+	r.id = $1
+	AND EXISTS (
+		SELECT 1
+		FROM jsonb_array_elements_text(s.metadata->'lines') AS line_key
+		WHERE line_key = r.provider_entity_id
+	)
+ORDER BY s.name
+`
+
+type ListStopsOnRouteRow struct {
+	ID   pgtype.UUID `json:"id"`
+	Kind string      `json:"kind"`
+	Code pgtype.Text `json:"code"`
+	Name string      `json:"name"`
+	Lon  float64     `json:"lon"`
+	Lat  float64     `json:"lat"`
+}
+
+// Stops whose provider line keys include this route's entity id. Ordering is
+// unknown until line-detail/trip ingest lands — sorted by name for now.
+func (q *Queries) ListStopsOnRoute(ctx context.Context, id pgtype.UUID) ([]ListStopsOnRouteRow, error) {
+	rows, err := q.db.Query(ctx, listStopsOnRoute, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListStopsOnRouteRow
+	for rows.Next() {
+		var i ListStopsOnRouteRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.Code,
+			&i.Name,
+			&i.Lon,
+			&i.Lat,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listStopsWithin = `-- name: ListStopsWithin :many
@@ -117,6 +366,127 @@ func (q *Queries) ListStopsWithin(ctx context.Context, arg ListStopsWithinParams
 			&i.Lon,
 			&i.Lat,
 			&i.DistanceM,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTransfersFromStop = `-- name: ListTransfersFromStop :many
+SELECT
+	t.id,
+	t.to_stop_id,
+	s2.name AS to_stop_name,
+	s2.code AS to_stop_code,
+	st_x(s2.location::geometry) AS to_lon,
+	st_y(s2.location::geometry) AS to_lat,
+	t.walk_distance_m,
+	(t.accessibility->>'notes')::text AS notes
+FROM transfers t
+JOIN stops s2 ON s2.id = t.to_stop_id
+WHERE t.from_stop_id = $1
+ORDER BY s2.name
+`
+
+type ListTransfersFromStopRow struct {
+	ID            pgtype.UUID `json:"id"`
+	ToStopID      pgtype.UUID `json:"to_stop_id"`
+	ToStopName    string      `json:"to_stop_name"`
+	ToStopCode    pgtype.Text `json:"to_stop_code"`
+	ToLon         float64     `json:"to_lon"`
+	ToLat         float64     `json:"to_lat"`
+	WalkDistanceM pgtype.Int4 `json:"walk_distance_m"`
+	Notes         string      `json:"notes"`
+}
+
+func (q *Queries) ListTransfersFromStop(ctx context.Context, fromStopID pgtype.UUID) ([]ListTransfersFromStopRow, error) {
+	rows, err := q.db.Query(ctx, listTransfersFromStop, fromStopID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTransfersFromStopRow
+	for rows.Next() {
+		var i ListTransfersFromStopRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ToStopID,
+			&i.ToStopName,
+			&i.ToStopCode,
+			&i.ToLon,
+			&i.ToLat,
+			&i.WalkDistanceM,
+			&i.Notes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const searchStops = `-- name: SearchStops :many
+SELECT
+	s.id,
+	s.kind,
+	s.code,
+	s.name,
+	st_x(s.location::geometry) AS lon,
+	st_y(s.location::geometry) AS lat,
+	p.code AS provider_code
+FROM stops s
+JOIN providers p ON p.id = s.provider_id
+WHERE
+	s.name ILIKE $1
+	OR s.code ILIKE $1
+	OR s.metadata->>'official_name' ILIKE $1
+ORDER BY (s.metadata->>'score')::float8 DESC NULLS LAST, s.name
+LIMIT $2
+`
+
+type SearchStopsParams struct {
+	Name  string `json:"name"`
+	Limit int32  `json:"limit"`
+}
+
+type SearchStopsRow struct {
+	ID           pgtype.UUID `json:"id"`
+	Kind         string      `json:"kind"`
+	Code         pgtype.Text `json:"code"`
+	Name         string      `json:"name"`
+	Lon          float64     `json:"lon"`
+	Lat          float64     `json:"lat"`
+	ProviderCode string      `json:"provider_code"`
+}
+
+// Text search across display name, station code, and the operator's official
+// name (kept in metadata). The gin_trgm index accelerates the ILIKE patterns.
+// Rows are ranked by the provider's footfall score when present.
+func (q *Queries) SearchStops(ctx context.Context, arg SearchStopsParams) ([]SearchStopsRow, error) {
+	rows, err := q.db.Query(ctx, searchStops, arg.Name, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchStopsRow
+	for rows.Next() {
+		var i SearchStopsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.Code,
+			&i.Name,
+			&i.Lon,
+			&i.Lat,
+			&i.ProviderCode,
 		); err != nil {
 			return nil, err
 		}

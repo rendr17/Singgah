@@ -87,8 +87,9 @@ func NormalizeLine(op Operator, line Line, agencyUUID pgtype.UUID, fetchedAt pgt
 		ShortName:        pgtype.Text{String: line.LineCode, Valid: true},
 		LongName:         pgtype.Text{String: line.Name, Valid: true},
 		Mode:             NormalizeMode(mode),
-		Color:            pgtype.Text{String: line.ColorCode, Valid: line.ColorCode != ""},
-		FetchedAt:        fetchedAt,
+		// Provider sends "#RRGGBB"; the canonical schema stores the bare hex.
+		Color:     pgtype.Text{String: strings.TrimPrefix(line.ColorCode, "#"), Valid: line.ColorCode != ""},
+		FetchedAt: fetchedAt,
 	}
 }
 

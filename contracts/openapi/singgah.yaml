@@ -15,6 +15,14 @@ paths:
     $ref: './paths/ready.yaml'
   /version:
     $ref: './paths/version.yaml'
+  /api/v1/stations:
+    $ref: './paths/stations.yaml'
+  /api/v1/stations/{id}:
+    $ref: './paths/station-detail.yaml'
+  /api/v1/routes:
+    $ref: './paths/routes.yaml'
+  /api/v1/routes/{id}:
+    $ref: './paths/route-detail.yaml'
 components:
   schemas:
     ErrorEnvelope:
@@ -22,3 +30,5 @@ components:
 tags:
   - name: meta
     description: Process/infrastructure endpoints
+  - name: catalog
+    description: Canonical transit network — stations, routes, transfers
