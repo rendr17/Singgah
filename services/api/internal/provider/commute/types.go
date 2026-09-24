@@ -109,6 +109,23 @@ type SegmentStation struct {
 	OtherLines    []string `json:"otherLines"` // "{operator}:{lineCode}"
 }
 
+// TimetableEntry is one scheduled departure from /stations/{op}/{code}/
+// timetable — times are Asia/Jakarta wall clock. id/dayMask/updatedAt are
+// upstream bookkeeping outside the documented Schedule schema: carried raw,
+// but no logic may depend on them until the provider documents semantics.
+type TimetableEntry struct {
+	ID                 string  `json:"id"`
+	StationID          string  `json:"stationId"`
+	TripNumber         *string `json:"tripNumber"`         // null when the operator publishes none
+	EstimatedDeparture string  `json:"estimatedDeparture"` // HH:MM:SS
+	EstimatedArrival   string  `json:"estimatedArrival"`
+	BoundFor           string  `json:"boundFor"`
+	LineCode           string  `json:"lineCode"`
+	CreatedAt          string  `json:"createdAt"` // "YYYY-MM-DD HH:MM:SS" upstream local
+	UpdatedAt          string  `json:"updatedAt"`
+	DayMask            int     `json:"dayMask"` // undocumented — observed constant per operator
+}
+
 // FarePlan is the provider's /fares/{from}/{to} response — a computed
 // station-to-station itinerary with legs, fare segments, and totals. Leg types
 // observed: TRANSFER (walk between stops) and RIDE (line ride with an ordered

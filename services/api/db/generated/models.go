@@ -50,6 +50,7 @@ type Route struct {
 	TextColor        pgtype.Text        `json:"text_color"`
 	FetchedAt        pgtype.Timestamptz `json:"fetched_at"`
 	SourceUpdatedAt  pgtype.Timestamptz `json:"source_updated_at"`
+	RemovedAt        pgtype.Timestamptz `json:"removed_at"`
 }
 
 type RouteStop struct {
@@ -72,6 +73,7 @@ type Stop struct {
 	Metadata         []byte             `json:"metadata"`
 	FetchedAt        pgtype.Timestamptz `json:"fetched_at"`
 	SourceUpdatedAt  pgtype.Timestamptz `json:"source_updated_at"`
+	RemovedAt        pgtype.Timestamptz `json:"removed_at"`
 }
 
 type Transfer struct {

@@ -42,7 +42,7 @@ SELECT
 FROM routes r
 LEFT JOIN agencies a ON a.id = r.agency_id
 JOIN providers p ON p.id = r.provider_id
-WHERE r.id = $1
+WHERE r.id = $1 AND r.removed_at IS NULL
 `
 
 type GetRouteRow struct {
@@ -88,7 +88,7 @@ const getRouteByProviderEntityID = `-- name: GetRouteByProviderEntityID :one
 SELECT r.id
 FROM routes r
 JOIN providers p ON p.id = r.provider_id
-WHERE p.code = $1 AND r.provider_entity_id = $2
+WHERE p.code = $1 AND r.provider_entity_id = $2 AND r.removed_at IS NULL
 `
 
 type GetRouteByProviderEntityIDParams struct {
@@ -119,7 +119,7 @@ SELECT
 	p.code AS provider_code
 FROM stops s
 JOIN providers p ON p.id = s.provider_id
-WHERE s.id = $1
+WHERE s.id = $1 AND s.removed_at IS NULL
 `
 
 type GetStopRow struct {
@@ -260,7 +260,13 @@ SELECT
 FROM routes r
 LEFT JOIN agencies a ON a.id = r.agency_id
 JOIN providers p ON p.id = r.provider_id
-WHERE $1::text = '' OR r.short_name ILIKE '%' || $1 || '%' OR r.long_name ILIKE '%' || $1 || '%'
+WHERE
+	r.removed_at IS NULL
+	AND (
+		$1::text = ''
+		OR r.short_name ILIKE '%' || $1 || '%'
+		OR r.long_name ILIKE '%' || $1 || '%'
+	)
 ORDER BY r.short_name NULLS LAST, r.long_name
 LIMIT $2
 `
@@ -325,6 +331,8 @@ JOIN routes r ON r.provider_id = s.provider_id
 JOIN agencies a ON a.id = r.agency_id
 WHERE
 	s.id = $1
+	AND s.removed_at IS NULL
+	AND r.removed_at IS NULL
 	AND EXISTS (
 		SELECT 1
 		FROM jsonb_array_elements_text(s.metadata->'lines') AS line_key
@@ -377,12 +385,12 @@ const listStopIDsByProviderEntityIDs = `-- name: ListStopIDsByProviderEntityIDs 
 SELECT s.id, s.provider_entity_id
 FROM stops s
 JOIN providers p ON p.id = s.provider_id
-WHERE p.code = $1 AND s.provider_entity_id = ANY($2::text[])
+WHERE p.code = $1 AND s.provider_entity_id = ANY($2::text[]) AND s.removed_at IS NULL
 `
 
 type ListStopIDsByProviderEntityIDsParams struct {
-	Code    string   `json:"code"`
-	Column2 []string `json:"column_2"`
+	Code      string   `json:"code"`
+	EntityIds []string `json:"entity_ids"`
 }
 
 type ListStopIDsByProviderEntityIDsRow struct {
@@ -393,7 +401,7 @@ type ListStopIDsByProviderEntityIDsRow struct {
 // Reverse mapping for journey responses: provider station ids -> canonical
 // UUIDs, one query for every stop reference in a leg.
 func (q *Queries) ListStopIDsByProviderEntityIDs(ctx context.Context, arg ListStopIDsByProviderEntityIDsParams) ([]ListStopIDsByProviderEntityIDsRow, error) {
-	rows, err := q.db.Query(ctx, listStopIDsByProviderEntityIDs, arg.Code, arg.Column2)
+	rows, err := q.db.Query(ctx, listStopIDsByProviderEntityIDs, arg.Code, arg.EntityIds)
 	if err != nil {
 		return nil, err
 	}
@@ -423,6 +431,7 @@ SELECT
 	p.code AS provider_code
 FROM stops s
 JOIN providers p ON p.id = s.provider_id
+WHERE s.removed_at IS NULL
 ORDER BY s.name
 LIMIT $1
 `
@@ -479,7 +488,8 @@ SELECT
 FROM stops s
 JOIN providers p ON p.id = s.provider_id
 WHERE
-	s.location && st_makeenvelope($1::float8, $2::float8, $3::float8, $4::float8, 4326)::geography
+	s.removed_at IS NULL
+	AND s.location && st_makeenvelope($1::float8, $2::float8, $3::float8, $4::float8, 4326)::geography
 	AND (
 		s.name ILIKE $5
 		OR s.code ILIKE $5
@@ -560,7 +570,7 @@ SELECT
 	rs.segment_kind
 FROM route_stops rs
 JOIN stops s ON s.id = rs.stop_id
-WHERE rs.route_id = $1
+WHERE rs.route_id = $1 AND s.removed_at IS NULL
 ORDER BY rs.seq
 `
 
@@ -620,7 +630,7 @@ SELECT
 	st_y(location::geometry) AS lat,
 	st_distance(location, wgs84_point($1, $2)) AS distance_m
 FROM stops
-WHERE st_dwithin(location, wgs84_point($1, $2), $3)
+WHERE removed_at IS NULL AND st_dwithin(location, wgs84_point($1, $2), $3)
 ORDER BY distance_m
 LIMIT $4
 `
@@ -690,7 +700,7 @@ SELECT
 	COALESCE(t.accessibility->>'notes', '')::text AS notes
 FROM transfers t
 JOIN stops s2 ON s2.id = t.to_stop_id
-WHERE t.from_stop_id = $1
+WHERE t.from_stop_id = $1 AND s2.removed_at IS NULL
 ORDER BY s2.name
 `
 
@@ -734,6 +744,53 @@ func (q *Queries) ListTransfersFromStop(ctx context.Context, fromStopID pgtype.U
 	return items, nil
 }
 
+const markRemovedRoutes = `-- name: MarkRemovedRoutes :execrows
+UPDATE routes
+SET removed_at = now()
+WHERE
+	provider_id = $1
+	AND removed_at IS NULL
+	AND NOT (provider_entity_id = ANY($2::text[]))
+`
+
+type MarkRemovedRoutesParams struct {
+	ProviderID pgtype.UUID `json:"provider_id"`
+	EntityIds  []string    `json:"entity_ids"`
+}
+
+func (q *Queries) MarkRemovedRoutes(ctx context.Context, arg MarkRemovedRoutesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markRemovedRoutes, arg.ProviderID, arg.EntityIds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const markRemovedStops = `-- name: MarkRemovedStops :execrows
+UPDATE stops
+SET removed_at = now()
+WHERE
+	provider_id = $1
+	AND removed_at IS NULL
+	AND NOT (provider_entity_id = ANY($2::text[]))
+`
+
+type MarkRemovedStopsParams struct {
+	ProviderID pgtype.UUID `json:"provider_id"`
+	EntityIds  []string    `json:"entity_ids"`
+}
+
+// Tombstone every stop of this provider that the latest run did NOT
+// successfully upsert: dropped upstream OR rejected during normalize (its
+// last-ingestable data is stale either way, so it leaves the live catalog).
+func (q *Queries) MarkRemovedStops(ctx context.Context, arg MarkRemovedStopsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markRemovedStops, arg.ProviderID, arg.EntityIds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const searchStops = `-- name: SearchStops :many
 SELECT
 	s.id,
@@ -746,9 +803,12 @@ SELECT
 FROM stops s
 JOIN providers p ON p.id = s.provider_id
 WHERE
-	s.name ILIKE $1
-	OR s.code ILIKE $1
-	OR s.metadata->>'official_name' ILIKE $1
+	s.removed_at IS NULL
+	AND (
+		s.name ILIKE $1
+		OR s.code ILIKE $1
+		OR s.metadata->>'official_name' ILIKE $1
+	)
 ORDER BY (CASE WHEN s.metadata->>'score' ~ '^-?[0-9]+(\.[0-9]+)?$'
 	THEN (s.metadata->>'score')::float8 END) DESC NULLS LAST, s.name
 LIMIT $2
@@ -989,8 +1049,9 @@ ON CONFLICT (provider_id, provider_entity_id) DO UPDATE SET
 	color = excluded.color,
 	text_color = excluded.text_color,
 	fetched_at = excluded.fetched_at,
-	source_updated_at = excluded.source_updated_at
-RETURNING id, agency_id, provider_id, provider_entity_id, short_name, long_name, mode, color, text_color, fetched_at, source_updated_at
+	source_updated_at = excluded.source_updated_at,
+	removed_at = NULL
+RETURNING id, agency_id, provider_id, provider_entity_id, short_name, long_name, mode, color, text_color, fetched_at, source_updated_at, removed_at
 `
 
 type UpsertRouteParams struct {
@@ -1032,6 +1093,7 @@ func (q *Queries) UpsertRoute(ctx context.Context, arg UpsertRouteParams) (Route
 		&i.TextColor,
 		&i.FetchedAt,
 		&i.SourceUpdatedAt,
+		&i.RemovedAt,
 	)
 	return i, err
 }
@@ -1068,8 +1130,9 @@ ON CONFLICT (provider_id, provider_entity_id) DO UPDATE SET
 	location = excluded.location,
 	metadata = excluded.metadata,
 	fetched_at = excluded.fetched_at,
-	source_updated_at = excluded.source_updated_at
-RETURNING id, provider_id, provider_entity_id, parent_station_id, kind, code, name, location, metadata, fetched_at, source_updated_at
+	source_updated_at = excluded.source_updated_at,
+	removed_at = NULL
+RETURNING id, provider_id, provider_entity_id, parent_station_id, kind, code, name, location, metadata, fetched_at, source_updated_at, removed_at
 `
 
 type UpsertStopParams struct {
@@ -1113,6 +1176,7 @@ func (q *Queries) UpsertStop(ctx context.Context, arg UpsertStopParams) (Stop, e
 		&i.Metadata,
 		&i.FetchedAt,
 		&i.SourceUpdatedAt,
+		&i.RemovedAt,
 	)
 	return i, err
 }

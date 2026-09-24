@@ -68,6 +68,7 @@ CREATE TABLE stops (
 	metadata jsonb NOT NULL DEFAULT '{}',
 	fetched_at timestamptz,
 	source_updated_at timestamptz,
+	removed_at timestamptz,
 	UNIQUE (provider_id, provider_entity_id)
 );
 
@@ -83,6 +84,7 @@ CREATE TABLE routes (
 	text_color text,
 	fetched_at timestamptz,
 	source_updated_at timestamptz,
+	removed_at timestamptz,
 	UNIQUE (provider_id, provider_entity_id)
 );
 

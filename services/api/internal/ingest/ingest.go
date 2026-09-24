@@ -40,8 +40,12 @@ type Report struct {
 	Routes     int
 	RouteStops int
 	Transfers  int
-	Rejections []commute.Rejection
-	FetchedAt  time.Time
+	// Removed counts rows tombstoned because the latest feed no longer
+	// carries them (or they now fail normalize) — soft delete, loud.
+	RemovedStops  int64
+	RemovedRoutes int64
+	Rejections    []commute.Rejection
+	FetchedAt     time.Time
 }
 
 // Commute runs the Commute Data Platform catalog refresh.
@@ -82,6 +86,7 @@ func Commute(ctx context.Context, pool *pgxpool.Pool, src Source) (Report, error
 	stopIDs := make(map[string]pgtype.UUID, len(stations))
 	stationCodes := make(map[string]string, len(stations)) // id -> operator code, for transfer fetches
 	var routeKeys []routeKey                               // routes wait for the stop map before sequencing
+	var routeEntityIDs []string
 
 	for _, op := range operators {
 		params := commute.NormalizeOperator(op, fetchedAt)
@@ -104,8 +109,18 @@ func Commute(ctx context.Context, pool *pgxpool.Pool, src Source) (Report, error
 				lineCode: line.LineCode,
 				routeID:  route.ID,
 			})
+			routeEntityIDs = append(routeEntityIDs, rp.ProviderEntityID)
 			report.Routes++
 		}
+	}
+
+	// Routes absent from this feed are tombstoned inside the same tx —
+	// MarkRemoved only clears rows the upserts above did not touch.
+	if report.RemovedRoutes, err = q.MarkRemovedRoutes(ctx, generated.MarkRemovedRoutesParams{
+		ProviderID: provider.ID,
+		EntityIds:  routeEntityIDs,
+	}); err != nil {
+		return report, fmt.Errorf("ingest: mark removed routes: %w", err)
 	}
 
 	for _, st := range stations {
@@ -122,6 +137,19 @@ func Commute(ctx context.Context, pool *pgxpool.Pool, src Source) (Report, error
 		stopIDs[st.ID] = stop.ID
 		stationCodes[st.ID] = st.Operator
 		report.Stops++
+	}
+
+	// Tombstone stops absent from the accepted set — dropped upstream or now
+	// failing normalize; either way they leave the live catalog (soft delete).
+	stopEntityIDs := make([]string, 0, len(stopIDs))
+	for id := range stopIDs {
+		stopEntityIDs = append(stopEntityIDs, id)
+	}
+	if report.RemovedStops, err = q.MarkRemovedStops(ctx, generated.MarkRemovedStopsParams{
+		ProviderID: provider.ID,
+		EntityIds:  stopEntityIDs,
+	}); err != nil {
+		return report, fmt.Errorf("ingest: mark removed stops: %w", err)
 	}
 
 	// Ordered stop sequences come from /lines/{op}/{code} — one call per

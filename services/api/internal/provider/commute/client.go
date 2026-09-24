@@ -106,6 +106,20 @@ func (c *Client) LineDetail(ctx context.Context, operatorCode, lineCode string) 
 // sequence rather than failing the whole run.
 var ErrNoTopology = errors.New("commute: no topology for line")
 
+// Timetable lists a station's scheduled departures inside an HH:MM window
+// (Asia/Jakarta). Upstream rounds the bounds to whole hours and accepts
+// ranges that wrap past midnight (e.g. 22:00→02:00).
+func (c *Client) Timetable(ctx context.Context, operatorCode, stationCode, from, to string) ([]TimetableEntry, error) {
+	var env envelope[[]TimetableEntry]
+	path := fmt.Sprintf("/stations/%s/%s/timetable?from=%s&to=%s",
+		url.PathEscape(operatorCode), url.PathEscape(stationCode),
+		url.QueryEscape(from), url.QueryEscape(to))
+	if err := c.get(ctx, path, &env); err != nil {
+		return nil, err
+	}
+	return env.Data, nil
+}
+
 // ErrStationUnknown reports the provider's 404 UNKNOWN_STATION — the pair is
 // syntactically valid but unresolvable upstream (e.g. a stop we rejected at
 // ingest). The journey handler maps it to an empty plan, not a 500.

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -17,13 +19,26 @@ import (
 
 const providerCode = "commute"
 
+// jakarta is WIB (UTC+7) permanently — no DST since 1964, so a fixed zone is
+// exact and needs no tzdata on the host.
+var jakarta = time.FixedZone("Asia/Jakarta", 7*60*60)
+
+// departuresWindow bounds the upstream timetable fetch in minutes.
+const departuresWindow = 3 * 60
+
+// maxDepartures caps how many boardings the leg carries — enough to answer
+// "kapan berangkat" without turning the plan into a timetable page.
+const maxDepartures = 3
+
 type Handler struct {
 	store   Store
 	planner FarePlanner
+	tt      Timetabler
+	now     func() time.Time
 }
 
-func NewHandler(store Store, planner FarePlanner) *Handler {
-	return &Handler{store: store, planner: planner}
+func NewHandler(store Store, planner FarePlanner, tt Timetabler) *Handler {
+	return &Handler{store: store, planner: planner, tt: tt, now: time.Now}
 }
 
 // RegisterRoutes mounts the domain's paths on an existing mux — the router
@@ -73,6 +88,7 @@ func (h *Handler) plan(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, r, http.StatusInternalServerError, "INTERNAL", "Internal server error")
 		return
 	}
+	h.attachDepartures(r.Context(), itinerary, plan)
 	writePlan(w, r, from, to, itinerary)
 }
 
@@ -104,8 +120,8 @@ func (h *Handler) normalize(ctx context.Context, plan *commute.FarePlan) (*Itine
 	uuids := map[string]string{}
 	if len(idList) > 0 {
 		rows, err := h.store.ListStopIDsByProviderEntityIDs(ctx, generated.ListStopIDsByProviderEntityIDsParams{
-			Code:    providerCode,
-			Column2: idList,
+			Code:      providerCode,
+			EntityIds: idList,
 		})
 		if err != nil {
 			return nil, err
@@ -165,6 +181,92 @@ func (h *Handler) normalize(ctx context.Context, plan *commute.FarePlan) (*Itine
 		itin.Fare = fare
 	}
 	return itin, nil
+}
+
+// attachDepartures fills nextDepartures on the first ride leg — "kapan
+// berangkat" is answered at the first boarding; later legs would need
+// arrival-time propagation the provider doesn't compute. A timetable outage
+// degrades to no departures, never a failed plan.
+func (h *Handler) attachDepartures(ctx context.Context, itin *Itinerary, plan *commute.FarePlan) {
+	for i, fl := range plan.Legs {
+		if fl.Type != "RIDE" || i >= len(itin.Legs) {
+			continue
+		}
+		op, stn := splitStationID(fl.From.ID)
+		_, line := splitLineKey(fl.Line)
+		if op == "" || line == "" {
+			return
+		}
+		now := h.now().In(jakarta)
+		entries, err := h.tt.Timetable(ctx, op, stn,
+			now.Format("15:04"), now.Add(departuresWindow*time.Minute).Format("15:04"))
+		if err != nil {
+			return
+		}
+		nowMin := now.Hour()*60 + now.Minute()
+		type cand struct {
+			d Departure
+			m int // minutes from now, wrapped at midnight
+		}
+		var cands []cand
+		for _, e := range entries {
+			if e.LineCode != line || (fl.Headsign != "" && e.BoundFor != fl.Headsign) {
+				continue
+			}
+			depMin, ok := minutesOfDay(e.EstimatedDeparture)
+			if !ok {
+				continue
+			}
+			m := (depMin - nowMin + 1440) % 1440
+			if m > departuresWindow {
+				continue
+			}
+			cands = append(cands, cand{d: Departure{
+				Time:       e.EstimatedDeparture[:5],
+				TripNumber: e.TripNumber,
+				BoundFor:   e.BoundFor,
+			}, m: m})
+		}
+		sort.Slice(cands, func(a, b int) bool { return cands[a].m < cands[b].m })
+		if len(cands) > maxDepartures {
+			cands = cands[:maxDepartures]
+		}
+		if len(cands) > 0 {
+			deps := make([]Departure, 0, len(cands))
+			for _, c := range cands {
+				deps = append(deps, c.d)
+			}
+			itin.Legs[i].NextDepartures = deps
+		}
+		return
+	}
+}
+
+// splitStationID turns "MRTJ-DKA" into operator "MRTJ" and code "DKA".
+func splitStationID(id string) (op, code string) {
+	i := strings.IndexByte(id, '-')
+	if i <= 0 || i == len(id)-1 {
+		return "", ""
+	}
+	return id[:i], id[i+1:]
+}
+
+// splitLineKey turns "MRTJ:M" into operator "MRTJ" and line code "M".
+func splitLineKey(key string) (op, code string) {
+	i := strings.IndexByte(key, ':')
+	if i <= 0 || i == len(key)-1 {
+		return "", ""
+	}
+	return key[:i], key[i+1:]
+}
+
+// minutesOfDay parses provider "HH:MM:SS" wall-clock strings.
+func minutesOfDay(s string) (int, bool) {
+	t, err := time.Parse("15:04:05", s)
+	if err != nil {
+		return 0, false
+	}
+	return t.Hour()*60 + t.Minute(), true
 }
 
 func writePlan(w http.ResponseWriter, r *http.Request, from, to generated.GetStopRow, itin *Itinerary) {

@@ -37,7 +37,7 @@ func (f *fakeStore) GetStop(_ context.Context, id pgtype.UUID) (generated.GetSto
 	return row, nil
 }
 func (f *fakeStore) ListStopIDsByProviderEntityIDs(_ context.Context, arg generated.ListStopIDsByProviderEntityIDsParams) ([]generated.ListStopIDsByProviderEntityIDsRow, error) {
-	f.gotEntityIDs = arg.Column2
+	f.gotEntityIDs = arg.EntityIds
 	return f.uuidRows, f.uuidErr
 }
 func (f *fakeStore) GetRouteByProviderEntityID(_ context.Context, _ generated.GetRouteByProviderEntityIDParams) (pgtype.UUID, error) {

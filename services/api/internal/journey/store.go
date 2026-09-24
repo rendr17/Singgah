@@ -25,3 +25,9 @@ type Store interface {
 type FarePlanner interface {
 	Fares(ctx context.Context, fromID, toID string) (*commute.FarePlan, error)
 }
+
+// Timetabler fetches a station's scheduled departures inside an HH:MM window —
+// satisfied by *commute.Client, faked in tests.
+type Timetabler interface {
+	Timetable(ctx context.Context, operator, stationCode, from, to string) ([]commute.TimetableEntry, error)
+}

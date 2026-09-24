@@ -21,6 +21,16 @@ type Leg struct {
 	StationCount int       `json:"stationCount,omitempty"`
 	Stops        []StopRef `json:"stops,omitempty"`
 	Headsign     string    `json:"headsign,omitempty"`
+	// NextDepartures fills the first ride leg only — later boardings would
+	// need arrival-time propagation the provider doesn't compute.
+	NextDepartures []Departure `json:"nextDepartures,omitempty"`
+}
+
+// Departure is one scheduled boarding — Asia/Jakarta wall clock.
+type Departure struct {
+	Time       string  `json:"time"` // HH:MM
+	TripNumber *string `json:"tripNumber"`
+	BoundFor   string  `json:"boundFor"`
 }
 
 type FareSegment struct {

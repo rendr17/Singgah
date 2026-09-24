@@ -47,7 +47,8 @@ func main() {
 		deps.DB = pool
 		queries := generated.New(pool)
 		deps.Catalog = catalog.NewHandler(queries)
-		deps.Journey = journey.NewHandler(queries, commute.NewClient(cfg.CommuteBaseURL))
+		commuteClient := commute.NewClient(cfg.CommuteBaseURL)
+		deps.Journey = journey.NewHandler(queries, commuteClient, commuteClient)
 		logger.Info("database connected")
 	} else {
 		logger.Warn("DATABASE_URL unset — database endpoints report unavailable")

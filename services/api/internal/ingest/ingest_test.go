@@ -200,6 +200,84 @@ func TestFailedIngestStillStampsAttempt(t *testing.T) {
 	}
 }
 
+// A station that leaves the provider feed is tombstoned (removed_at), not
+// deleted — and resurrected if it reappears in a later run.
+func TestIngestTombstonesDroppedStops(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set — start infrastructure/local compose and run migrations")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	pool, err := db.Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer pool.Close()
+
+	// Catalog tests share this database — start from an empty catalog so the
+	// tombstone counts are deterministic regardless of earlier runs.
+	if _, err := pool.Exec(ctx,
+		"TRUNCATE route_stops, transfers, stops, routes, agencies CASCADE"); err != nil {
+		t.Fatalf("truncate: %v", err)
+	}
+
+	src := loadFixtureSource(t)
+	if _, err := Commute(ctx, pool, src); err != nil {
+		t.Fatalf("ingest run 1: %v", err)
+	}
+
+	kept := src.stations[:0]
+	for _, s := range src.stations {
+		if s.ID != "MRTJ-DKA" {
+			kept = append(kept, s)
+		}
+	}
+	src.stations = kept
+
+	report, err := Commute(ctx, pool, src)
+	if err != nil {
+		t.Fatalf("ingest run 2: %v", err)
+	}
+	if report.RemovedStops != 1 {
+		t.Errorf("RemovedStops = %d, want 1", report.RemovedStops)
+	}
+	var removedAt *time.Time
+	if err := pool.QueryRow(ctx,
+		"SELECT removed_at FROM stops WHERE provider_entity_id='MRTJ-DKA'").Scan(&removedAt); err != nil {
+		t.Fatalf("removed_at: %v", err)
+	}
+	if removedAt == nil {
+		t.Error("MRTJ-DKA was not tombstoned")
+	}
+	var active int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM stops WHERE removed_at IS NULL").Scan(&active); err != nil {
+		t.Fatalf("active count: %v", err)
+	}
+	if active != 3 {
+		t.Errorf("active stops = %d, want 3", active)
+	}
+
+	// Reappearing in a later feed resurrects the row — upsert clears the flag.
+	src.stations = append(src.stations, commute.Station{
+		ID: "MRTJ-DKA", Name: "Dukuh Atas BNI", Operator: "MRTJ",
+		Latitude: ptr(-6.202), Longitude: ptr(106.823),
+	})
+	if _, err := Commute(ctx, pool, src); err != nil {
+		t.Fatalf("ingest run 3: %v", err)
+	}
+	if err := pool.QueryRow(ctx,
+		"SELECT removed_at FROM stops WHERE provider_entity_id='MRTJ-DKA'").Scan(&removedAt); err != nil {
+		t.Fatalf("removed_at after resurrect: %v", err)
+	}
+	if removedAt != nil {
+		t.Error("resurrected stop kept removed_at")
+	}
+}
+
+func ptr(f float64) *float64 { return &f }
+
 // A station without an upstream code is valid data (code is optional), but
 // its transfers cannot be fetched — that edge is rejected, not run-fatal.
 func TestIngestSkipsTransfersForCodelessStation(t *testing.T) {
