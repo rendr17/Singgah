@@ -3,8 +3,10 @@ package commute
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -39,8 +41,15 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 	dec := json.NewDecoder(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		var env envelope[json.RawMessage]
-		if err := dec.Decode(&env); err == nil && env.Error != "" {
-			return fmt.Errorf("commute: %s: %s", path, env.Error)
+		var e struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		}
+		if err := dec.Decode(&env); err == nil && json.Unmarshal(env.Error, &e) == nil && e.Message != "" {
+			if e.Code == "UNKNOWN_STATION" {
+				return ErrStationUnknown
+			}
+			return fmt.Errorf("commute: %s: %s", path, e.Message)
 		}
 		return fmt.Errorf("commute: %s: HTTP %d", path, resp.StatusCode)
 	}
@@ -75,4 +84,20 @@ func (c *Client) Transfers(ctx context.Context, operatorCode, stationCode string
 		return nil, err
 	}
 	return env.Data, nil
+}
+
+// ErrStationUnknown reports the provider's 404 UNKNOWN_STATION — the pair is
+// syntactically valid but unresolvable upstream (e.g. a stop we rejected at
+// ingest). The journey handler maps it to an empty plan, not a 500.
+var ErrStationUnknown = errors.New("commute: station unknown upstream")
+
+// Fares computes the provider's station-to-station itinerary — the MVP journey
+// source per docs/23_ROUTING_MAP_GIS.md.
+func (c *Client) Fares(ctx context.Context, fromID, toID string) (*FarePlan, error) {
+	var env envelope[FarePlan]
+	path := fmt.Sprintf("/fares/%s/%s", url.PathEscape(fromID), url.PathEscape(toID))
+	if err := c.get(ctx, path, &env); err != nil {
+		return nil, err
+	}
+	return &env.Data, nil
 }

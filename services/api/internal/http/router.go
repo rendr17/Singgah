@@ -12,6 +12,7 @@ import (
 	"singgah/services/api/internal/health"
 	"singgah/services/api/internal/http/middleware"
 	"singgah/services/api/internal/http/response"
+	"singgah/services/api/internal/journey"
 )
 
 // Deps carries the router's runtime dependencies — constructed once in main.
@@ -20,8 +21,10 @@ type Deps struct {
 	Version string
 	// DB may be nil when DATABASE_URL is unset; /ready reports that honestly.
 	DB health.Pinger
-	// Catalog is nil without a database; its routes then report unavailable.
+	// Catalog and Journey are nil without a database; their routes are then
+	// simply unmounted (404) — /ready still reports the dependency honestly.
 	Catalog *catalog.Handler
+	Journey *journey.Handler
 }
 
 func NewRouter(deps Deps) http.Handler {
@@ -35,9 +38,14 @@ func NewRouter(deps Deps) http.Handler {
 	r.Get("/ready", health.ReadyHandler(deps.DB))
 	r.Get("/version", health.VersionHandler(deps.Version))
 
-	if deps.Catalog != nil {
-		r.Mount("/api/v1", deps.Catalog.Routes())
-	}
+	r.Route("/api/v1", func(v1 chi.Router) {
+		if deps.Catalog != nil {
+			deps.Catalog.RegisterRoutes(v1)
+		}
+		if deps.Journey != nil {
+			deps.Journey.RegisterRoutes(v1)
+		}
+	})
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, r, http.StatusNotFound, "NOT_FOUND", "Resource not found")

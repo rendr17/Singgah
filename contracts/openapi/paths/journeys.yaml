@@ -1,0 +1,38 @@
+get:
+  operationId: planJourney
+  summary: Station-to-station itinerary
+  description: >-
+    One provider-computed itinerary between two canonical station UUIDs.
+    Legs come back normalized to canonical stop/route UUIDs; fares are IDR
+    integers. `itinerary` is null when the upstream source finds no plan —
+    never an error. Always `status: "scheduled"`; no realtime exists yet.
+  tags:
+    - planner
+  parameters:
+    - name: from
+      in: query
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Origin stop UUID
+    - name: to
+      in: query
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Destination stop UUID
+  responses:
+    '200':
+      description: Normalized plan (itinerary may be null)
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/catalog.yaml#/JourneyPlan'
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

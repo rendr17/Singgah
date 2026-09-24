@@ -72,6 +72,25 @@ func (q *Queries) GetRoute(ctx context.Context, id pgtype.UUID) (GetRouteRow, er
 	return i, err
 }
 
+const getRouteByProviderEntityID = `-- name: GetRouteByProviderEntityID :one
+SELECT r.id
+FROM routes r
+JOIN providers p ON p.id = r.provider_id
+WHERE p.code = $1 AND r.provider_entity_id = $2
+`
+
+type GetRouteByProviderEntityIDParams struct {
+	Code             string `json:"code"`
+	ProviderEntityID string `json:"provider_entity_id"`
+}
+
+func (q *Queries) GetRouteByProviderEntityID(ctx context.Context, arg GetRouteByProviderEntityIDParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getRouteByProviderEntityID, arg.Code, arg.ProviderEntityID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getStop = `-- name: GetStop :one
 SELECT
 	s.id,
@@ -84,6 +103,7 @@ SELECT
 	s.metadata,
 	s.fetched_at,
 	s.source_updated_at,
+	s.provider_entity_id,
 	p.code AS provider_code
 FROM stops s
 JOIN providers p ON p.id = s.provider_id
@@ -91,17 +111,18 @@ WHERE s.id = $1
 `
 
 type GetStopRow struct {
-	ID              pgtype.UUID        `json:"id"`
-	ParentStationID pgtype.UUID        `json:"parent_station_id"`
-	Kind            string             `json:"kind"`
-	Code            pgtype.Text        `json:"code"`
-	Name            string             `json:"name"`
-	Lon             float64            `json:"lon"`
-	Lat             float64            `json:"lat"`
-	Metadata        []byte             `json:"metadata"`
-	FetchedAt       pgtype.Timestamptz `json:"fetched_at"`
-	SourceUpdatedAt pgtype.Timestamptz `json:"source_updated_at"`
-	ProviderCode    string             `json:"provider_code"`
+	ID               pgtype.UUID        `json:"id"`
+	ParentStationID  pgtype.UUID        `json:"parent_station_id"`
+	Kind             string             `json:"kind"`
+	Code             pgtype.Text        `json:"code"`
+	Name             string             `json:"name"`
+	Lon              float64            `json:"lon"`
+	Lat              float64            `json:"lat"`
+	Metadata         []byte             `json:"metadata"`
+	FetchedAt        pgtype.Timestamptz `json:"fetched_at"`
+	SourceUpdatedAt  pgtype.Timestamptz `json:"source_updated_at"`
+	ProviderEntityID string             `json:"provider_entity_id"`
+	ProviderCode     string             `json:"provider_code"`
 }
 
 // location is returned as lon/lat floats — callers never handle raw geography.
@@ -119,6 +140,7 @@ func (q *Queries) GetStop(ctx context.Context, id pgtype.UUID) (GetStopRow, erro
 		&i.Metadata,
 		&i.FetchedAt,
 		&i.SourceUpdatedAt,
+		&i.ProviderEntityID,
 		&i.ProviderCode,
 	)
 	return i, err
@@ -240,6 +262,45 @@ func (q *Queries) ListRoutesServingStop(ctx context.Context, id pgtype.UUID) ([]
 			&i.AgencyCode,
 			&i.AgencyName,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStopIDsByProviderEntityIDs = `-- name: ListStopIDsByProviderEntityIDs :many
+SELECT s.id, s.provider_entity_id
+FROM stops s
+JOIN providers p ON p.id = s.provider_id
+WHERE p.code = $1 AND s.provider_entity_id = ANY($2::text[])
+`
+
+type ListStopIDsByProviderEntityIDsParams struct {
+	Code    string   `json:"code"`
+	Column2 []string `json:"column_2"`
+}
+
+type ListStopIDsByProviderEntityIDsRow struct {
+	ID               pgtype.UUID `json:"id"`
+	ProviderEntityID string      `json:"provider_entity_id"`
+}
+
+// Reverse mapping for journey responses: provider station ids -> canonical
+// UUIDs, one query for every stop reference in a leg.
+func (q *Queries) ListStopIDsByProviderEntityIDs(ctx context.Context, arg ListStopIDsByProviderEntityIDsParams) ([]ListStopIDsByProviderEntityIDsRow, error) {
+	rows, err := q.db.Query(ctx, listStopIDsByProviderEntityIDs, arg.Code, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListStopIDsByProviderEntityIDsRow
+	for rows.Next() {
+		var i ListStopIDsByProviderEntityIDsRow
+		if err := rows.Scan(&i.ID, &i.ProviderEntityID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

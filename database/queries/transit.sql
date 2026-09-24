@@ -153,6 +153,7 @@ SELECT
 	s.metadata,
 	s.fetched_at,
 	s.source_updated_at,
+	s.provider_entity_id,
 	p.code AS provider_code
 FROM stops s
 JOIN providers p ON p.id = s.provider_id
@@ -309,6 +310,20 @@ WHERE
 		WHERE line_key = r.provider_entity_id
 	)
 ORDER BY s.name;
+
+-- name: ListStopIDsByProviderEntityIDs :many
+-- Reverse mapping for journey responses: provider station ids -> canonical
+-- UUIDs, one query for every stop reference in a leg.
+SELECT s.id, s.provider_entity_id
+FROM stops s
+JOIN providers p ON p.id = s.provider_id
+WHERE p.code = $1 AND s.provider_entity_id = ANY($2::text[]);
+
+-- name: GetRouteByProviderEntityID :one
+SELECT r.id
+FROM routes r
+JOIN providers p ON p.id = r.provider_id
+WHERE p.code = $1 AND r.provider_entity_id = $2;
 
 -- name: ListStopsWithin :many
 -- Nearest stops to a WGS84 point within radius_m, by real distance in meters.

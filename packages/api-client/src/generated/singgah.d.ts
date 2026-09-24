@@ -142,6 +142,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/journeys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Station-to-station itinerary
+         * @description One provider-computed itinerary between two canonical station UUIDs. Legs come back normalized to canonical stop/route UUIDs; fares are IDR integers. `itinerary` is null when the upstream source finds no plan — never an error. Always `status: "scheduled"`; no realtime exists yet.
+         */
+        get: operations["planJourney"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -232,6 +252,72 @@ export interface components {
             /** @description Served stops sorted by name — authoritative stop ordering arrives with line/trip ingest, so this list is not a sequence diagram yet. */
             stops: components["schemas"]["StopRef"][];
             source: components["schemas"]["SourceMeta"];
+        };
+        /** @description Stop reference inside an itinerary. `id` is absent when the upstream station ref cannot be resolved to a canonical stop (external service). */
+        JourneyStopRef: {
+            /** Format: uuid */
+            id?: string;
+            name: string;
+        };
+        JourneyLeg: {
+            /** @description walk | ride | raw upstream type for unrecognised legs */
+            type: string;
+            from: components["schemas"]["JourneyStopRef"];
+            to: components["schemas"]["JourneyStopRef"];
+            distanceM?: number;
+            /**
+             * Format: uuid
+             * @description Canonical route UUID for ride legs
+             */
+            routeId?: string;
+            /** @description Provider line key, e.g. MRTJ:M — diagnostic only */
+            line?: string;
+            operator?: string;
+            stationCount?: number;
+            /** @description Ordered stops ridden — real sequence from the provider */
+            stops?: components["schemas"]["JourneyStopRef"][];
+            headsign?: string;
+        };
+        FareSegment: {
+            operator: string;
+            from: components["schemas"]["JourneyStopRef"];
+            to: components["schemas"]["JourneyStopRef"];
+            /**
+             * Format: int64
+             * @description IDR integer — money is never a float
+             */
+            amount: number;
+        };
+        Fare: {
+            /** @enum {string} */
+            currency: "IDR";
+            /** Format: int64 */
+            total?: number;
+            segments: components["schemas"]["FareSegment"][];
+        };
+        Itinerary: {
+            legs: components["schemas"]["JourneyLeg"][];
+            /** @description Count of walk legs — computed from legs, not the provider's transferCount */
+            walkTransfers: number;
+            rideLegs: number;
+            fare?: components["schemas"]["Fare"];
+            totalDistanceM: number;
+            /**
+             * @description Static provider data — never live until realtime lands
+             * @enum {string}
+             */
+            status: "scheduled";
+        };
+        JourneyPlan: {
+            from: components["schemas"]["JourneyStopRef"];
+            to: components["schemas"]["JourneyStopRef"];
+            /** @description null when the provider computes no plan for the pair */
+            itinerary: components["schemas"]["Itinerary"] | null;
+            source: {
+                provider: string;
+                /** Format: date-time */
+                requestedAt: string;
+            };
         };
     };
     responses: never;
@@ -464,6 +550,40 @@ export interface operations {
                     "application/json": {
                         route: components["schemas"]["RouteDetail"];
                     };
+                };
+            };
+            /** @description Error envelope — shared by all endpoints */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    planJourney: {
+        parameters: {
+            query: {
+                /** @description Origin stop UUID */
+                from: string;
+                /** @description Destination stop UUID */
+                to: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Normalized plan (itinerary may be null) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JourneyPlan"];
                 };
             };
             /** @description Error envelope — shared by all endpoints */

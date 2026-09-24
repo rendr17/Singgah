@@ -26,12 +26,18 @@ func NewHandler(store Store) *Handler {
 	return &Handler{store: store}
 }
 
-func (h *Handler) Routes() http.Handler {
-	r := chi.NewRouter()
+// RegisterRoutes mounts the domain's paths on an existing mux — the router
+// composes several domains under one /api/v1 prefix.
+func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/stations", h.listStations)
 	r.Get("/stations/{id}", h.getStation)
 	r.Get("/routes", h.listRoutes)
 	r.Get("/routes/{id}", h.getRoute)
+}
+
+func (h *Handler) Routes() http.Handler {
+	r := chi.NewRouter()
+	h.RegisterRoutes(r)
 	return r
 }
 

@@ -23,6 +23,8 @@ paths:
     $ref: './paths/routes.yaml'
   /api/v1/routes/{id}:
     $ref: './paths/route-detail.yaml'
+  /api/v1/journeys:
+    $ref: './paths/journeys.yaml'
 components:
   schemas:
     ErrorEnvelope:
@@ -32,3 +34,5 @@ tags:
     description: Process/infrastructure endpoints
   - name: catalog
     description: Canonical transit network — stations, routes, transfers
+  - name: planner
+    description: Station-to-station itinerary planning (scheduled data)

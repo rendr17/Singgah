@@ -7,11 +7,12 @@ package commute
 import "encoding/json"
 
 // envelope wraps every response: {"status": 200, "data": ...} or
-// {"status": 404, "error": "..."} on failure.
+// {"status": 404, "error": {"code","message"}} on failure — the error field is
+// an object, decoded lazily so success paths never pay for it.
 type envelope[T any] struct {
-	Status int    `json:"status"`
-	Error  string `json:"error"`
-	Data   T      `json:"data"`
+	Status int             `json:"status"`
+	Error  json.RawMessage `json:"error"`
+	Data   T               `json:"data"`
 }
 
 type Operator struct {
@@ -77,4 +78,44 @@ type StationRef struct {
 type ExternalStationRef struct {
 	Name         string `json:"name"`
 	OperatorName string `json:"operatorName"`
+}
+
+// FarePlan is the provider's /fares/{from}/{to} response — a computed
+// station-to-station itinerary with legs, fare segments, and totals. Leg types
+// observed: TRANSFER (walk between stops) and RIDE (line ride with an ordered
+// stop list). Anything else passes through with its raw type.
+type FarePlan struct {
+	From          FareStationRef `json:"from"`
+	To            FareStationRef `json:"to"`
+	Legs          []FareLeg      `json:"legs"`
+	Segments      []FareSegment  `json:"segments"`
+	TotalFare     *int64         `json:"totalFare"` // IDR, integer minor-unit-safe
+	TotalDistance float64        `json:"totalDistanceM"`
+	TransferCount int            `json:"transferCount"`
+}
+
+// FareStationRef is the lightweight stop ref used inside fare legs — unlike
+// StationRef it carries no operator field.
+type FareStationRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type FareLeg struct {
+	Type         string           `json:"type"` // TRANSFER | RIDE | (unknown passthrough)
+	From         FareStationRef   `json:"from"`
+	To           FareStationRef   `json:"to"`
+	DistanceM    *float64         `json:"distanceM"`
+	Line         string           `json:"line"`         // RIDE only — "{operator}:{lineCode}"
+	Operator     string           `json:"operator"`     // RIDE only
+	StationCount int              `json:"stationCount"` // RIDE only
+	Stops        []FareStationRef `json:"stops"`        // RIDE only, ordered
+	Headsign     string           `json:"headsign"`     // RIDE only
+}
+
+type FareSegment struct {
+	Operator string         `json:"operator"`
+	From     FareStationRef `json:"from"`
+	To       FareStationRef `json:"to"`
+	Fare     int64          `json:"fare"` // IDR integer
 }

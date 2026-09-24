@@ -43,7 +43,11 @@
 
 <h1>Singgah</h1>
 <p>Pergi boleh spontan. Rute jangan.</p>
-<p><a href={resolve('/map')}>Peta jaringan →</a> · <a href={resolve('/routes')}>Semua rute →</a></p>
+<p>
+	<a href={resolve('/plan')}>Rencana perjalanan →</a> ·
+	<a href={resolve('/map')}>Peta jaringan →</a> ·
+	<a href={resolve('/routes')}>Semua rute →</a>
+</p>
 
 <div class="search">
 	<SearchField

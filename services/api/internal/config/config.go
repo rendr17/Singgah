@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"singgah/services/api/internal/provider/commute"
 	"strconv"
 	"time"
 )
@@ -16,6 +17,10 @@ type Config struct {
 	// DatabaseURL is optional: the API still serves non-DB endpoints when it
 	// is unset, and /ready reports the database as not configured.
 	DatabaseURL string
+
+	// CommuteBaseURL is the upstream journey/fare source — overridable for
+	// staging and fixture servers.
+	CommuteBaseURL string
 
 	ReadHeaderTimeout time.Duration
 	ReadTimeout       time.Duration
@@ -40,6 +45,11 @@ func Load() (Config, error) {
 	}
 
 	cfg.DatabaseURL = os.Getenv("DATABASE_URL")
+
+	cfg.CommuteBaseURL = os.Getenv("COMMUTE_BASE_URL")
+	if cfg.CommuteBaseURL == "" {
+		cfg.CommuteBaseURL = commute.DefaultBaseURL
+	}
 
 	if v := os.Getenv("PORT"); v != "" {
 		port, err := strconv.Atoi(v)

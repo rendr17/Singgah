@@ -16,6 +16,8 @@ import (
 	"singgah/services/api/internal/config"
 	"singgah/services/api/internal/db"
 	httpapi "singgah/services/api/internal/http"
+	"singgah/services/api/internal/journey"
+	"singgah/services/api/internal/provider/commute"
 )
 
 // version is injected at build time via -ldflags "-X main.version=<ver>".
@@ -43,7 +45,9 @@ func main() {
 		}
 		defer pool.Close()
 		deps.DB = pool
-		deps.Catalog = catalog.NewHandler(generated.New(pool))
+		queries := generated.New(pool)
+		deps.Catalog = catalog.NewHandler(queries)
+		deps.Journey = journey.NewHandler(queries, commute.NewClient(cfg.CommuteBaseURL))
 		logger.Info("database connected")
 	} else {
 		logger.Warn("DATABASE_URL unset — database endpoints report unavailable")

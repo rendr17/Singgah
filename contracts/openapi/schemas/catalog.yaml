@@ -169,3 +169,153 @@ RouteDetail:
             $ref: '#/StopRef'
         source:
           $ref: '#/SourceMeta'
+
+JourneyStopRef:
+  type: object
+  description: >-
+    Stop reference inside an itinerary. `id` is absent when the upstream
+    station ref cannot be resolved to a canonical stop (external service).
+  required:
+    - name
+  additionalProperties: false
+  properties:
+    id:
+      type: string
+      format: uuid
+    name:
+      type: string
+
+JourneyLeg:
+  type: object
+  required:
+    - type
+    - from
+    - to
+  additionalProperties: false
+  properties:
+    type:
+      type: string
+      description: walk | ride | raw upstream type for unrecognised legs
+    from:
+      $ref: '#/JourneyStopRef'
+    to:
+      $ref: '#/JourneyStopRef'
+    distanceM:
+      type: number
+    routeId:
+      type: string
+      format: uuid
+      description: Canonical route UUID for ride legs
+    line:
+      type: string
+      description: Provider line key, e.g. MRTJ:M — diagnostic only
+    operator:
+      type: string
+    stationCount:
+      type: integer
+    stops:
+      type: array
+      description: Ordered stops ridden — real sequence from the provider
+      items:
+        $ref: '#/JourneyStopRef'
+    headsign:
+      type: string
+
+FareSegment:
+  type: object
+  required:
+    - operator
+    - from
+    - to
+    - amount
+  additionalProperties: false
+  properties:
+    operator:
+      type: string
+    from:
+      $ref: '#/JourneyStopRef'
+    to:
+      $ref: '#/JourneyStopRef'
+    amount:
+      type: integer
+      format: int64
+      description: IDR integer — money is never a float
+
+Fare:
+  type: object
+  required:
+    - currency
+    - segments
+  additionalProperties: false
+  properties:
+    currency:
+      type: string
+      enum:
+        - IDR
+    total:
+      type: integer
+      format: int64
+    segments:
+      type: array
+      items:
+        $ref: '#/FareSegment'
+
+Itinerary:
+  type: object
+  required:
+    - legs
+    - walkTransfers
+    - rideLegs
+    - totalDistanceM
+    - status
+  additionalProperties: false
+  properties:
+    legs:
+      type: array
+      items:
+        $ref: '#/JourneyLeg'
+    walkTransfers:
+      type: integer
+      description: Count of walk legs — computed from legs, not the provider's transferCount
+    rideLegs:
+      type: integer
+    fare:
+      $ref: '#/Fare'
+    totalDistanceM:
+      type: number
+    status:
+      type: string
+      enum:
+        - scheduled
+      description: Static provider data — never live until realtime lands
+
+JourneyPlan:
+  type: object
+  required:
+    - from
+    - to
+    - itinerary
+    - source
+  additionalProperties: false
+  properties:
+    from:
+      $ref: '#/JourneyStopRef'
+    to:
+      $ref: '#/JourneyStopRef'
+    itinerary:
+      oneOf:
+        - $ref: '#/Itinerary'
+        - type: 'null'
+      description: null when the provider computes no plan for the pair
+    source:
+      type: object
+      required:
+        - provider
+        - requestedAt
+      additionalProperties: false
+      properties:
+        provider:
+          type: string
+        requestedAt:
+          type: string
+          format: date-time
