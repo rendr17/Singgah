@@ -54,6 +54,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.work
+          cache-dependency-path: services/api/go.sum
       - run: test -z "$(gofmt -l services)"
       - name: Apply migrations to the real database
         run: bash scripts/db-migrate.sh
