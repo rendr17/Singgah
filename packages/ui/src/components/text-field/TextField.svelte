@@ -7,15 +7,7 @@
 		error?: string;
 	}
 
-	let {
-		label,
-		hint,
-		error,
-		id,
-		class: className,
-		value = $bindable(),
-		...rest
-	}: Props = $props();
+	let { label, hint, error, id, class: className, value = $bindable(), ...rest }: Props = $props();
 
 	const uid = $props.id();
 	const fieldId = $derived(id ?? `sg-field-${uid}`);
