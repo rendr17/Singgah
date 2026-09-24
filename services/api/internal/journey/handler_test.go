@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -53,6 +54,22 @@ func (f *fakePlanner) Fares(_ context.Context, _, _ string) (*commute.FarePlan, 
 	return f.plan, f.err
 }
 
+type fakeTimetabler struct {
+	entries  []commute.TimetableEntry
+	err      error
+	gotOp    string
+	gotCode  string
+	gotFrom  string
+	gotTo    string
+	gotCalls int
+}
+
+func (f *fakeTimetabler) Timetable(_ context.Context, op, code, from, to string) ([]commute.TimetableEntry, error) {
+	f.gotCalls++
+	f.gotOp, f.gotCode, f.gotFrom, f.gotTo = op, code, from, to
+	return f.entries, f.err
+}
+
 func mustUUID(t *testing.T, s string) pgtype.UUID {
 	t.Helper()
 	var id pgtype.UUID
@@ -62,10 +79,24 @@ func mustUUID(t *testing.T, s string) pgtype.UUID {
 	return id
 }
 
-func serve(t *testing.T, store Store, planner FarePlanner, target string) *httptest.ResponseRecorder {
+func serve(t *testing.T, store Store, planner FarePlanner, tt Timetabler, target string) *httptest.ResponseRecorder {
 	t.Helper()
 	r := chi.NewRouter()
-	NewHandler(store, planner).RegisterRoutes(r)
+	NewHandler(store, planner, tt).RegisterRoutes(r)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	r.ServeHTTP(rec, req)
+	return rec
+}
+
+// serveAt serves the handler pinned to a fixed clock so the departure
+// window math is deterministic.
+func serveAt(t *testing.T, store Store, planner FarePlanner, tt Timetabler, target string, now time.Time) *httptest.ResponseRecorder {
+	t.Helper()
+	h := NewHandler(store, planner, tt)
+	h.now = func() time.Time { return now }
+	r := chi.NewRouter()
+	h.RegisterRoutes(r)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, target, nil)
 	r.ServeHTTP(rec, req)
@@ -100,7 +131,7 @@ func baseStore(t *testing.T) *fakeStore {
 
 func TestPlanRequiresBothParams(t *testing.T) {
 	for _, target := range []string{"/journeys", "/journeys?from=" + fromUUID, "/journeys?from=x&to=y"} {
-		rec := serve(t, baseStore(t), &fakePlanner{}, target)
+		rec := serve(t, baseStore(t), &fakePlanner{}, &fakeTimetabler{}, target)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("%s: status = %d, want 400", target, rec.Code)
 		}
@@ -108,7 +139,7 @@ func TestPlanRequiresBothParams(t *testing.T) {
 }
 
 func TestPlanUnknownStop(t *testing.T) {
-	rec := serve(t, baseStore(t), &fakePlanner{}, "/journeys?from=11111111-2222-3333-4444-555555555555&to="+toUUID)
+	rec := serve(t, baseStore(t), &fakePlanner{}, &fakeTimetabler{}, "/journeys?from=11111111-2222-3333-4444-555555555555&to="+toUUID)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -139,7 +170,7 @@ func TestPlanNormalizesItinerary(t *testing.T) {
 		TotalDistance: 13388,
 		TransferCount: 1,
 	}}
-	rec := serve(t, store, planner, "/journeys?from="+fromUUID+"&to="+toUUID)
+	rec := serve(t, store, planner, &fakeTimetabler{}, "/journeys?from="+fromUUID+"&to="+toUUID)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -171,7 +202,7 @@ func TestPlanNormalizesItinerary(t *testing.T) {
 }
 
 func TestPlanNoUpstreamStation(t *testing.T) {
-	rec := serve(t, baseStore(t), &fakePlanner{err: commute.ErrStationUnknown}, "/journeys?from="+fromUUID+"&to="+toUUID)
+	rec := serve(t, baseStore(t), &fakePlanner{err: commute.ErrStationUnknown}, &fakeTimetabler{}, "/journeys?from="+fromUUID+"&to="+toUUID)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -181,7 +212,7 @@ func TestPlanNoUpstreamStation(t *testing.T) {
 }
 
 func TestPlanProviderOutage(t *testing.T) {
-	rec := serve(t, baseStore(t), &fakePlanner{err: errors.New("connection refused")}, "/journeys?from="+fromUUID+"&to="+toUUID)
+	rec := serve(t, baseStore(t), &fakePlanner{err: errors.New("connection refused")}, &fakeTimetabler{}, "/journeys?from="+fromUUID+"&to="+toUUID)
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502", rec.Code)
 	}
@@ -210,7 +241,7 @@ func TestPlanSameModeSingleRide(t *testing.T) {
 		TotalFare:     &fare,
 		TotalDistance: 8100,
 	}}
-	rec := serve(t, store, planner, "/journeys?from="+fromUUID+"&to="+toUUID)
+	rec := serve(t, store, planner, &fakeTimetabler{}, "/journeys?from="+fromUUID+"&to="+toUUID)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -239,7 +270,7 @@ func TestPlanFareUnknown(t *testing.T) {
 			{Type: "RIDE", Line: "MRTJ:M", Operator: "MRTJ", From: commute.FareStationRef{ID: "KCI-SUD"}, To: commute.FareStationRef{ID: "MRTJ-LBB"}, StationCount: 13},
 		},
 	}}
-	rec := serve(t, store, planner, "/journeys?from="+fromUUID+"&to="+toUUID)
+	rec := serve(t, store, planner, &fakeTimetabler{}, "/journeys?from="+fromUUID+"&to="+toUUID)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -252,7 +283,7 @@ func TestPlanFareUnknown(t *testing.T) {
 func TestPlanProviderUnsupported(t *testing.T) {
 	store := baseStore(t)
 	store.stops[fromUUID] = generated.GetStopRow{ID: mustUUID(t, fromUUID), Name: "Sudirman", ProviderCode: "legacy-gtfs", ProviderEntityID: "X-SUD"}
-	rec := serve(t, store, &fakePlanner{}, "/journeys?from="+fromUUID+"&to="+toUUID)
+	rec := serve(t, store, &fakePlanner{}, &fakeTimetabler{}, "/journeys?from="+fromUUID+"&to="+toUUID)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want 422", rec.Code)
 	}
@@ -276,7 +307,7 @@ func TestPlanUnknownLegTypePassesThrough(t *testing.T) {
 			{Type: "FUTURE_MODE", From: commute.FareStationRef{ID: "KCI-SUD"}, To: commute.FareStationRef{ID: "MRTJ-LBB"}},
 		},
 	}}
-	rec := serve(t, store, planner, "/journeys?from="+fromUUID+"&to="+toUUID)
+	rec := serve(t, store, planner, &fakeTimetabler{}, "/journeys?from="+fromUUID+"&to="+toUUID)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -300,8 +331,151 @@ func TestPlanNormalizeStoreError(t *testing.T) {
 			{Type: "RIDE", Line: "MRTJ:M", Operator: "MRTJ", From: commute.FareStationRef{ID: "KCI-SUD"}, To: commute.FareStationRef{ID: "MRTJ-LBB"}},
 		},
 	}}
-	rec := serve(t, store, planner, "/journeys?from="+fromUUID+"&to="+toUUID)
+	rec := serve(t, store, planner, &fakeTimetabler{}, "/journeys?from="+fromUUID+"&to="+toUUID)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}
+
+// departureStore resolves the walk+ride plan's boarding stops.
+func departureStore(t *testing.T) *fakeStore {
+	t.Helper()
+	store := baseStore(t)
+	store.uuidRows = []generated.ListStopIDsByProviderEntityIDsRow{
+		{ID: mustUUID(t, fromUUID), ProviderEntityID: "KCI-SUD"},
+		{ID: mustUUID(t, toUUID), ProviderEntityID: "MRTJ-LBB"},
+		{ID: mustUUID(t, dkaUUID), ProviderEntityID: "MRTJ-DKA"},
+	}
+	return store
+}
+
+// departurePlan is TRANSFER walk KCI-SUD -> MRTJ-DKA, then RIDE MRTJ:M
+// southbound to MRTJ-LBB — the boarding station is MRTJ-DKA.
+func departurePlan() *commute.FarePlan {
+	return &commute.FarePlan{
+		From: commute.FareStationRef{ID: "KCI-SUD", Name: "Sudirman"},
+		To:   commute.FareStationRef{ID: "MRTJ-LBB", Name: "Lebak Bulus"},
+		Legs: []commute.FareLeg{
+			{Type: "TRANSFER", From: commute.FareStationRef{ID: "KCI-SUD"}, To: commute.FareStationRef{ID: "MRTJ-DKA", Name: "Dukuh Atas BNI"}},
+			{Type: "RIDE", Line: "MRTJ:M", Operator: "MRTJ", From: commute.FareStationRef{ID: "MRTJ-DKA"}, To: commute.FareStationRef{ID: "MRTJ-LBB"}, StationCount: 12, Headsign: "Lebak Bulus Bank Syariah Indonesia"},
+		},
+	}
+}
+
+const departureTarget = "/journeys?from=b7f4b2a0-1f3d-4e5a-9c6b-2a1d3e4f5a6b&to=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+func rideLegDeps(t *testing.T, rec *httptest.ResponseRecorder) []any {
+	t.Helper()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	legs := decode(t, rec)["itinerary"].(map[string]any)["legs"].([]any)
+	deps, _ := legs[len(legs)-1].(map[string]any)["nextDepartures"].([]any)
+	return deps
+}
+
+func TestPlanAttachesNextDepartures(t *testing.T) {
+	trip := "MRTJ-1023"
+	tt := &fakeTimetabler{entries: []commute.TimetableEntry{
+		{EstimatedDeparture: "07:30:00", BoundFor: "Lebak Bulus Bank Syariah Indonesia", LineCode: "M"},
+		{EstimatedDeparture: "07:04:00", BoundFor: "Lebak Bulus Bank Syariah Indonesia", LineCode: "M", TripNumber: &trip},
+		{EstimatedDeparture: "07:11:00", BoundFor: "Lebak Bulus Bank Syariah Indonesia", LineCode: "M"},
+		{EstimatedDeparture: "07:17:00", BoundFor: "Lebak Bulus Bank Syariah Indonesia", LineCode: "M"},
+		{EstimatedDeparture: "07:05:00", BoundFor: "Bundaran HI Bank Jakarta", LineCode: "M"},           // wrong direction
+		{EstimatedDeparture: "07:06:00", BoundFor: "Lebak Bulus Bank Syariah Indonesia", LineCode: "C"}, // wrong line
+		{EstimatedDeparture: "06:50:00", BoundFor: "Lebak Bulus Bank Syariah Indonesia", LineCode: "M"}, // already left
+	}}
+	// 2026-09-24 07:00 WIB = 00:00 UTC.
+	rec := serveAt(t, departureStore(t), &fakePlanner{plan: departurePlan()}, tt,
+		departureTarget, time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC))
+
+	if tt.gotCalls != 1 || tt.gotOp != "MRTJ" || tt.gotCode != "DKA" {
+		t.Fatalf("timetable fetch = op %q code %q calls %d", tt.gotOp, tt.gotCode, tt.gotCalls)
+	}
+	if tt.gotFrom != "07:00" || tt.gotTo != "10:00" {
+		t.Fatalf("window = %s-%s, want 07:00-10:00", tt.gotFrom, tt.gotTo)
+	}
+	legs := decode(t, rec)["itinerary"].(map[string]any)["legs"].([]any)
+	if _, ok := legs[0].(map[string]any)["nextDepartures"]; ok {
+		t.Fatal("walk leg must not carry departures")
+	}
+	deps := legs[1].(map[string]any)["nextDepartures"].([]any)
+	if len(deps) != 3 {
+		t.Fatalf("departures = %v, want 3 sorted and capped", deps)
+	}
+	for i, want := range []string{"07:04", "07:11", "07:17"} {
+		if deps[i].(map[string]any)["time"] != want {
+			t.Fatalf("departures[%d] = %v", i, deps[i])
+		}
+	}
+	if deps[0].(map[string]any)["tripNumber"] != "MRTJ-1023" {
+		t.Fatalf("tripNumber = %v", deps[0])
+	}
+	if deps[1].(map[string]any)["tripNumber"] != nil {
+		t.Fatalf("null tripNumber must stay null: %v", deps[1])
+	}
+}
+
+func TestPlanDeparturesWrapMidnight(t *testing.T) {
+	tt := &fakeTimetabler{entries: []commute.TimetableEntry{
+		{EstimatedDeparture: "23:45:00", BoundFor: "Lebak Bulus Bank Syariah Indonesia", LineCode: "M"},
+		{EstimatedDeparture: "00:15:00", BoundFor: "Lebak Bulus Bank Syariah Indonesia", LineCode: "M"}, // next day, still in window
+		{EstimatedDeparture: "03:30:00", BoundFor: "Lebak Bulus Bank Syariah Indonesia", LineCode: "M"}, // outside 3h window
+		{EstimatedDeparture: "23:00:00", BoundFor: "Lebak Bulus Bank Syariah Indonesia", LineCode: "M"}, // already left
+	}}
+	// 23:30 WIB = 16:30 UTC.
+	rec := serveAt(t, departureStore(t), &fakePlanner{plan: departurePlan()}, tt,
+		departureTarget, time.Date(2026, 9, 24, 16, 30, 0, 0, time.UTC))
+
+	if tt.gotFrom != "23:30" || tt.gotTo != "02:30" {
+		t.Fatalf("window = %s-%s, want 23:30-02:30", tt.gotFrom, tt.gotTo)
+	}
+	deps := rideLegDeps(t, rec)
+	if len(deps) != 2 || deps[0].(map[string]any)["time"] != "23:45" || deps[1].(map[string]any)["time"] != "00:15" {
+		t.Fatalf("departures = %v, want [23:45 00:15]", deps)
+	}
+}
+
+func TestPlanTimetableOutageKeepsPlan(t *testing.T) {
+	tt := &fakeTimetabler{err: errors.New("upstream down")}
+	rec := serve(t, departureStore(t), &fakePlanner{plan: departurePlan()}, tt, departureTarget)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d — timetable outage must not fail the plan", rec.Code)
+	}
+	if deps := rideLegDeps(t, rec); deps != nil {
+		t.Fatalf("departures = %v, want omitted", deps)
+	}
+}
+
+func TestPlanDeparturesNoHeadsignMatchesAnyDirection(t *testing.T) {
+	plan := departurePlan()
+	plan.Legs[1].Headsign = ""
+	tt := &fakeTimetabler{entries: []commute.TimetableEntry{
+		{EstimatedDeparture: "07:05:00", BoundFor: "Bundaran HI Bank Jakarta", LineCode: "M"},
+		{EstimatedDeparture: "07:04:00", BoundFor: "Lebak Bulus Bank Syariah Indonesia", LineCode: "M"},
+	}}
+	rec := serveAt(t, departureStore(t), &fakePlanner{plan: plan}, tt,
+		departureTarget, time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC))
+	deps := rideLegDeps(t, rec)
+	if len(deps) != 2 || deps[0].(map[string]any)["time"] != "07:04" || deps[1].(map[string]any)["time"] != "07:05" {
+		t.Fatalf("departures = %v, want both directions sorted", deps)
+	}
+}
+
+func TestPlanWalkOnlySkipsTimetable(t *testing.T) {
+	tt := &fakeTimetabler{}
+	plan := &commute.FarePlan{
+		From: commute.FareStationRef{ID: "KCI-SUD", Name: "Sudirman"},
+		To:   commute.FareStationRef{ID: "MRTJ-DKA", Name: "Dukuh Atas BNI"},
+		Legs: []commute.FareLeg{
+			{Type: "TRANSFER", From: commute.FareStationRef{ID: "KCI-SUD"}, To: commute.FareStationRef{ID: "MRTJ-DKA"}},
+		},
+	}
+	rec := serve(t, departureStore(t), &fakePlanner{plan: plan}, tt, departureTarget)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if tt.gotCalls != 0 {
+		t.Fatalf("timetable fetched %d times for a walk-only plan", tt.gotCalls)
 	}
 }
