@@ -7,8 +7,10 @@
 		fitCamera,
 		focusCamera,
 		hitTest,
+		introSequence,
 		lineCutShapes,
 		linesNear,
+		markerLineStops,
 		pickArtworkTier,
 		pointOnScreen,
 		stationCutShapes,
@@ -16,6 +18,7 @@
 		zoomAt,
 		type CutShape,
 		type IntegrationCamera,
+		type IntroSequence,
 		type SchematicLabelPoint,
 		type SchematicLine,
 		type SchematicPoint,
@@ -47,6 +50,9 @@
 		attribution?: string;
 		/** Canonical station id currently selected — shared with the geo map. */
 		selectedId?: string;
+		/** False while a mode switch hides the pane; becoming true replays the
+		 *  network entrance sweep once (skipped under reduced motion). */
+		visible?: boolean;
 		onSelect?: (stationId: string) => void;
 		/** Tap on a corridor stroke — nearest traced line key. */
 		onLineSelect?: (lineKey: string) => void;
@@ -66,11 +72,15 @@
 		lineKey,
 		attribution,
 		selectedId,
+		visible = true,
 		onSelect,
 		onLineSelect,
 		camera = $bindable()
 	}: Props = $props();
 
+	// Paint-server ids are document-global — prefix with the instance id so
+	// two mounted maps never cross-reference each other's gradients.
+	const uid = $props.id();
 	let el: HTMLDivElement;
 	let vw = $state(0);
 	let vh = $state(0);
@@ -135,6 +145,54 @@
 		animating = true;
 		camera = focusCamera(cx, cy, Math.max(camera.scale, FOCUS_SCALE), world, view());
 		setTimeout(() => (animating = false), 260);
+	});
+
+	// --- entrance sweep -----------------------------------------------------
+	// Each traced line draws itself inward and both halves meet at the middle
+	// of the map — introSequence() gives every polyline's two pieces an end
+	// at the anchor, so dashoffset animation converges there ("bertemu di
+	// tengah"). The artwork hides during the draw and fades back over the
+	// finished strokes, which sit exactly on the corridor bands.
+	const INTRO_STROKE_MS = 560;
+	const INTRO_SPAN_MS = 340;
+	const INTRO_REVEAL_MS = 380;
+	let introPhase = $state<'idle' | 'draw' | 'reveal'>('idle');
+	let introData = $state<IntroSequence | undefined>();
+	// Bump restarts the CSS animations by remounting the overlay block.
+	let introRun = $state(0);
+	let introTimers: ReturnType<typeof setTimeout>[] = [];
+	let introArmed = true;
+
+	$effect(() => {
+		if (!visible) {
+			introArmed = true;
+			return;
+		}
+		// Deferred until the pane is actually laid out — a mode-hidden pane
+		// still runs effects but reports a 0-size viewport.
+		if (!introArmed || lines.length === 0 || vw <= 0) return;
+		introArmed = false;
+		if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+		const seq = introSequence(lines, points, world, {
+			strokeMs: INTRO_STROKE_MS,
+			spanMs: INTRO_SPAN_MS
+		});
+		if (seq.strokes.length === 0) return;
+		introData = seq;
+		introRun++;
+		introPhase = 'draw';
+		// A replay while the previous sweep is still scheduled must not let its
+		// stale timers land mid-draw.
+		for (const t of introTimers) clearTimeout(t);
+		introTimers = [];
+		const settle = INTRO_SPAN_MS + INTRO_STROKE_MS + 120;
+		introTimers.push(setTimeout(() => (introPhase = 'reveal'), settle));
+		introTimers.push(
+			setTimeout(() => {
+				introPhase = 'idle';
+				introData = undefined;
+			}, settle + INTRO_REVEAL_MS)
+		);
 	});
 
 	// --- gestures -----------------------------------------------------------
@@ -271,7 +329,10 @@
 	onMount(() => {
 		dpr = window.devicePixelRatio || 1;
 		el.addEventListener('wheel', onWheel, { passive: false });
-		return () => el.removeEventListener('wheel', onWheel);
+		return () => {
+			el.removeEventListener('wheel', onWheel);
+			for (const t of introTimers) clearTimeout(t);
+		};
 	});
 
 	function labelPos(p: SchematicPoint) {
@@ -314,30 +375,32 @@
 			style:height="{worldHeight}px"
 			style:transform="translate({camera.tx}px, {camera.ty}px) scale({camera.scale})"
 		>
-			{#if previewUrl && !previewFailed}
-				<img
-					class="sg-im__art"
-					src={previewUrl}
-					width={worldWidth}
-					height={worldHeight}
-					alt=""
-					draggable="false"
-					onerror={() => (previewFailed = true)}
-				/>
-			{/if}
-			{#each tiles as t (t.svg)}
-				<img
-					class="sg-im__tile"
-					src={artTier === 'svg' ? t.svg : (t.rasters[artTier] ?? t.svg)}
-					style:left="{t.x}px"
-					style:top="{t.y}px"
-					width={t.w}
-					height={t.h}
-					alt=""
-					draggable="false"
-					onerror={() => (tileErrors += 1)}
-				/>
-			{/each}
+			<div class="sg-im__artwork" class:sg-im__artwork--off={introPhase === 'draw'}>
+				{#if previewUrl && !previewFailed}
+					<img
+						class="sg-im__art"
+						src={previewUrl}
+						width={worldWidth}
+						height={worldHeight}
+						alt=""
+						draggable="false"
+						onerror={() => (previewFailed = true)}
+					/>
+				{/if}
+				{#each tiles as t (t.svg)}
+					<img
+						class="sg-im__tile"
+						src={artTier === 'svg' ? t.svg : (t.rasters[artTier] ?? t.svg)}
+						style:left="{t.x}px"
+						style:top="{t.y}px"
+						width={t.w}
+						height={t.h}
+						alt=""
+						draggable="false"
+						onerror={() => (tileErrors += 1)}
+					/>
+				{/each}
+			</div>
 			<svg
 				class="sg-im__overlay"
 				viewBox="0 0 {worldWidth} {worldHeight}"
@@ -347,8 +410,20 @@
 			>
 				{#if cutShapes.length > 0}
 					<!-- Veil with capsule cutouts: the artwork stays sharp through
-					     the holes — same treatment as commute's canvas scrim. -->
+					     the holes — same treatment as commute's canvas scrim. The
+					     shapes blur inside the mask so the dim edge ramps back in
+					     over ~26wu (commute's SPOTLIGHT_FEATHER_WORLD). -->
 					<defs>
+						<filter
+							id="sg-im-feather"
+							filterUnits="userSpaceOnUse"
+							x="0"
+							y="0"
+							width={worldWidth}
+							height={worldHeight}
+						>
+							<feGaussianBlur stdDeviation="13" />
+						</filter>
 						<mask
 							id="sg-im-veil-mask"
 							maskUnits="userSpaceOnUse"
@@ -358,32 +433,34 @@
 							height={worldHeight}
 						>
 							<rect width={worldWidth} height={worldHeight} fill="#fff" />
-							{#each cutShapes as s, i (i)}
-								{#if s.ax === s.bx && s.ay === s.by}
-									<circle cx={s.ax} cy={s.ay} r={s.r} fill="#000" />
-								{:else if (s.ax === s.bx || s.ay === s.by) && s.cr < s.r}
-									<!-- axis-aligned capsule with small corner radius = the
-									     authored rounded-rect shape (pills, label boxes) -->
-									<rect
-										x={Math.min(s.ax, s.bx) - s.r}
-										y={Math.min(s.ay, s.by) - s.r}
-										width={Math.abs(s.bx - s.ax) + s.r * 2}
-										height={Math.abs(s.by - s.ay) + s.r * 2}
-										rx={s.cr}
-										fill="#000"
-									/>
-								{:else}
-									<line
-										x1={s.ax}
-										y1={s.ay}
-										x2={s.bx}
-										y2={s.by}
-										stroke="#000"
-										stroke-width={s.r * 2}
-										stroke-linecap="round"
-									/>
-								{/if}
-							{/each}
+							<g filter="url(#sg-im-feather)">
+								{#each cutShapes as s, i (i)}
+									{#if s.ax === s.bx && s.ay === s.by}
+										<circle cx={s.ax} cy={s.ay} r={s.r} fill="#000" />
+									{:else if (s.ax === s.bx || s.ay === s.by) && s.cr < s.r}
+										<!-- axis-aligned capsule with small corner radius = the
+										     authored rounded-rect shape (pills, label boxes) -->
+										<rect
+											x={Math.min(s.ax, s.bx) - s.r}
+											y={Math.min(s.ay, s.by) - s.r}
+											width={Math.abs(s.bx - s.ax) + s.r * 2}
+											height={Math.abs(s.by - s.ay) + s.r * 2}
+											rx={s.cr}
+											fill="#000"
+										/>
+									{:else}
+										<line
+											x1={s.ax}
+											y1={s.ay}
+											x2={s.bx}
+											y2={s.by}
+											stroke="#000"
+											stroke-width={s.r * 2}
+											stroke-linecap="round"
+										/>
+									{/if}
+								{/each}
+							</g>
 						</mask>
 					</defs>
 					<rect
@@ -398,13 +475,47 @@
 					{@const sel = p.stationId === selectedId}
 					{@const lp = labelPos(p)}
 					<g class="sg-im__pt" class:sg-im__pt--sel={sel}>
-						{#if sel}
-							<circle
-								cx={(p.ax + p.bx) / 2}
-								cy={(p.ay + p.by) / 2}
-								r={p.radius + 12}
-								class="sg-im__halo"
-							/>
+						{#if sel && !p.noRing}
+							<!-- The ring hugs the whole marker capsule — every roundel
+							     of an interchange sits inside it — and runs through
+							     the serving lines' colours, ordered by where
+							     their strokes cross the spine. -->
+							{@const stops = markerLineStops(p, lines)}
+							{@const hcx = (p.ax + p.bx) / 2}
+							{@const hcy = (p.ay + p.by) / 2}
+							{@const hdx = p.bx - p.ax}
+							{@const hdy = p.by - p.ay}
+							{@const hlen = Math.hypot(hdx, hdy)}
+							{@const pad = p.radius + 10}
+							{@const gid = `sg-im-hg-${uid}-${p.id}`}
+							{#if stops.length > 1}
+								<linearGradient id={gid} x1="0" y1="0.5" x2="1" y2="0.5">
+									{#each stops as s (s.line.key)}
+										<stop
+											offset={hlen > 1 ? (s.t * hlen + pad) / (hlen + pad * 2) : s.t}
+											stop-color={s.line.color}
+										/>
+									{/each}
+								</linearGradient>
+							{/if}
+							<g
+								transform="translate({hcx} {hcy}) rotate({(Math.atan2(hdy, hdx) * 180) / Math.PI})"
+								transition:fade={{ duration: 180 }}
+							>
+								<rect
+									x={-hlen / 2 - pad}
+									y={-pad}
+									width={hlen + pad * 2}
+									height={pad * 2}
+									rx={Math.min((p.cornerRadius ?? p.radius) + 10, pad)}
+									class="sg-im__halo"
+									style:stroke={stops.length > 1
+										? `url(#${gid})`
+										: stops.length === 1
+											? stops[0].line.color
+											: undefined}
+								/>
+							</g>
 						{/if}
 						{#if markers !== 'baked'}
 							{#if p.ax === p.bx && p.ay === p.by}
@@ -433,6 +544,34 @@
 					</g>
 				{/each}
 			</svg>
+			{#if introPhase !== 'idle' && introData}
+				{#key introRun}
+					<svg
+						class="sg-im__intro"
+						viewBox="0 0 {worldWidth} {worldHeight}"
+						width={worldWidth}
+						height={worldHeight}
+						aria-hidden="true"
+					>
+						{#each introData.strokes as s, i (i)}
+							<path
+								class="sg-im__ipath"
+								d={s.d}
+								pathLength="1"
+								stroke={s.color}
+								stroke-width={s.width}
+								style:animation-delay="{s.delayMs}ms"
+							/>
+						{/each}
+						{#each introData.markers as m, i (i)}
+							<g class="sg-im__imark" style:animation-delay="{m.delayMs}ms">
+								<circle cx={m.x} cy={m.y} r={m.r} fill="#fff" />
+								<circle cx={m.x} cy={m.y} r={m.r * 0.72} fill={m.color} />
+							</g>
+						{/each}
+					</svg>
+				{/key}
+			{/if}
 		</div>
 	{:else}
 		<p class="sg-im__state" role="status">Memuat peta integrasi…</p>
@@ -487,11 +626,67 @@
 	}
 	.sg-im__art,
 	.sg-im__tile,
-	.sg-im__overlay {
+	.sg-im__overlay,
+	.sg-im__intro {
 		position: absolute;
 		top: 0;
 		left: 0;
 		display: block;
+	}
+	.sg-im__artwork {
+		position: absolute;
+		inset: 0;
+		transition: opacity 0.38s ease-out;
+	}
+	.sg-im__artwork--off {
+		opacity: 0;
+		transition-duration: 0.1s;
+	}
+	.sg-im__intro {
+		pointer-events: none;
+	}
+	.sg-im__ipath {
+		fill: none;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+		stroke-dasharray: 1;
+		stroke-dashoffset: 1;
+		animation: sg-im-ipath 0.56s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+	}
+	@keyframes sg-im-ipath {
+		to {
+			stroke-dashoffset: 0;
+		}
+	}
+	.sg-im__imark {
+		transform-box: fill-box;
+		transform-origin: center;
+		opacity: 0;
+		animation: sg-im-imark 0.2s ease-out both;
+	}
+	@keyframes sg-im-imark {
+		from {
+			opacity: 0;
+			transform: scale(0.3);
+		}
+		to {
+			opacity: 1;
+			transform: scale(1);
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.sg-im__ipath {
+			animation: none;
+			stroke-dashoffset: 0;
+		}
+		.sg-im__imark {
+			animation: none;
+			opacity: 1;
+			transform: none;
+		}
+		.sg-im__artwork {
+			transition-duration: 0.1s;
+		}
 	}
 	.sg-im__attr {
 		position: absolute;

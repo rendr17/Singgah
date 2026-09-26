@@ -368,3 +368,213 @@ export function clampCamera(
 		ty: clamp(camera.ty, world.height * camera.scale, viewport.height)
 	};
 }
+
+// --- selection halo + entrance sweep ----------------------------------------
+
+/** A line serving a marker, and where its traced stroke crosses the capsule
+ *  spine — 0..1 from a→b. */
+export interface MarkerLineStop {
+	line: SchematicLine;
+	t: number;
+}
+
+/** Lines serving a station marker (the point's provider key appears in a
+ *  segment's `markers`), ordered along the capsule spine. The artwork lays
+ *  each roundel out where its line passes through, so the stop order matches
+ *  the baked dots and the halo can paint each ring section in its own line's
+ *  colour. Circle markers have no spine: stops spread evenly instead. */
+export function markerLineStops(
+	point: SchematicPoint,
+	lines: readonly SchematicLine[]
+): MarkerLineStop[] {
+	const dx = point.bx - point.ax;
+	const dy = point.by - point.ay;
+	const len2 = dx * dx + dy * dy;
+	const stops: MarkerLineStop[] = [];
+	for (const line of lines) {
+		if (!line.segments.some((s) => s.markers.includes(point.id))) continue;
+		let best = Infinity;
+		let t = 0.5;
+		for (const segment of line.segments) {
+			for (const [ex1, ey1, ex2, ey2] of segment.edges) {
+				if (len2 === 0) break;
+				const mx = (ex1 + ex2) / 2;
+				const my = (ey1 + ey2) / 2;
+				const tt = Math.max(
+					0,
+					Math.min(1, ((mx - point.ax) * dx + (my - point.ay) * dy) / len2)
+				);
+				const d = (mx - (point.ax + tt * dx)) ** 2 + (my - (point.ay + tt * dy)) ** 2;
+				if (d < best) {
+					best = d;
+					t = tt;
+				}
+			}
+		}
+		stops.push({ line, t });
+	}
+	stops.sort((a, b) => a.t - b.t);
+	if (len2 === 0 && stops.length > 1)
+		stops.forEach((s, i) => (s.t = i / (stops.length - 1)));
+	return stops;
+}
+
+/** One drawn piece of the entrance sweep — dashoffset-animated start→end. */
+export interface IntroStroke {
+	d: string;
+	color: string;
+	/** Stroke width in world units — the corridor band it lands on (2r). */
+	width: number;
+	delayMs: number;
+}
+
+/** A station roundel popping in as the sweep reaches it. */
+export interface IntroMarker {
+	x: number;
+	y: number;
+	r: number;
+	color: string;
+	delayMs: number;
+}
+
+export interface IntroSequence {
+	strokes: IntroStroke[];
+	markers: IntroMarker[];
+}
+
+interface IntroPiece {
+	line: SchematicLine;
+	pts: [number, number][];
+	/** Cumulative arc length at each vertex — for marker timing. */
+	cum: number[];
+	total: number;
+}
+
+/** Edge quads are contiguous-but-may-reverse trace output; join them into
+ *  one polyline, appending a short connector where a gap slips through. */
+function chainEdges(edges: number[][]): [number, number][] {
+	const pts: [number, number][] = [];
+	for (const [x1, y1, x2, y2] of edges) {
+		const tail = pts[pts.length - 1];
+		if (!tail) pts.push([x1, y1], [x2, y2]);
+		else if (Math.abs(tail[0] - x1) < 1 && Math.abs(tail[1] - y1) < 1) pts.push([x2, y2]);
+		else if (Math.abs(tail[0] - x2) < 1 && Math.abs(tail[1] - y2) < 1) pts.push([x1, y1]);
+		else pts.push([x1, y1], [x2, y2]);
+	}
+	return pts;
+}
+
+/** Draw-order geometry for the entrance sweep — the network drawing itself
+ *  in when the pane becomes visible (commute map-skeleton.tsx, reversed:
+ *  each polyline splits at the vertex nearest the map's middle and both
+ *  halves are oriented to END there, so a line's two drawing heads converge
+ *  at its centre-nearest point — "bertemu di tengah". Line delays rank
+ *  far→near so the cascade finishes at the middle rather than starting there. */
+export function introSequence(
+	lines: readonly SchematicLine[],
+	points: readonly SchematicPoint[],
+	world: WorldRect,
+	opts: { strokeMs?: number; spanMs?: number } = {}
+): IntroSequence {
+	const strokeMs = opts.strokeMs ?? 560;
+	const spanMs = opts.spanMs ?? 340;
+	const ax = world.width / 2;
+	const ay = world.height / 2;
+
+	const pieces: IntroPiece[] = [];
+	const nearByLine = new Map<string, number>();
+	for (const line of lines) {
+		for (const segment of line.segments) {
+			const pts = chainEdges(segment.edges);
+			if (pts.length < 2) continue;
+			let split = 0;
+			let near = Infinity;
+			for (let i = 0; i < pts.length; i++) {
+				const d = (pts[i][0] - ax) ** 2 + (pts[i][1] - ay) ** 2;
+				if (d < near) {
+					near = d;
+					split = i;
+				}
+			}
+			nearByLine.set(line.key, Math.min(nearByLine.get(line.key) ?? Infinity, near));
+			for (const part of [pts.slice(0, split + 1), pts.slice(split).reverse()])
+				if (part.length >= 2) {
+					const cum = [0];
+					for (let i = 1; i < part.length; i++)
+						cum.push(
+							cum[i - 1] +
+								Math.hypot(part[i][0] - part[i - 1][0], part[i][1] - part[i - 1][1])
+						);
+					pieces.push({ line, pts: part, cum, total: cum[cum.length - 1] });
+				}
+		}
+	}
+
+	const ranked = [...nearByLine.entries()].sort((a, b) => a[1] - b[1]);
+	const divisor = Math.max(1, ranked.length - 1);
+	const delayByLine = new Map(
+		ranked.map(([key], i) => [key, ((ranked.length - 1 - i) / divisor) * spanMs])
+	);
+
+	const strokes: IntroStroke[] = pieces.map((p) => ({
+		d: 'M' + p.pts.map(([x, y]) => `${Math.round(x)} ${Math.round(y)}`).join('L'),
+		color: p.line.color,
+		width: p.line.r * 2,
+		delayMs: delayByLine.get(p.line.key) ?? 0
+	}));
+
+	// Station dots pop in their serving line's colour the moment the drawing
+	// head passes — commute's orderStations: the delay is the piece's own
+	// start plus the arc fraction the head still has to travel to reach it.
+	const linesByPoint = new Map<string, SchematicLine[]>();
+	for (const line of lines)
+		for (const s of line.segments)
+			for (const mk of s.markers) {
+				const arr = linesByPoint.get(mk);
+				if (arr) arr.push(line);
+				else linesByPoint.set(mk, [line]);
+			}
+	const piecesByLine = new Map<string, IntroPiece[]>();
+	for (const p of pieces) {
+		const arr = piecesByLine.get(p.line.key);
+		if (arr) arr.push(p);
+		else piecesByLine.set(p.line.key, [p]);
+	}
+
+	const markers: IntroMarker[] = [];
+	for (const point of points) {
+		const serving = linesByPoint.get(point.id);
+		if (!serving?.length) continue;
+		const dx = point.bx - point.ax;
+		const dy = point.by - point.ay;
+		const seenPos = new Set<string>();
+		for (const { line, t } of markerLineStops(point, serving)) {
+			const x = point.ax + t * dx;
+			const y = point.ay + t * dy;
+			const posKey = `${Math.round(x / 8)}:${Math.round(y / 8)}`;
+			if (seenPos.has(posKey)) continue;
+			seenPos.add(posKey);
+			let best = Infinity;
+			let delayMs = delayByLine.get(line.key) ?? 0;
+			for (const pc of piecesByLine.get(line.key) ?? []) {
+				for (let i = 0; i < pc.pts.length - 1; i++) {
+					const [x1, y1] = pc.pts[i];
+					const [x2, y2] = pc.pts[i + 1];
+					const ex = x2 - x1;
+					const ey = y2 - y1;
+					const e2 = ex * ex + ey * ey || 1;
+					const tt = Math.max(0, Math.min(1, ((x - x1) * ex + (y - y1) * ey) / e2));
+					const d = (x - (x1 + tt * ex)) ** 2 + (y - (y1 + tt * ey)) ** 2;
+					if (d < best) {
+						best = d;
+						delayMs =
+							(delayByLine.get(line.key) ?? 0) +
+							(pc.total ? (pc.cum[i] + tt * Math.sqrt(e2)) / pc.total : 0) * strokeMs;
+					}
+				}
+			}
+			markers.push({ x, y, r: point.radius * 0.8, color: line.color, delayMs });
+		}
+	}
+	return { strokes, markers };
+}

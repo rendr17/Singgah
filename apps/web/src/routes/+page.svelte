@@ -3,13 +3,14 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
-	import { env } from '$env/dynamic/public';
+	import { SvelteMap } from 'svelte/reactivity';
 	import UiPreview from '$lib/dev/UiPreview.svelte';
 	import MapModeSwitcher from '$lib/components/map/MapModeSwitcher.svelte';
 	import MapSearch from '$lib/components/map/MapSearch.svelte';
 	import StationCombobox from '$lib/components/station/StationCombobox.svelte';
 	import DepartureBoard from '$lib/components/station/DepartureBoard.svelte';
 	import JourneyTimeline from '$lib/components/journey/JourneyTimeline.svelte';
+	import { basemapStyleUrl } from '$lib/basemap';
 	import { facilityLabel } from '$lib/facilities';
 	import {
 		buildIntegrationTiles,
@@ -21,7 +22,13 @@
 	import { mapStore } from '$lib/stores/map.svelte';
 	import { unwrap } from '@singgah/api-client';
 	import type { components } from '@singgah/api-client';
-	import type { Feature, FeatureCollection, SchematicPoint } from '@singgah/map';
+	import type {
+		Feature,
+		FeatureCollection,
+		SchematicLabelPoint,
+		SchematicLine,
+		SchematicPoint
+	} from '@singgah/map';
 	import { Button, IconButton, SearchField, StateBlock, StatusBadge } from '@singgah/ui';
 
 	type Station = components['schemas']['StationSummary'];
@@ -30,9 +37,10 @@
 	type Plan = components['schemas']['JourneyPlan'];
 	type RouteLines = components['schemas']['RouteLineCollection'];
 	type RouteDetail = components['schemas']['RouteDetail'];
+	type RouteSummary = components['schemas']['RouteSummary'];
 	type LegAlternative = components['schemas']['JourneyLegAlternative'];
 
-	const STYLE_URL = env.PUBLIC_MAP_STYLE_URL ?? 'https://tiles.openfreemap.org/styles/bright';
+	const STYLE_URL = basemapStyleUrl();
 
 	let query = $state('');
 	let stations = $state<Station[]>([]);
@@ -87,22 +95,46 @@
 	// mode switches so each map keeps its camera and loaded tiles.
 	let integrationManifest = $state<IntegrationManifest | undefined>();
 	let integrationPoints = $state<SchematicPoint[]>([]);
+	let integrationLines = $state<SchematicLine[]>([]);
+	let integrationLabels = $state<SchematicLabelPoint[]>([]);
 	let integrationFailed = $state(false);
 	let integrationRequested = false;
 	const integrationTiles = $derived(
 		integrationManifest ? buildIntegrationTiles(integrationManifest) : []
 	);
 
+	// Traced corridor keys ("KCI:C") join the routes catalog on
+	// agencyCode:shortName — a tapped stroke resolves to the canonical route
+	// id, and a drawn corridor isolates itself on the artwork (veil).
+	const routesByKey = new SvelteMap<string, RouteSummary>();
+	const keyByRouteId = new SvelteMap<string, string>();
+
 	function loadIntegration() {
 		if (integrationRequested) return;
 		integrationRequested = true;
 		void (async () => {
 			try {
-				const { manifest, points } = await loadIntegrationMap();
+				const { manifest, points, lines, labels } = await loadIntegrationMap();
 				integrationPoints = points;
+				integrationLines = lines;
+				integrationLabels = labels;
 				integrationManifest = manifest;
 			} catch {
 				integrationFailed = true;
+			}
+		})();
+		// Catalog join degrades independently — taps still open stations.
+		void (async () => {
+			try {
+				const data = await unwrap(api.GET('/api/v1/routes', { params: { query: { limit: 500 } } }));
+				for (const r of data.routes) {
+					if (!r.agencyCode || !r.shortName) continue;
+					const key = `${r.agencyCode}:${r.shortName}`;
+					routesByKey.set(key, r);
+					keyByRouteId.set(r.id, key);
+				}
+			} catch {
+				/* corridor taps degrade — stations still select */
 			}
 		})();
 	}
@@ -277,6 +309,13 @@
 	// Viewport-scoped markers + route lines, same contract as /map.
 	let mapStations = $state<Station[]>([]);
 	let netLines = $state<RouteLines | undefined>();
+	let stationsError = $state('');
+	// First fetch only — later pans keep the last markers and don't flash a
+	// loading note over a usable map.
+	let stationsFirstLoad = $state(true);
+	// A dead map (style load failure) never emits a viewport, so the stations
+	// state would spin "Memuat…" forever — the note is gated on this instead.
+	let mapFailed = $state(false);
 	// Manual "Garis rute" switch — a drawn journey/corridor still wins, so
 	// effective visibility is `linesVisible && !routeActive` on the map.
 	let linesVisible = $state(false);
@@ -293,8 +332,13 @@
 						})
 					);
 					mapStations = data.stations;
-				} catch {
-					// keep the last good marker set — the offline banner covers the rest
+					stationsError = '';
+				} catch (e) {
+					// Keep the last good marker set — the map note reports the outage
+					// instead of leaving an unexplained empty map.
+					stationsError = e instanceof Error ? e.message : 'Data stasiun gagal dimuat.';
+				} finally {
+					stationsFirstLoad = false;
 				}
 			})();
 			// Route lines degrade independently — decorative layer, same as /map.
@@ -409,6 +453,23 @@
 		} catch {
 			if (seq === corridorSeq) corridorState = 'error';
 		}
+	}
+
+	// An open corridor isolates itself on the schematic (dim veil) — the key
+	// join is only populated for corridors actually traced on the artwork.
+	const corridorLineKey = $derived(corridor ? keyByRouteId.get(corridor.id) : undefined);
+
+	// Line taps: a corridor stroke on the schematic resolves "OP:CODE" via the
+	// catalog join; the geo map's route lines already carry canonical ids. An
+	// open inspector drills into its corridor view — otherwise the route page
+	// carries the detail (same destination as picking a line in search).
+	function onLineTap(routeId: string) {
+		if (inspector) void openCorridor(routeId);
+		else void goto(resolve('/routes/[id]', { id: routeId }));
+	}
+	function onSchematicLine(key: string) {
+		const r = routesByKey.get(key);
+		if (r) onLineTap(r.id);
 	}
 
 	// Drawable corridor: the catalog's MultiLineString for this route wins
@@ -732,7 +793,9 @@
 					linesVisible={linesVisible && !routeActive}
 					{onViewportChange}
 					onSelect={inspect}
+					onSelectLine={onLineTap}
 					focus={focusPoint}
+					onFailed={() => (mapFailed = true)}
 					{route}
 				/>
 				<label class="lines-toggle">
@@ -754,10 +817,15 @@
 						worldWidth={integrationManifest.viewBox[2]}
 						worldHeight={integrationManifest.viewBox[3]}
 						points={integrationPoints}
+						lines={integrationLines}
+						labels={integrationLabels}
+						lineKey={corridorLineKey}
 						markers={integrationManifest.markers ?? 'overlay'}
 						attribution={integrationManifest.attribution}
 						selectedId={inspectingId}
+						visible={mapStore.mode === 'integration'}
 						onSelect={inspect}
+						onLineSelect={onSchematicLine}
 						bind:camera={mapStore.integrationCamera}
 					/>
 				{:else}
@@ -766,6 +834,15 @@
 					</div>
 				{/if}
 			</div>
+			{#if !mapFailed && stationsFirstLoad}
+				<div class="map-note">
+					<StateBlock kind="loading">Memuat stasiun…</StateBlock>
+				</div>
+			{:else if !mapFailed && stationsError}
+				<div class="map-note">
+					<StateBlock kind="error">{stationsError}</StateBlock>
+				</div>
+			{/if}
 			<MapModeSwitcher />
 		{:else}
 			<StateBlock kind="loading">Memuat peta…</StateBlock>
@@ -1268,6 +1345,18 @@
 			border-radius: var(--sg-radius-button);
 			box-shadow: var(--sg-shadow-overlay);
 			font-size: var(--sg-text-secondary);
+			z-index: 1;
+		}
+
+		/* Station-layer status — same .map-note idiom as /map: a centered chip
+		   under the top edge, inert so it never eats map gestures. */
+		.map-note {
+			position: absolute;
+			top: var(--sg-space-3);
+			inset-inline: var(--sg-space-3);
+			display: flex;
+			justify-content: center;
+			pointer-events: none;
 			z-index: 1;
 		}
 

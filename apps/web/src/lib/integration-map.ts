@@ -38,16 +38,25 @@ export async function loadIntegrationMap(): Promise<{
 	const pr = await fetch(manifest.points);
 	if (!pr.ok) throw new Error('points unavailable');
 	const { points } = (await pr.json()) as { points: SchematicPoint[] };
-	// Lines/labels power isolation; a missing set degrades to a map that
-	// still selects stations but doesn't dim for a tapped corridor.
-	const lines = manifest.lines
-		? (((await (await fetch(manifest.lines)).json()) as { lines: SchematicLine[] }).lines ?? [])
-		: [];
-	const labels = manifest.labels
-		? (((await (await fetch(manifest.labels)).json()) as { points: SchematicLabelPoint[] })
-				.points ?? [])
-		: [];
+	// Lines/labels power isolation; a missing or unreadable set degrades to a
+	// map that still selects stations but doesn't dim for a tapped corridor.
+	const [lines, labels] = await Promise.all([
+		manifest.lines ? fetchWrapped<SchematicLine>(manifest.lines, 'lines') : Promise.resolve([]),
+		manifest.labels
+			? fetchWrapped<SchematicLabelPoint>(manifest.labels, 'points')
+			: Promise.resolve([])
+	]);
 	return { manifest, points, lines, labels };
+}
+
+async function fetchWrapped<T>(url: string, wrap: string): Promise<T[]> {
+	try {
+		const res = await fetch(url);
+		if (!res.ok) return [];
+		return ((await res.json()) as Record<string, T[]>)[wrap] ?? [];
+	} catch {
+		return [];
+	}
 }
 
 // One tile per grid cell; each carries its SVG plus the pre-rasterized webp

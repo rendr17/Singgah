@@ -16,6 +16,8 @@
 		fitToData?: boolean;
 		/** Click on an unclustered station — receives its canonical id. */
 		onSelect?: (id: string) => void;
+		/** Click on a network route line — receives its canonical route id. */
+		onSelectLine?: (routeId: string) => void;
 		/** Viewport bounds after each settled move — drives bbox-scoped fetches. */
 		onViewportChange?: (bbox: [number, number, number, number]) => void;
 		/** Journey overlay — LineStrings get `dashed` for walk legs; Points mark
@@ -30,6 +32,10 @@
 		/** Imperative camera target: ease to this lon/lat only when it falls
 		 *  outside the current view — in-view selections never move the map. */
 		focus?: [number, number];
+		/** Called once when the map can never become ready (init or style load
+		 *  failure) — lets parents drop loading affordances that would otherwise
+		 *  spin forever. */
+		onFailed?: () => void;
 		class?: string;
 	}
 
@@ -41,11 +47,13 @@
 		interactive = true,
 		fitToData = false,
 		onSelect,
+		onSelectLine,
 		onViewportChange,
 		route,
 		lines,
 		linesVisible = true,
 		focus,
+		onFailed,
 		class: className
 	}: Props = $props();
 
@@ -99,6 +107,16 @@
 					m.addControl(new ml.ScaleControl({ unit: 'metric' }), 'bottom-left');
 				}
 				map = m;
+				// A failed style/sprite fetch never reaches 'load' — emit() and the
+				// data fetches it drives would silently never run. Surface it as
+				// failed instead of hanging on "Memuat peta…". Tile/source errors
+				// carry sourceId/tile and are transient — leave those alone.
+				m.on('error', (e) => {
+					const ev = e as { sourceId?: string; tile?: unknown };
+					if (cancelled || ready || ev.sourceId || ev.tile) return;
+					failed = true;
+					onFailed?.();
+				});
 				m.on('load', () => {
 					if (cancelled) return;
 					m!.addSource(LINES, { type: 'geojson', data: lines ?? EMPTY_FC });
@@ -353,6 +371,25 @@
 							m!.getCanvas().style.cursor = '';
 						});
 					}
+					// Corridor strokes select their route — except where a
+					// station/cluster sits on the line: markers draw on top, so
+					// they win the tap too.
+					for (const layer of ['route-lines', 'route-lines-approx']) {
+						m!.on('click', layer, (e) => {
+							const id = e.features?.[0]?.properties?.routeId;
+							if (typeof id !== 'string') return;
+							const covered = ['stations', 'station-icons', 'clusters']
+								.filter((l) => m!.getLayer(l))
+								.some((l) => m!.queryRenderedFeatures(e.point, { layers: [l] }).length > 0);
+							if (!covered) onSelectLine?.(id);
+						});
+						m!.on('mouseenter', layer, () => {
+							m!.getCanvas().style.cursor = 'pointer';
+						});
+						m!.on('mouseleave', layer, () => {
+							m!.getCanvas().style.cursor = '';
+						});
+					}
 					if (onViewportChange) {
 						const emit = () => {
 							// A hidden pane (other map mode) has a 0-size container — its
@@ -371,7 +408,10 @@
 					ready = true;
 				});
 			} catch {
-				if (!cancelled) failed = true;
+				if (!cancelled) {
+					failed = true;
+					onFailed?.();
+				}
 			}
 		})();
 		return () => {

@@ -5,8 +5,10 @@ import {
 	focusCamera,
 	hitTest,
 	hitTestPoint,
+	introSequence,
 	lineCutShapes,
 	linesNear,
+	markerLineStops,
 	pickArtworkTier,
 	pointOnScreen,
 	stationCutShapes,
@@ -235,5 +237,130 @@ describe('pickArtworkTier', () => {
 	it('clamps tiny/degenerate inputs to the coarsest tier', () => {
 		expect(pickArtworkTier(0.01, 1)).toBe('0.5');
 		expect(pickArtworkTier(0.8, 0)).toBe('1');
+	});
+});
+
+describe('markerLineStops', () => {
+	const capsule: SchematicPoint = {
+		id: 'S',
+		stationId: 'st-1',
+		ax: 0,
+		ay: 0,
+		bx: 100,
+		by: 0,
+		radius: 10
+	};
+	const lineAt = (key: string, color: string, x: number): SchematicLine => ({
+		key,
+		operator: 'T',
+		code: key,
+		name: key,
+		color,
+		r: 4,
+		segments: [{ kind: 'TRUNK', edges: [[x, -50, x, 50]], markers: ['S'] }]
+	});
+
+	it('orders serving lines by where they cross the spine', () => {
+		const stops = markerLineStops(capsule, [
+			lineAt('A', '#aaa', 20),
+			lineAt('B', '#bbb', 80),
+			lineAt('C', '#ccc', 0)
+		]);
+		expect(stops.map((s) => s.line.key)).toEqual(['C', 'A', 'B']);
+		expect(stops.map((s) => s.t)).toEqual([0, 0.2, 0.8]);
+	});
+
+	it('skips lines that do not serve the point', () => {
+		const stops = markerLineStops(capsule, [
+			lineAt('A', '#aaa', 50),
+			{
+				...lineAt('X', '#xxx', 10),
+				segments: [{ kind: 'TRUNK', edges: [[10, -50, 10, 50]], markers: ['OTHER'] }]
+			}
+		]);
+		expect(stops.map((s) => s.line.key)).toEqual(['A']);
+	});
+
+	it('spreads stops evenly on circle markers', () => {
+		const circle: SchematicPoint = { ...capsule, bx: 0, by: 0 };
+		const stops = markerLineStops(circle, [lineAt('A', '#aaa', 0), lineAt('B', '#bbb', 0)]);
+		expect(stops.map((s) => s.t)).toEqual([0, 1]);
+	});
+});
+
+describe('introSequence', () => {
+	const world = { width: 400, height: 300 }; // anchor (200, 150)
+	const line = (
+		key: string,
+		color: string,
+		edges: number[][],
+		markers: string[] = []
+	): SchematicLine => ({
+		key,
+		operator: 'T',
+		code: key,
+		name: key,
+		color,
+		r: 5,
+		segments: [{ kind: 'TRUNK', edges, markers }]
+	});
+
+	it('splits each polyline so every stroke ends at the middle-nearest vertex', () => {
+		const across = line('T:1', '#111111', [
+			[0, 150, 100, 150],
+			[100, 150, 200, 150],
+			[200, 150, 390, 150]
+		]);
+		const { strokes } = introSequence([across], [], world, { strokeMs: 100, spanMs: 40 });
+		// nearest vertex to (200,150) is (200,150) itself — both pieces end there.
+		expect(strokes).toHaveLength(2);
+		for (const s of strokes) {
+			expect(s.d.endsWith('200 150')).toBe(true);
+			expect(s.width).toBe(10);
+		}
+		expect(strokes.map((s) => s.d).sort()).toEqual(
+			['M0 150L100 150L200 150', 'M390 150L200 150'].sort()
+		);
+	});
+
+	it('ranks delays so the line nearest the middle draws last', () => {
+		const near = line('T:N', '#n', [[190, 140, 210, 160]]);
+		const far = line('T:F', '#f', [[0, 10, 10, 10]]);
+		const { strokes } = introSequence([near, far], [], world, { strokeMs: 100, spanMs: 80 });
+		const byColor = Object.fromEntries(strokes.map((s) => [s.color, s.delayMs]));
+		expect(byColor['#n']).toBeCloseTo(80);
+		expect(byColor['#f']).toBeCloseTo(0);
+	});
+
+	it('pops station dots in the serving colour as the head passes', () => {
+		const trunk = line('T:1', '#abc', [[0, 150, 200, 150]], ['P']);
+		const point: SchematicPoint = {
+			id: 'P',
+			stationId: 'st',
+			ax: 50,
+			ay: 150,
+			bx: 50,
+			by: 150,
+			radius: 10
+		};
+		const { markers } = introSequence([trunk], [point], world, { strokeMs: 100, spanMs: 0 });
+		expect(markers).toHaveLength(1);
+		expect(markers[0].color).toBe('#abc');
+		// dot at (50,150) sits a quarter along the 0→200 piece.
+		expect(markers[0].delayMs).toBeCloseTo(25);
+	});
+
+	it('does not pop markers a line does not serve', () => {
+		const trunk = line('T:1', '#abc', [[0, 150, 200, 150]], ['Q']);
+		const point: SchematicPoint = {
+			id: 'P',
+			stationId: 'st',
+			ax: 50,
+			ay: 150,
+			bx: 50,
+			by: 150,
+			radius: 10
+		};
+		expect(introSequence([trunk], [point], world).markers).toHaveLength(0);
 	});
 });

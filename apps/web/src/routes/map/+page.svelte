@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { env } from '$env/dynamic/public';
 	import { browser } from '$app/environment';
 	import { onMount, tick } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { api } from '$lib/api';
+	import { basemapStyleUrl } from '$lib/basemap';
 	import { facilityLabel } from '$lib/facilities';
 	import { mapStore } from '$lib/stores/map.svelte';
 	import BackNav from '$lib/components/app-shell/BackNav.svelte';
@@ -30,9 +30,7 @@
 	type RouteDetail = components['schemas']['RouteDetail'];
 	type Plan = components['schemas']['JourneyPlan'];
 
-	// OpenFreeMap: free public OpenMapTiles hosting, no key — fine for dev and
-	// early production; self-hosting a style is a later infra decision.
-	const STYLE_URL = env.PUBLIC_MAP_STYLE_URL ?? 'https://tiles.openfreemap.org/styles/bright';
+	const STYLE_URL = basemapStyleUrl();
 
 	let stations = $state<Station[]>([]);
 	let lines = $state<RouteLines | undefined>();
@@ -41,6 +39,9 @@
 	// First fetch only — later pans keep the last markers and don't flash a
 	// loading note over a usable map.
 	let firstLoad = $state(true);
+	// A dead map (style load failure) never emits a viewport, so firstLoad
+	// would spin "Memuat…" forever — the note is gated on this instead.
+	let mapFailed = $state(false);
 
 	// Station sheet — the two fetches degrade independently: a timetable
 	// outage must not hide the station's catalog detail.
@@ -346,12 +347,12 @@
 		{/if}
 	</div>
 
-	{#if firstLoad}
+	{#if !mapFailed && firstLoad}
 		<div class="map-note">
 			<StateBlock kind="loading">Memuat stasiun…</StateBlock>
 		</div>
 	{/if}
-	{#if error}
+	{#if !mapFailed && error}
 		<div class="map-note">
 			<StateBlock kind="error">{error}</StateBlock>
 		</div>
@@ -370,6 +371,8 @@
 				focus={focusPoint}
 				route={journeyRoute}
 				onSelect={openStation}
+				onSelectLine={openLine}
+				onFailed={() => (mapFailed = true)}
 			/>
 			<label class="lines-toggle">
 				<input type="checkbox" bind:checked={linesVisible} />
@@ -396,6 +399,7 @@
 					markers={integrationManifest.markers ?? 'overlay'}
 					attribution={integrationManifest.attribution}
 					selectedId={mapStore.selectedStationId}
+					visible={mapStore.mode === 'integration'}
 					onSelect={openStation}
 					onLineSelect={openLineByKey}
 					bind:camera={mapStore.integrationCamera}
