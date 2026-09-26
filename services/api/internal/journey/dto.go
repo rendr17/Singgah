@@ -1,6 +1,9 @@
 package journey
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Public shapes — canonical UUIDs out, provider ids stay out of the contract.
 
@@ -21,9 +24,31 @@ type Leg struct {
 	StationCount int       `json:"stationCount,omitempty"`
 	Stops        []StopRef `json:"stops,omitempty"`
 	Headsign     string    `json:"headsign,omitempty"`
+	// Geometry is a GeoJSON LineString sliced from an ingested route shape
+	// (GTFS) between the leg's endpoints — the candidate cut that best hugs
+	// the leg's stops. Absent when no shape serves the listed stops —
+	// clients draw the stop-to-stop polyline instead.
+	Geometry json.RawMessage `json:"geometry,omitempty"`
 	// NextDepartures fills the first ride leg only — later boardings would
 	// need arrival-time propagation the provider doesn't compute.
 	NextDepartures []Departure `json:"nextDepartures,omitempty"`
+	// Alternatives are other routes that also carry this leg's endpoints —
+	// corridors the rider could board instead of the provider's pick.
+	Alternatives []LegAlternative `json:"alternatives,omitempty"`
+}
+
+// LegAlternative is a catalog-derived option: its stops and geometry come
+// from that route's own route_stops/shape rows, so selecting one never
+// borrows the chosen leg's stop list to describe a different corridor.
+type LegAlternative struct {
+	RouteID      string          `json:"routeId"`
+	Line         string          `json:"line"` // provider entity id, e.g. "TJ:2"
+	ShortName    string          `json:"shortName,omitempty"`
+	Name         string          `json:"name,omitempty"` // corridor long name
+	Operator     string          `json:"operator,omitempty"`
+	StationCount int             `json:"stationCount,omitempty"`
+	Stops        []StopRef       `json:"stops"`
+	Geometry     json.RawMessage `json:"geometry,omitempty"`
 }
 
 // Departure is one scheduled boarding — Asia/Jakarta wall clock.
@@ -60,7 +85,8 @@ type Itinerary struct {
 type PlanResponse struct {
 	From      StopRef    `json:"from"`
 	To        StopRef    `json:"to"`
-	Itinerary *Itinerary `json:"itinerary"` // null = provider found no plan
+	At        *time.Time `json:"at,omitempty"` // requested departure context — absent means "leave now"
+	Itinerary *Itinerary `json:"itinerary"`    // null = provider found no plan
 	Source    SourceMeta `json:"source"`
 }
 

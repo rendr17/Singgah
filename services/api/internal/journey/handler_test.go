@@ -22,9 +22,16 @@ type fakeStore struct {
 	getStopErr   error
 	uuidRows     []generated.ListStopIDsByProviderEntityIDsRow
 	uuidErr      error
+	coordRows    []generated.ListStopCoordsRow
+	coordErr     error
 	routeID      pgtype.UUID
 	routeErr     error
+	shape        string
+	shapeErr     error
+	altRows      []generated.ListRouteAlternativesRow
+	altSlices    map[string][]generated.ListRouteStopSliceRow // route id -> stops
 	gotEntityIDs []string
+	gotSlice     generated.SliceRouteShapeParams
 }
 
 func (f *fakeStore) GetStop(_ context.Context, id pgtype.UUID) (generated.GetStopRow, error) {
@@ -41,16 +48,31 @@ func (f *fakeStore) ListStopIDsByProviderEntityIDs(_ context.Context, arg genera
 	f.gotEntityIDs = arg.EntityIds
 	return f.uuidRows, f.uuidErr
 }
+func (f *fakeStore) ListStopCoords(_ context.Context, _ []pgtype.UUID) ([]generated.ListStopCoordsRow, error) {
+	return f.coordRows, f.coordErr
+}
 func (f *fakeStore) GetRouteByProviderEntityID(_ context.Context, _ generated.GetRouteByProviderEntityIDParams) (pgtype.UUID, error) {
 	return f.routeID, f.routeErr
 }
-
-type fakePlanner struct {
-	plan *commute.FarePlan
-	err  error
+func (f *fakeStore) SliceRouteShape(_ context.Context, arg generated.SliceRouteShapeParams) (string, error) {
+	f.gotSlice = arg
+	return f.shape, f.shapeErr
+}
+func (f *fakeStore) ListRouteAlternatives(_ context.Context, _ generated.ListRouteAlternativesParams) ([]generated.ListRouteAlternativesRow, error) {
+	return f.altRows, nil
+}
+func (f *fakeStore) ListRouteStopSlice(_ context.Context, arg generated.ListRouteStopSliceParams) ([]generated.ListRouteStopSliceRow, error) {
+	return f.altSlices[arg.RouteID.String()], nil
 }
 
-func (f *fakePlanner) Fares(_ context.Context, _, _ string) (*commute.FarePlan, error) {
+type fakePlanner struct {
+	plan  *commute.FarePlan
+	err   error
+	gotAt *time.Time
+}
+
+func (f *fakePlanner) Fares(_ context.Context, _, _ string, at *time.Time) (*commute.FarePlan, error) {
+	f.gotAt = at
 	return f.plan, f.err
 }
 
@@ -198,6 +220,107 @@ func TestPlanNormalizesItinerary(t *testing.T) {
 	src := body["source"].(map[string]any)
 	if src["provider"] != "commute" || src["requestedAt"] == nil {
 		t.Fatalf("source = %v", src)
+	}
+}
+
+// Shape picking is scored against the leg's whole resolved stop sequence —
+// endpoints alone can't tell same-termini variants apart (TJ:7F's detour
+// pattern won the old endpoint-only score by ~2 m).
+func TestPlanSliceScoringSendsWholeStopSequence(t *testing.T) {
+	store := baseStore(t)
+	store.routeID = mustUUID(t, routeUUID)
+	store.uuidRows = []generated.ListStopIDsByProviderEntityIDsRow{
+		{ID: mustUUID(t, fromUUID), ProviderEntityID: "TJ-A"},
+		{ID: mustUUID(t, toUUID), ProviderEntityID: "TJ-C"},
+		{ID: mustUUID(t, dkaUUID), ProviderEntityID: "TJ-B"},
+	}
+	store.coordRows = []generated.ListStopCoordsRow{
+		{ID: mustUUID(t, fromUUID), Lon: 106.870, Lat: -6.169},
+		{ID: mustUUID(t, dkaUUID), Lon: 106.855, Lat: -6.174},
+		{ID: mustUUID(t, toUUID), Lon: 106.823, Lat: -6.176},
+	}
+	planner := &fakePlanner{plan: &commute.FarePlan{
+		From: commute.FareStationRef{ID: "TJ-A", Name: "Sumur Batu"},
+		To:   commute.FareStationRef{ID: "TJ-C", Name: "Monumen Nasional"},
+		Legs: []commute.FareLeg{
+			{Type: "RIDE", Line: "TJ:7F", From: commute.FareStationRef{ID: "TJ-A"}, To: commute.FareStationRef{ID: "TJ-C"},
+				Stops: []commute.FareStationRef{{ID: "TJ-B", Name: "Galur"}}},
+		},
+	}}
+	rec := serve(t, store, planner, &fakeTimetabler{}, "/journeys?from="+fromUUID+"&to="+toUUID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	got := store.gotSlice
+	if got.MaxSnapM <= 0 {
+		t.Fatalf("max_snap_m = %v — the honesty bound must be sent", got.MaxSnapM)
+	}
+	if len(got.Lons) != 3 || len(got.Lats) != 3 {
+		t.Fatalf("lons/lats = %v/%v, want the full 3-stop sequence", got.Lons, got.Lats)
+	}
+	found := false
+	for i, lon := range got.Lons {
+		if lon == 106.855 && got.Lats[i] == -6.174 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("intermediate stop coords missing from scoring params: %v %v", got.Lons, got.Lats)
+	}
+}
+
+// Corridor alternatives are catalog-derived: the candidate route's own stop
+// slice (reversed into ride order when its seq runs the other way) and its
+// own shape cut — never the chosen leg's data.
+func TestPlanLegAlternatives(t *testing.T) {
+	store := baseStore(t)
+	store.routeID = mustUUID(t, routeUUID)
+	store.uuidRows = []generated.ListStopIDsByProviderEntityIDsRow{
+		{ID: mustUUID(t, fromUUID), ProviderEntityID: "TJ-A"},
+		{ID: mustUUID(t, toUUID), ProviderEntityID: "TJ-C"},
+	}
+	store.coordRows = []generated.ListStopCoordsRow{
+		{ID: mustUUID(t, fromUUID), Lon: 106.870, Lat: -6.169},
+		{ID: mustUUID(t, toUUID), Lon: 106.823, Lat: -6.176},
+	}
+	altRouteID := mustUUID(t, "c2c2c2c2-2c2c-4c2c-8c2c-2c2c2c2c2c2c")
+	store.altRows = []generated.ListRouteAlternativesRow{
+		{ID: altRouteID, ProviderEntityID: "TJ:2", ShortName: pgtype.Text{String: "2", Valid: true}, SeqFrom: 10, SeqTo: 1},
+	}
+	store.altSlices = map[string][]generated.ListRouteStopSliceRow{
+		altRouteID.String(): {
+			{ID: mustUUID(t, toUUID), Name: "Monumen Nasional", Seq: 1, Lon: 106.823, Lat: -6.176},
+			{ID: mustUUID(t, dkaUUID), Name: "Kwitang", Seq: 2, Lon: 106.830, Lat: -6.174},
+			{ID: mustUUID(t, fromUUID), Name: "Sumur Batu", Seq: 10, Lon: 106.870, Lat: -6.169},
+		},
+	}
+	planner := &fakePlanner{plan: &commute.FarePlan{
+		From: commute.FareStationRef{ID: "TJ-A", Name: "Sumur Batu"},
+		To:   commute.FareStationRef{ID: "TJ-C", Name: "Monumen Nasional"},
+		Legs: []commute.FareLeg{
+			{Type: "RIDE", Line: "TJ:7F", From: commute.FareStationRef{ID: "TJ-A"}, To: commute.FareStationRef{ID: "TJ-C"}},
+		},
+	}}
+	rec := serve(t, store, planner, &fakeTimetabler{}, "/journeys?from="+fromUUID+"&to="+toUUID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	legs := decode(t, rec)["itinerary"].(map[string]any)["legs"].([]any)
+	alts := legs[0].(map[string]any)["alternatives"].([]any)
+	if len(alts) != 1 {
+		t.Fatalf("alternatives = %v", alts)
+	}
+	alt := alts[0].(map[string]any)
+	if alt["line"] != "TJ:2" || alt["shortName"] != "2" || alt["operator"] != "TJ" || alt["stationCount"] != float64(2) {
+		t.Fatalf("alternative = %v", alt)
+	}
+	stops := alt["stops"].([]any)
+	if len(stops) != 1 || stops[0].(map[string]any)["name"] != "Kwitang" {
+		t.Fatalf("alternative stops = %v — endpoints excluded, ride order kept", stops)
+	}
+	// the alt geometry scoring ran the alt route's slice in ride order
+	if store.gotSlice.RouteID != altRouteID || len(store.gotSlice.Lons) != 3 || store.gotSlice.Lons[0] != 106.870 {
+		t.Fatalf("slice params = %+v", store.gotSlice)
 	}
 }
 
@@ -459,6 +582,45 @@ func TestPlanDeparturesNoHeadsignMatchesAnyDirection(t *testing.T) {
 	deps := rideLegDeps(t, rec)
 	if len(deps) != 2 || deps[0].(map[string]any)["time"] != "07:04" || deps[1].(map[string]any)["time"] != "07:05" {
 		t.Fatalf("departures = %v, want both directions sorted", deps)
+	}
+}
+
+func TestPlanRejectsInvalidAt(t *testing.T) {
+	rec := serve(t, baseStore(t), &fakePlanner{}, &fakeTimetabler{}, departureTarget+"&at=bogus")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestPlanAtForwardedAndEchoed(t *testing.T) {
+	planner := &fakePlanner{plan: departurePlan()}
+	rec := serve(t, departureStore(t), planner, &fakeTimetabler{}, departureTarget+"&at=2026-09-25T08%3A00%3A00%2B07%3A00")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if planner.gotAt == nil || planner.gotAt.Format(time.RFC3339) != "2026-09-25T08:00:00+07:00" {
+		t.Fatalf("at forwarded = %v", planner.gotAt)
+	}
+	if at := decode(t, rec)["at"]; at != "2026-09-25T08:00:00+07:00" {
+		t.Fatalf("at echoed = %v", at)
+	}
+}
+
+func TestPlanAtAnchorsDepartures(t *testing.T) {
+	tt := &fakeTimetabler{entries: []commute.TimetableEntry{
+		{EstimatedDeparture: "08:04:00", BoundFor: "Lebak Bulus Bank Syariah Indonesia", LineCode: "M"},
+		{EstimatedDeparture: "07:04:00", BoundFor: "Lebak Bulus Bank Syariah Indonesia", LineCode: "M"}, // before the at anchor
+	}}
+	// The wall clock is irrelevant — ?at= anchors the window at 08:00 WIB.
+	rec := serveAt(t, departureStore(t), &fakePlanner{plan: departurePlan()}, tt,
+		departureTarget+"&at=2026-09-25T08%3A00%3A00%2B07%3A00",
+		time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC))
+	if tt.gotFrom != "08:00" || tt.gotTo != "11:00" {
+		t.Fatalf("window = %s-%s, want 08:00-11:00", tt.gotFrom, tt.gotTo)
+	}
+	deps := rideLegDeps(t, rec)
+	if len(deps) != 1 || deps[0].(map[string]any)["time"] != "08:04" {
+		t.Fatalf("departures = %v, want [08:04]", deps)
 	}
 }
 

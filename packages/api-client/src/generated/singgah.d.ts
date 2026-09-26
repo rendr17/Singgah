@@ -664,6 +664,8 @@ export interface operations {
                 from: string;
                 /** @description Destination stop UUID */
                 to: string;
+                /** @description Departure context ("leave at") — forwarded upstream for peak/off-peak fare selection and anchors the departures window. Absent = now. */
+                at?: string;
             };
             header?: never;
             path?: never;
