@@ -400,10 +400,7 @@ export function markerLineStops(
 				if (len2 === 0) break;
 				const mx = (ex1 + ex2) / 2;
 				const my = (ey1 + ey2) / 2;
-				const tt = Math.max(
-					0,
-					Math.min(1, ((mx - point.ax) * dx + (my - point.ay) * dy) / len2)
-				);
+				const tt = Math.max(0, Math.min(1, ((mx - point.ax) * dx + (my - point.ay) * dy) / len2));
 				const d = (mx - (point.ax + tt * dx)) ** 2 + (my - (point.ay + tt * dy)) ** 2;
 				if (d < best) {
 					best = d;
@@ -414,8 +411,7 @@ export function markerLineStops(
 		stops.push({ line, t });
 	}
 	stops.sort((a, b) => a.t - b.t);
-	if (len2 === 0 && stops.length > 1)
-		stops.forEach((s, i) => (s.t = i / (stops.length - 1)));
+	if (len2 === 0 && stops.length > 1) stops.forEach((s, i) => (s.t = i / (stops.length - 1)));
 	return stops;
 }
 
@@ -502,8 +498,7 @@ export function introSequence(
 					const cum = [0];
 					for (let i = 1; i < part.length; i++)
 						cum.push(
-							cum[i - 1] +
-								Math.hypot(part[i][0] - part[i - 1][0], part[i][1] - part[i - 1][1])
+							cum[i - 1] + Math.hypot(part[i][0] - part[i - 1][0], part[i][1] - part[i - 1][1])
 						);
 					pieces.push({ line, pts: part, cum, total: cum[cum.length - 1] });
 				}
