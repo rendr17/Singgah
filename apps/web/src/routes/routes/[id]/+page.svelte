@@ -38,7 +38,7 @@
 			<StateBlock kind="empty">Belum ada stasiun tercatat untuk rute ini.</StateBlock>
 		{:else}
 			<ul class="sg-list">
-				{#each route.stops as stop (stop.id)}
+				{#each route.stops as stop (stop.seq)}
 					<li>
 						<a href={resolve('/stations/[id]', { id: stop.id })}>
 							{#if stop.stationNumber}<span class="num muted">{stop.stationNumber}</span>{/if}
