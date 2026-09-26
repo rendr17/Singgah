@@ -7,7 +7,9 @@
 	let { data }: PageProps = $props();
 </script>
 
-<BackNav href="/" label="Pencarian" />
+<svelte:head><title>Rute · Singgah</title></svelte:head>
+
+<BackNav href="/" label="Beranda" />
 <h1 class="sg-page-title">Rute</h1>
 
 {#if data.error}

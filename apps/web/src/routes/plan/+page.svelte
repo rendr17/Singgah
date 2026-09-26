@@ -6,9 +6,10 @@
 	import { api } from '$lib/api';
 	import { loadCachedPlan, saveCachedPlan } from '$lib/plan-cache';
 	import BackNav from '$lib/components/app-shell/BackNav.svelte';
+	import StationCombobox from '$lib/components/station/StationCombobox.svelte';
 	import { unwrap } from '@singgah/api-client';
 	import type { components } from '@singgah/api-client';
-	import { SearchField, StatusBadge } from '@singgah/ui';
+	import { Button, StateBlock, StatusBadge, Surface, TextField } from '@singgah/ui';
 
 	type Station = components['schemas']['StationSummary'];
 	type Plan = components['schemas']['JourneyPlan'];
@@ -21,77 +22,44 @@
 	// True when the shown plan came from localStorage after a failed fetch —
 	// the banner must say so instead of letting stale data pass as fresh.
 	let planFromCache = $state(false);
+	// datetime-local value; empty = leave now. Fed into `at` on submit.
+	let departAt = $state('');
 
-	const loadCached = (fromId: string, toId: string) => loadCachedPlan(localStorage, fromId, toId);
-	const saveCached = (fromId: string, toId: string, p: Plan) =>
-		saveCachedPlan(localStorage, fromId, toId, p);
+	const loadCached = (fromId: string, toId: string, at: string) =>
+		loadCachedPlan(localStorage, fromId, toId, at);
+	const saveCached = (fromId: string, toId: string, at: string, p: Plan) =>
+		saveCachedPlan(localStorage, fromId, toId, at, p);
 
-	function useStationSearch() {
-		let query = $state('');
-		let results = $state<Station[]>([]);
-		let timer: ReturnType<typeof setTimeout>;
-		// A programmatic pick writes the chosen name into the field — the
-		// resulting query change must not re-open the options dropdown.
-		let suppressNext = false;
-		$effect(() => {
-			const q = query.trim();
-			clearTimeout(timer);
-			if (suppressNext) {
-				suppressNext = false;
-				results = [];
-				return;
-			}
-			if (q === '') {
-				results = [];
-				return;
-			}
-			timer = setTimeout(async () => {
-				try {
-					const data = await unwrap(
-						api.GET('/api/v1/stations', { params: { query: { query: q } } })
-					);
-					results = data.stations;
-				} catch {
-					results = [];
-				}
-			}, 300);
-			return () => clearTimeout(timer);
-		});
-		return {
-			get query() {
-				return query;
-			},
-			set query(v) {
-				query = v;
-			},
-			get results() {
-				return results;
-			},
-			set results(v) {
-				results = v;
-			},
-			suppressSearch() {
-				suppressNext = true;
-			}
-		};
+	// toLocalInput renders an ISO instant for <input type="datetime-local"> —
+	// the field is device-local by definition, so it gets a local reading.
+	function toLocalInput(iso: string): string {
+		const d = new Date(iso);
+		if (Number.isNaN(d.getTime())) return '';
+		const p = (n: number) => String(n).padStart(2, '0');
+		return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 	}
 
-	const from = useStationSearch();
-	const to = useStationSearch();
+	let fromQuery = $state('');
+	let toQuery = $state('');
 
 	function pick(which: 'from' | 'to', s: Station) {
 		if (which === 'from') {
 			fromStation = s;
-			from.suppressSearch();
-			from.query = s.name;
-			from.results = [];
+			fromQuery = s.name;
 		} else {
 			toStation = s;
-			to.suppressSearch();
-			to.query = s.name;
-			to.results = [];
+			toQuery = s.name;
 		}
 	}
+
+	// Timeline screen takes the same params; station ids come from the picked
+	// fields first, falling back to the plan's own refs (cached shared links).
+	const detail = $derived.by(() => {
+		const from = fromStation?.id ?? plan?.from.id;
+		const to = toStation?.id ?? plan?.to.id;
+		if (!plan || !from || !to) return null;
+		return { from, to, at: plan.at ? `&at=${encodeURIComponent(plan.at)}` : '' };
+	});
 
 	async function submit() {
 		if (!fromStation || !toStation) return;
@@ -99,17 +67,23 @@
 		planError = '';
 		plan = null;
 		planFromCache = false;
+		const at = departAt ? new Date(departAt).toISOString() : '';
 		try {
 			plan = await unwrap(
 				api.GET('/api/v1/journeys', {
-					params: { query: { from: fromStation.id, to: toStation.id } }
+					params: { query: { from: fromStation.id, to: toStation.id, at: at || undefined } }
 				})
 			);
-			saveCached(fromStation.id, toStation.id, plan);
+			saveCached(fromStation.id, toStation.id, at, plan);
 			// Keep the plan shareable: the URL is the snapshot, not app state.
-			replaceState(resolve(`/plan?from=${fromStation.id}&to=${toStation.id}`), page.state);
+			replaceState(
+				resolve(
+					`/plan?from=${fromStation.id}&to=${toStation.id}${at ? '&at=' + encodeURIComponent(at) : ''}`
+				),
+				page.state
+			);
 		} catch (e) {
-			const cached = loadCached(fromStation.id, toStation.id);
+			const cached = loadCached(fromStation.id, toStation.id, at);
 			if (cached) {
 				plan = cached;
 				planFromCache = true;
@@ -126,6 +100,8 @@
 	onMount(async () => {
 		const fromId = page.url.searchParams.get('from');
 		const toId = page.url.searchParams.get('to');
+		const atId = page.url.searchParams.get('at');
+		if (atId) departAt = toLocalInput(atId);
 		let ready = true;
 		for (const [which, id] of [
 			['from', fromId],
@@ -147,7 +123,7 @@
 		} else if (fromId && toId) {
 			// Offline open of a shared link: station names can't be resolved,
 			// but the cached copy for this exact pair still renders.
-			const cached = loadCached(fromId, toId);
+			const cached = loadCached(fromId, toId, atId ?? '');
 			if (cached) {
 				plan = cached;
 				planFromCache = true;
@@ -156,69 +132,80 @@
 	});
 </script>
 
-<BackNav href="/" label="Pencarian" />
-<h1>Perjalanan</h1>
-<p class="muted">Rencana stasiun ke stasiun — data jadwal statis.</p>
+<svelte:head><title>Perjalanan · Singgah</title></svelte:head>
 
-<div class="fields">
+<BackNav href="/" label="Beranda" />
+<h1 class="sg-page-title">Perjalanan</h1>
+<p class="sg-meta">Rencana stasiun ke stasiun — data jadwal statis.</p>
+
+<form
+	class="fields"
+	onsubmit={(e) => {
+		e.preventDefault();
+		submit();
+	}}
+>
 	<div class="field">
 		<label for="from">Dari</label>
-		<SearchField
+		<StationCombobox
 			id="from"
 			label="Stasiun asal"
 			placeholder="Nama stasiun…"
-			bind:value={from.query}
+			bind:value={fromQuery}
+			bind:selected={fromStation}
 		/>
-		{#if from.results.length > 0}
-			<ul class="options">
-				{#each from.results as s (s.id)}
-					<li><button type="button" onclick={() => pick('from', s)}>{s.name}</button></li>
-				{/each}
-			</ul>
-		{/if}
 	</div>
 	<div class="field">
 		<label for="to">Ke</label>
-		<SearchField id="to" label="Stasiun tujuan" placeholder="Nama stasiun…" bind:value={to.query} />
-		{#if to.results.length > 0}
-			<ul class="options">
-				{#each to.results as s (s.id)}
-					<li><button type="button" onclick={() => pick('to', s)}>{s.name}</button></li>
-				{/each}
-			</ul>
-		{/if}
+		<StationCombobox
+			id="to"
+			label="Stasiun tujuan"
+			placeholder="Nama stasiun…"
+			bind:value={toQuery}
+			bind:selected={toStation}
+		/>
 	</div>
-	<button
-		type="button"
-		class="go"
-		disabled={!fromStation || !toStation || planning}
-		onclick={submit}
-	>
+	<TextField id="at" type="datetime-local" label="Berangkat" bind:value={departAt} />
+	<Button type="submit" disabled={!fromStation || !toStation || planning}>
 		{planning ? 'Mencari…' : 'Cari rute'}
-	</button>
-</div>
+	</Button>
+</form>
+
+{#if planning}
+	<StateBlock kind="loading">Mencari rute…</StateBlock>
+{/if}
 
 {#if planError}
-	<p role="alert">{planError}</p>
+	<StateBlock kind="error">{planError}</StateBlock>
 {/if}
 
 {#if plan}
 	{#if planFromCache}
-		<p class="muted" role="status">
+		<p class="sg-meta" role="status">
 			Rute tersimpan — data per {new Date(plan.source.requestedAt).toLocaleString('id-ID')}
 		</p>
 	{/if}
 	{#if plan.itinerary === null}
-		<p>Provider tidak menemukan rute antara {plan.from.name} dan {plan.to.name}.</p>
+		<StateBlock kind="empty">
+			Provider tidak menemukan rute antara {plan.from.name} dan {plan.to.name}.
+		</StateBlock>
 	{:else}
 		{@const itin = plan.itinerary}
-		<section class="result">
+		<Surface class="result">
+			{#if plan.at}
+				<p class="sg-meta plan-for">
+					Untuk berangkat {new Date(plan.at).toLocaleString('id-ID', {
+						dateStyle: 'medium',
+						timeStyle: 'short'
+					})}
+				</p>
+			{/if}
 			<header class="result-head">
 				<StatusBadge status={itin.status} />
 				{#if itin.fare?.total != null}
 					<span class="fare">Rp{itin.fare.total.toLocaleString('id-ID')}</span>
 				{/if}
-				<span class="muted">
+				<span class="sg-meta">
 					{(itin.totalDistanceM / 1000).toFixed(1)} km · {itin.rideLegs} naik
 					{#if itin.walkTransfers > 0}· {itin.walkTransfers} transit jalan{/if}
 				</span>
@@ -231,16 +218,23 @@
 							<span class="leg-icon" aria-hidden="true">↔</span>
 							<span>
 								Jalan ke {leg.to.name}
-								{#if leg.distanceM}<span class="muted"> · {Math.round(leg.distanceM)} m</span>{/if}
+								{#if leg.distanceM}<span class="sg-meta">
+										· {Math.round(leg.distanceM)} m</span
+									>{/if}
 							</span>
 						{:else}
 							<span class="leg-icon" aria-hidden="true">●</span>
 							<span>
 								<strong>{leg.line}</strong> arah {leg.headsign || leg.to.name}
-								<span class="muted">
+								<span class="sg-meta">
 									· {leg.stationCount} perhentian
 									{#if leg.distanceM}· {(leg.distanceM / 1000).toFixed(1)} km{/if}
 								</span>
+								{#if leg.nextDepartures && leg.nextDepartures.length > 0}
+									<span class="departures">
+										Berangkat {leg.nextDepartures.map((d) => d.time).join(' · ')}
+									</span>
+								{/if}
 								{#if leg.stops && leg.stops.length > 2}
 									<details>
 										<summary>{leg.stops.length} stasiun dilewati</summary>
@@ -277,15 +271,19 @@
 					</ul>
 				</details>
 			{/if}
-		</section>
+
+			{#if detail}
+				<p class="detail-link">
+					<a href={resolve(`/journey?from=${detail.from}&to=${detail.to}${detail.at}`)}
+						>Rincian perjalanan →</a
+					>
+				</p>
+			{/if}
+		</Surface>
 	{/if}
 {/if}
 
 <style>
-	.muted {
-		color: var(--sg-text-muted);
-		font-size: 0.875rem;
-	}
 	.fields {
 		display: flex;
 		flex-direction: column;
@@ -295,47 +293,15 @@
 	}
 	.field label {
 		display: block;
-		font-weight: 600;
+		font-size: var(--sg-text-secondary);
+		font-weight: var(--sg-weight-bold);
 		margin-bottom: var(--sg-space-1);
 	}
-	.options {
-		list-style: none;
-		margin: var(--sg-space-1) 0 0;
-		padding: 0;
-		border: 1px solid var(--sg-border);
-		border-radius: var(--sg-radius-input);
-	}
-	.options button {
-		display: block;
-		width: 100%;
-		text-align: left;
-		padding: var(--sg-space-2) var(--sg-space-3);
-		background: none;
-		border: none;
-		cursor: pointer;
-	}
-	.options button:hover {
-		background-color: var(--sg-surface-muted);
-	}
-	.go {
-		min-height: var(--sg-target-min, 44px);
-		padding: 0 var(--sg-space-4);
-		border: none;
-		border-radius: var(--sg-radius-input);
-		background-color: var(--sg-brand, #0f6b4f);
-		color: #fff;
-		font-weight: 600;
-		cursor: pointer;
-	}
-	.go:disabled {
-		opacity: 0.5;
-		cursor: default;
+	.plan-for {
+		margin: 0 0 var(--sg-space-2);
 	}
 	.result {
 		max-width: 36rem;
-		border: 1px solid var(--sg-border);
-		border-radius: var(--sg-radius-card);
-		padding: var(--sg-space-3) var(--sg-space-4);
 	}
 	.result-head {
 		display: flex;
@@ -344,7 +310,7 @@
 		flex-wrap: wrap;
 	}
 	.fare {
-		font-weight: 700;
+		font-weight: var(--sg-weight-bold);
 		font-variant-numeric: tabular-nums;
 	}
 	.legs {
@@ -360,7 +326,18 @@
 		gap: var(--sg-space-2);
 	}
 	.leg-icon {
-		color: var(--sg-brand, #0f6b4f);
+		color: var(--sg-brand);
+	}
+	.departures {
+		display: block;
+		margin-top: var(--sg-space-1);
+		font-weight: var(--sg-weight-semibold);
+		font-variant-numeric: tabular-nums;
+	}
+	summary {
+		cursor: pointer;
+		font-size: var(--sg-text-secondary);
+		color: var(--sg-text-muted);
 	}
 	details ul {
 		margin: var(--sg-space-1) 0 0;

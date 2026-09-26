@@ -4,37 +4,25 @@
 	import { browser } from '$app/environment';
 	import { env } from '$env/dynamic/public';
 	import BackNav from '$lib/components/app-shell/BackNav.svelte';
+	import DepartureBoard from '$lib/components/station/DepartureBoard.svelte';
+	import { facilityLabel } from '$lib/facilities';
 	import { SectionHeading, StateBlock } from '@singgah/ui';
 	import { TransitMap, stationsToGeoJSON } from '@singgah/map';
 
-	const STYLE_URL = env.PUBLIC_MAP_STYLE_URL ?? 'https://tiles.openfreemap.org/styles/positron';
+	const STYLE_URL = env.PUBLIC_MAP_STYLE_URL ?? 'https://tiles.openfreemap.org/styles/bright';
 
 	let { data }: PageProps = $props();
 	const station = $derived(data.station);
-
-	// Human labels for the provider-declared amenity types (contract: lowercase
-	// snake). Unknown future types fall back to the raw type string.
-	const FACILITY_LABELS: Record<string, string> = {
-		toilet: 'Toilet',
-		toilet_accessible: 'Toilet aksesibel',
-		praying_room: 'Musala',
-		nursing_room: 'Ruang menyusui',
-		elevator_paid: 'Lift (area berbayar)',
-		elevator_unpaid: 'Lift (area gratis)',
-		escalator_paid: 'Eskalator (area berbayar)',
-		escalator_unpaid: 'Eskalator (area gratis)',
-		parking: 'Parkir',
-		bike_parking: 'Parkir sepeda',
-		lockers: 'Loker',
-		charging_station: 'Stasiun pengisian daya'
-	};
+	const departures = $derived(data.departures);
 </script>
+
+<svelte:head><title>{station?.name ?? 'Stasiun'} · Singgah</title></svelte:head>
 
 {#if station === null}
 	<StateBlock kind="error">{data.error}</StateBlock>
-	<BackNav href="/" label="Kembali ke pencarian" />
+	<BackNav href="/" label="Kembali ke beranda" />
 {:else}
-	<BackNav href="/" label="Pencarian" />
+	<BackNav href="/" label="Beranda" />
 
 	<h1 class="sg-page-title">{station.name}</h1>
 	{#if station.officialName && station.officialName !== station.name}
@@ -82,6 +70,20 @@
 	</section>
 
 	<section>
+		<SectionHeading>Jadwal keberangkatan</SectionHeading>
+		{#if departures === null}
+			<StateBlock kind="error">Jadwal keberangkatan sedang tidak tersedia.</StateBlock>
+		{:else if departures.lines.length === 0}
+			<StateBlock kind="empty">Belum ada jadwal tercatat untuk stasiun ini.</StateBlock>
+		{:else}
+			<DepartureBoard lines={departures.lines} />
+			<p class="sg-meta">
+				Jadwal statis {departures.source.provider} — bukan posisi live.
+			</p>
+		{/if}
+	</section>
+
+	<section>
 		<SectionHeading>Transit</SectionHeading>
 		{#if station.transfers.length === 0}
 			<StateBlock kind="empty">Tidak ada transfer tercatat.</StateBlock>
@@ -89,13 +91,13 @@
 			<ul class="sg-list">
 				{#each station.transfers as transfer (transfer.toStop.id)}
 					<li>
-						<a href={resolve('/stations/[id]', { id: transfer.toStop.id })}
-							>{transfer.toStop.name}</a
-						>
-						{#if transfer.walkDistanceM}
-							<span class="muted">· jalan {transfer.walkDistanceM} m</span>
-						{/if}
-						{#if transfer.notes}<span class="muted">· {transfer.notes}</span>{/if}
+						<a href={resolve('/stations/[id]', { id: transfer.toStop.id })}>
+							{transfer.toStop.name}
+							{#if transfer.walkDistanceM}
+								<span class="muted">· jalan {transfer.walkDistanceM} m</span>
+							{/if}
+							{#if transfer.notes}<span class="muted">· {transfer.notes}</span>{/if}
+						</a>
 					</li>
 				{/each}
 			</ul>
@@ -108,7 +110,7 @@
 			<ul class="sg-list">
 				{#each station.facilities as f (f.type + f.text)}
 					<li>
-						{FACILITY_LABELS[f.type] ?? f.type}
+						{facilityLabel(f.type)}
 						{#if f.text}<span class="muted">· {f.text}</span>{/if}
 						{#if f.accessibilityRelevant}<span class="muted">· relevan aksesibilitas</span>{/if}
 					</li>

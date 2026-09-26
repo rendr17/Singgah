@@ -28,18 +28,28 @@ const plan: Plan = {
 describe('plan cache', () => {
 	it('round-trips a plan per station pair', () => {
 		const s = fakeStorage();
-		saveCachedPlan(s, 'a', 'b', plan);
-		expect(loadCachedPlan(s, 'a', 'b')).toEqual(plan);
+		saveCachedPlan(s, 'a', 'b', '', plan);
+		expect(loadCachedPlan(s, 'a', 'b', '')).toEqual(plan);
 		// Different pair, different slot — no cross-talk.
-		expect(loadCachedPlan(s, 'b', 'a')).toBeNull();
+		expect(loadCachedPlan(s, 'b', 'a', '')).toBeNull();
+	});
+
+	it('keys by departure context — an at-plan does not shadow the leave-now plan', () => {
+		const s = fakeStorage();
+		saveCachedPlan(s, 'a', 'b', '', plan);
+		const timed: Plan = { ...plan, at: '2026-09-25T08:00:00+07:00' };
+		saveCachedPlan(s, 'a', 'b', '2026-09-25T08:00:00+07:00', timed);
+		expect(loadCachedPlan(s, 'a', 'b', '')).toEqual(plan);
+		expect(loadCachedPlan(s, 'a', 'b', '2026-09-25T08:00:00+07:00')).toEqual(timed);
+		expect(loadCachedPlan(s, 'a', 'b', '2026-09-26T08:00:00+07:00')).toBeNull();
 	});
 
 	it('returns null for corrupt or provenance-less entries', () => {
 		const s = fakeStorage();
 		s.map.set('singgah:plan:a:b', '{not json');
-		expect(loadCachedPlan(s, 'a', 'b')).toBeNull();
+		expect(loadCachedPlan(s, 'a', 'b', '')).toBeNull();
 		s.map.set('singgah:plan:a:b', JSON.stringify({ ...plan, source: undefined }));
-		expect(loadCachedPlan(s, 'a', 'b')).toBeNull();
+		expect(loadCachedPlan(s, 'a', 'b', '')).toBeNull();
 	});
 
 	it('survives a throwing storage (private mode) without breaking the page', () => {
@@ -51,7 +61,7 @@ describe('plan cache', () => {
 				throw new Error('denied');
 			}
 		};
-		expect(loadCachedPlan(dead, 'a', 'b')).toBeNull();
-		expect(() => saveCachedPlan(dead, 'a', 'b', plan)).not.toThrow();
+		expect(loadCachedPlan(dead, 'a', 'b', '')).toBeNull();
+		expect(() => saveCachedPlan(dead, 'a', 'b', '', plan)).not.toThrow();
 	});
 });

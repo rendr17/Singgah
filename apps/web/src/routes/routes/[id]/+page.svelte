@@ -8,6 +8,11 @@
 	const route = $derived(data.route);
 </script>
 
+<svelte:head
+	><title>{route ? `${route.shortName || route.longName} · Singgah` : 'Rute · Singgah'}</title
+	></svelte:head
+>
+
 {#if route === null}
 	<StateBlock kind="error">{data.error}</StateBlock>
 	<BackNav href="/routes" label="Semua rute" />
@@ -35,9 +40,11 @@
 			<ul class="sg-list">
 				{#each route.stops as stop (stop.id)}
 					<li>
-						{#if stop.stationNumber}<span class="num muted">{stop.stationNumber}</span>{/if}
-						<a href={resolve('/stations/[id]', { id: stop.id })}>{stop.name}</a>
-						{#if stop.code}<span class="muted">· {stop.code}</span>{/if}
+						<a href={resolve('/stations/[id]', { id: stop.id })}>
+							{#if stop.stationNumber}<span class="num muted">{stop.stationNumber}</span>{/if}
+							{stop.name}
+							{#if stop.code}<span class="muted">· {stop.code}</span>{/if}
+						</a>
 					</li>
 				{/each}
 			</ul>

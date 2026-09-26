@@ -3,6 +3,11 @@
 	import { resolve } from '$app/paths';
 </script>
 
+<svelte:head
+	><title>{page.status === 404 ? 'Halaman tidak ditemukan' : 'Kesalahan'} · Singgah</title
+	></svelte:head
+>
+
 {#if page.status === 404}
 	<h1 class="sg-page-title">Halaman tidak ditemukan</h1>
 	<p class="sg-meta">Alamat ini tidak cocok dengan halaman Singgah mana pun.</p>

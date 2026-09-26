@@ -28,31 +28,45 @@
 	}
 </script>
 
-<BackNav href="/" label="Pencarian" />
+<svelte:head><title>Penyedia data · Singgah</title></svelte:head>
+
+<BackNav href="/" label="Beranda" />
 
 <h1 class="sg-page-title">Penyedia data</h1>
 <p class="sg-meta">Sumber data transit, lisensi, dan kesegaran ingest.</p>
 
 {#if data.error}
 	<StateBlock kind="error">{data.error}</StateBlock>
+{:else if data.providers.length === 0}
+	<StateBlock kind="empty">Belum ada penyedia data terdaftar.</StateBlock>
 {:else}
-	{#each data.providers as p (p.code)}
-		{@const failed = failedAttempt(p)}
-		<Surface>
-			<SectionHeading>{p.name}</SectionHeading>
-			<p class="sg-meta">
-				<code>{p.code}</code>
-				{#if !p.isActive}<span class="sg-warn">· nonaktif</span>{/if}
-			</p>
-			<p>{ageLabel(p.lastSuccessAt)}</p>
-			{#if failed}<p class="sg-warn">{failed}</p>{/if}
-			{#if p.licenseName}<p>Lisensi: {p.licenseName}</p>{/if}
-			{#if p.attributionText}<p>{p.attributionText}</p>{/if}
-			{#if p.allowedUse}<p class="sg-meta">{p.allowedUse}</p>{/if}
-			{#if p.refreshCadence}<p class="sg-meta">Jadwal refresh: {p.refreshCadence}</p>{/if}
-			{#if p.knownLimitations}
-				<p class="sg-meta">Keterbatasan: {p.knownLimitations}</p>
-			{/if}
-		</Surface>
-	{/each}
+	<div class="provider-list">
+		{#each data.providers as p (p.code)}
+			{@const failed = failedAttempt(p)}
+			<Surface>
+				<SectionHeading>{p.name}</SectionHeading>
+				<p class="sg-meta">
+					<code>{p.code}</code>
+					{#if !p.isActive}<span class="sg-warn">· nonaktif</span>{/if}
+				</p>
+				<p>{ageLabel(p.lastSuccessAt)}</p>
+				{#if failed}<p class="sg-warn">{failed}</p>{/if}
+				{#if p.licenseName}<p>Lisensi: {p.licenseName}</p>{/if}
+				{#if p.attributionText}<p>{p.attributionText}</p>{/if}
+				{#if p.allowedUse}<p class="sg-meta">{p.allowedUse}</p>{/if}
+				{#if p.refreshCadence}<p class="sg-meta">Jadwal refresh: {p.refreshCadence}</p>{/if}
+				{#if p.knownLimitations}
+					<p class="sg-meta">Keterbatasan: {p.knownLimitations}</p>
+				{/if}
+			</Surface>
+		{/each}
+	</div>
 {/if}
+
+<style>
+	.provider-list {
+		display: grid;
+		gap: var(--sg-space-3);
+		max-width: 40rem;
+	}
+</style>
