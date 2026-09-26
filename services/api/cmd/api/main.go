@@ -46,8 +46,8 @@ func main() {
 		defer pool.Close()
 		deps.DB = pool
 		queries := generated.New(pool)
-		deps.Catalog = catalog.NewHandler(queries)
 		commuteClient := commute.NewClient(cfg.CommuteBaseURL)
+		deps.Catalog = catalog.NewHandler(queries, commuteClient)
 		deps.Journey = journey.NewHandler(queries, commuteClient, commuteClient)
 		logger.Info("database connected")
 	} else {

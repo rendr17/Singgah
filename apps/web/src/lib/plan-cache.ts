@@ -9,9 +9,20 @@ const PLAN_CACHE = 'singgah:plan:';
 
 type StorageLike = Pick<Storage, 'getItem' | 'setItem'>;
 
-export function loadCachedPlan(storage: StorageLike, fromId: string, toId: string): Plan | null {
+// Plans for different departure contexts are different answers — `at` is
+// part of the key so a timed plan never shadows the leave-now one.
+function cacheKey(fromId: string, toId: string, at: string) {
+	return PLAN_CACHE + fromId + ':' + toId + (at ? ':' + at : '');
+}
+
+export function loadCachedPlan(
+	storage: StorageLike,
+	fromId: string,
+	toId: string,
+	at: string
+): Plan | null {
 	try {
-		const raw = storage.getItem(PLAN_CACHE + fromId + ':' + toId);
+		const raw = storage.getItem(cacheKey(fromId, toId, at));
 		const cached = raw ? (JSON.parse(raw) as Plan) : null;
 		// A cache without provenance can't be labeled honestly — treat it as absent.
 		return cached?.source?.requestedAt ? cached : null;
@@ -20,9 +31,15 @@ export function loadCachedPlan(storage: StorageLike, fromId: string, toId: strin
 	}
 }
 
-export function saveCachedPlan(storage: StorageLike, fromId: string, toId: string, p: Plan) {
+export function saveCachedPlan(
+	storage: StorageLike,
+	fromId: string,
+	toId: string,
+	at: string,
+	p: Plan
+) {
 	try {
-		storage.setItem(PLAN_CACHE + fromId + ':' + toId, JSON.stringify(p));
+		storage.setItem(cacheKey(fromId, toId, at), JSON.stringify(p));
 	} catch {
 		// quota/private mode — the plan still renders, it just isn't persisted
 	}

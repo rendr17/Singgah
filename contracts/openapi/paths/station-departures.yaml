@@ -1,0 +1,48 @@
+get:
+  operationId: getStationDepartures
+  summary: Station departures board
+  description: >-
+    Scheduled departures from one station, grouped by line and direction
+    (boundFor). Source is the provider's static timetable — always
+    "scheduled", never live. Times are Asia/Jakarta wall clock; each
+    direction also carries the most recent past departure when one falls
+    inside the lookback window.
+  tags:
+    - catalog
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    - name: window
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 15
+        maximum: 1440
+        default: 240
+      description: >-
+        Minutes ahead of "now" (Asia/Jakarta) to include. 1440 returns the
+        whole service day.
+  responses:
+    '200':
+      description: Departures grouped per line and direction
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - departures
+            additionalProperties: false
+            properties:
+              departures:
+                $ref: '../schemas/catalog.yaml#/StationDepartures'
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

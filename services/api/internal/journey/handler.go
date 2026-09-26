@@ -2,8 +2,10 @@ package journey
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -29,6 +31,13 @@ const departuresWindow = 3 * 60
 // maxDepartures caps how many boardings the leg carries — enough to answer
 // "kapan berangkat" without turning the plan into a timetable page.
 const maxDepartures = 3
+
+// maxShapeSnapM bounds how far a listed stop may sit from the drawn slice
+// before the shape is rejected: surveyed halte sit within ~120 m of their
+// true shape, while same-termini variants miss mid-route stops by 600 m+.
+// Beyond it, drawing the shape would lie about the path — the leg carries
+// no geometry and the client falls back to the stop-to-stop polyline.
+const maxShapeSnapM = 250
 
 type Handler struct {
 	store   Store
@@ -57,6 +66,10 @@ func (h *Handler) plan(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	at, ok := parseAt(w, r)
+	if !ok {
+		return
+	}
 	from, err := h.store.GetStop(r.Context(), fromID)
 	if err != nil {
 		writeErr(w, r, err, "Origin station not found")
@@ -73,9 +86,9 @@ func (h *Handler) plan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	plan, err := h.planner.Fares(r.Context(), from.ProviderEntityID, to.ProviderEntityID)
+	plan, err := h.planner.Fares(r.Context(), from.ProviderEntityID, to.ProviderEntityID, at)
 	if errors.Is(err, commute.ErrStationUnknown) {
-		writePlan(w, r, from, to, nil)
+		writePlan(w, r, from, to, nil, at)
 		return
 	}
 	if err != nil {
@@ -88,8 +101,13 @@ func (h *Handler) plan(w http.ResponseWriter, r *http.Request) {
 		httpapi.Error(w, r, http.StatusInternalServerError, "INTERNAL", "Internal server error")
 		return
 	}
-	h.attachDepartures(r.Context(), itinerary, plan)
-	writePlan(w, r, from, to, itinerary)
+	// at anchors the departures window when given; otherwise "leave now".
+	anchor := h.now()
+	if at != nil {
+		anchor = *at
+	}
+	h.attachDepartures(r.Context(), itinerary, plan, anchor)
+	writePlan(w, r, from, to, itinerary, at)
 }
 
 func (h *Handler) normalize(ctx context.Context, plan *commute.FarePlan) (*Itinerary, error) {
@@ -134,6 +152,25 @@ func (h *Handler) normalize(ctx context.Context, plan *commute.FarePlan) (*Itine
 		return StopRef{ID: uuids[s.ID], Name: s.Name}
 	}
 
+	// Coordinates of the resolved stops — one fetch, used to slice route
+	// shapes per leg. A coords lookup failure degrades to no geometry; it
+	// must not fail a plan the provider already computed.
+	coords := map[string]generated.ListStopCoordsRow{}
+	if len(uuids) > 0 {
+		ids := make([]pgtype.UUID, 0, len(uuids))
+		for _, u := range uuids {
+			var id pgtype.UUID
+			if id.Scan(u) == nil {
+				ids = append(ids, id)
+			}
+		}
+		if rows, err := h.store.ListStopCoords(ctx, ids); err == nil {
+			for _, r := range rows {
+				coords[r.ID.String()] = r
+			}
+		}
+	}
+
 	itin := &Itinerary{
 		Status:         "scheduled",
 		TotalDistanceM: plan.TotalDistance,
@@ -160,6 +197,8 @@ func (h *Handler) normalize(ctx context.Context, plan *commute.FarePlan) (*Itine
 				ProviderEntityID: leg.Line,
 			}); err == nil {
 				l.RouteID = routeID.String()
+				l.Geometry = h.sliceGeometry(ctx, routeID, leg, uuids, coords)
+				l.Alternatives = h.legAlternatives(ctx, routeID, uuids[leg.From.ID], uuids[leg.To.ID])
 			} else if !errors.Is(err, pgx.ErrNoRows) {
 				return nil, err
 			}
@@ -183,11 +222,130 @@ func (h *Handler) normalize(ctx context.Context, plan *commute.FarePlan) (*Itine
 	return itin, nil
 }
 
+// sliceGeometry cuts the ingested route shape between a leg's endpoints.
+// The pick is scored against the whole resolved stop sequence — same-termini
+// variants that detour past unlisted streets lose to the shape the leg
+// actually rides. Missing shapes/coords or a slice error all degrade to no
+// geometry — the client then draws the stop-to-stop polyline. Geometry is
+// an enhancement, never a reason to fail a computed plan.
+func (h *Handler) sliceGeometry(ctx context.Context, routeID pgtype.UUID, leg commute.FareLeg, uuids map[string]string, coords map[string]generated.ListStopCoordsRow) json.RawMessage {
+	coord := func(r commute.FareStationRef) (generated.ListStopCoordsRow, bool) {
+		c, ok := coords[uuids[r.ID]]
+		return c, ok
+	}
+	f, okF := coord(leg.From)
+	t, okT := coord(leg.To)
+	if !okF || !okT {
+		return nil
+	}
+	lons := make([]float64, 0, len(leg.Stops)+2)
+	lats := make([]float64, 0, len(leg.Stops)+2)
+	lons = append(lons, f.Lon)
+	lats = append(lats, f.Lat)
+	for _, s := range leg.Stops {
+		if c, ok := coord(s); ok {
+			lons = append(lons, c.Lon)
+			lats = append(lats, c.Lat)
+		}
+	}
+	lons = append(lons, t.Lon)
+	lats = append(lats, t.Lat)
+	return h.sliceShape(ctx, routeID, lons, lats)
+}
+
+// legAlternatives lists other catalog routes that also carry the leg's
+// endpoints — "bisa juga naik koridor 2". Each entry carries that route's
+// own stop slice and shape cut, so a picked alternative never borrows the
+// chosen leg's stops to describe a different corridor. Catalogue gaps
+// degrade to no alternatives, never a failed plan.
+func (h *Handler) legAlternatives(ctx context.Context, routeID pgtype.UUID, fromUUID, toUUID string) []LegAlternative {
+	var fromID, toID pgtype.UUID
+	if fromID.Scan(fromUUID) != nil || toID.Scan(toUUID) != nil {
+		return nil
+	}
+	rows, err := h.store.ListRouteAlternatives(ctx, generated.ListRouteAlternativesParams{
+		StopID:   fromID,
+		StopID_2: toID,
+		ID:       routeID,
+	})
+	if err != nil {
+		return nil
+	}
+	seen := map[pgtype.UUID]bool{}
+	var out []LegAlternative
+	for _, row := range rows {
+		if seen[row.ID] {
+			continue // min-hops seq pair already taken — rows are ABS-diff ordered
+		}
+		seen[row.ID] = true
+		slice, err := h.store.ListRouteStopSlice(ctx, generated.ListRouteStopSliceParams{
+			RouteID: row.ID,
+			Seq:     min(row.SeqFrom, row.SeqTo),
+			Seq_2:   max(row.SeqFrom, row.SeqTo),
+		})
+		if err != nil || len(slice) < 2 {
+			continue
+		}
+		if row.SeqFrom > row.SeqTo {
+			slices.Reverse(slice)
+		}
+		lons := make([]float64, 0, len(slice))
+		lats := make([]float64, 0, len(slice))
+		stops := make([]StopRef, 0, len(slice)-2)
+		for i, s := range slice {
+			lons = append(lons, s.Lon)
+			lats = append(lats, s.Lat)
+			if i > 0 && i < len(slice)-1 {
+				stops = append(stops, StopRef{ID: s.ID.String(), Name: s.Name})
+			}
+		}
+		op, _ := splitLineKey(row.ProviderEntityID)
+		alt := LegAlternative{
+			RouteID:      row.ID.String(),
+			Line:         row.ProviderEntityID,
+			Operator:     op,
+			StationCount: len(slice) - 1,
+			Stops:        stops,
+			Geometry:     h.sliceShape(ctx, row.ID, lons, lats),
+		}
+		if row.ShortName.Valid {
+			alt.ShortName = row.ShortName.String
+		}
+		if row.LongName.Valid {
+			alt.Name = row.LongName.String
+		}
+		out = append(out, alt)
+	}
+	return out
+}
+
+// sliceShape runs the scored shape cut for a sequence of stop coordinates —
+// shared by provider legs and corridor alternatives alike.
+func (h *Handler) sliceShape(ctx context.Context, routeID pgtype.UUID, lons, lats []float64) json.RawMessage {
+	if len(lons) < 2 {
+		return nil
+	}
+	g, err := h.store.SliceRouteShape(ctx, generated.SliceRouteShapeParams{
+		RouteID:  routeID,
+		FromLon:  lons[0],
+		FromLat:  lats[0],
+		ToLon:    lons[len(lons)-1],
+		ToLat:    lats[len(lats)-1],
+		Lons:     lons,
+		Lats:     lats,
+		MaxSnapM: maxShapeSnapM,
+	})
+	if err != nil || g == "" {
+		return nil
+	}
+	return json.RawMessage(g)
+}
+
 // attachDepartures fills nextDepartures on the first ride leg — "kapan
 // berangkat" is answered at the first boarding; later legs would need
 // arrival-time propagation the provider doesn't compute. A timetable outage
 // degrades to no departures, never a failed plan.
-func (h *Handler) attachDepartures(ctx context.Context, itin *Itinerary, plan *commute.FarePlan) {
+func (h *Handler) attachDepartures(ctx context.Context, itin *Itinerary, plan *commute.FarePlan, anchor time.Time) {
 	for i, fl := range plan.Legs {
 		if fl.Type != "RIDE" || i >= len(itin.Legs) {
 			continue
@@ -197,13 +355,13 @@ func (h *Handler) attachDepartures(ctx context.Context, itin *Itinerary, plan *c
 		if op == "" || line == "" {
 			return
 		}
-		now := h.now().In(jakarta)
+		anchor = anchor.In(jakarta)
 		entries, err := h.tt.Timetable(ctx, op, stn,
-			now.Format("15:04"), now.Add(departuresWindow*time.Minute).Format("15:04"))
+			anchor.Format("15:04"), anchor.Add(departuresWindow*time.Minute).Format("15:04"))
 		if err != nil {
 			return
 		}
-		nowMin := now.Hour()*60 + now.Minute()
+		anchorMin := anchor.Hour()*60 + anchor.Minute()
 		type cand struct {
 			d Departure
 			m int // minutes from now, wrapped at midnight
@@ -217,7 +375,7 @@ func (h *Handler) attachDepartures(ctx context.Context, itin *Itinerary, plan *c
 			if !ok {
 				continue
 			}
-			m := (depMin - nowMin + 1440) % 1440
+			m := (depMin - anchorMin + 1440) % 1440
 			if m > departuresWindow {
 				continue
 			}
@@ -269,13 +427,30 @@ func minutesOfDay(s string) (int, bool) {
 	return t.Hour()*60 + t.Minute(), true
 }
 
-func writePlan(w http.ResponseWriter, r *http.Request, from, to generated.GetStopRow, itin *Itinerary) {
+func writePlan(w http.ResponseWriter, r *http.Request, from, to generated.GetStopRow, itin *Itinerary, at *time.Time) {
 	httpapi.JSON(w, http.StatusOK, PlanResponse{
 		From:      StopRef{ID: from.ID.String(), Name: from.Name},
 		To:        StopRef{ID: to.ID.String(), Name: to.Name},
+		At:        at,
 		Itinerary: itin,
 		Source:    SourceMeta{Provider: providerCode, RequestedAt: time.Now().UTC()},
 	})
+}
+
+// parseAt reads the optional departure context — an RFC 3339 instant the plan
+// is computed for ("leave at"). It goes upstream for fare selection and
+// anchors the departures window; absent means "now".
+func parseAt(w http.ResponseWriter, r *http.Request) (*time.Time, bool) {
+	v := r.URL.Query().Get("at")
+	if v == "" {
+		return nil, true
+	}
+	t, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		httpapi.Error(w, r, http.StatusBadRequest, "BAD_REQUEST", "Invalid at timestamp")
+		return nil, false
+	}
+	return &t, true
 }
 
 func parseUUID(w http.ResponseWriter, r *http.Request, param string) (pgtype.UUID, bool) {

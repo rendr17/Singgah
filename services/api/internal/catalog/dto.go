@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -31,6 +32,9 @@ type StationSummary struct {
 	Lat          float64 `json:"lat"`
 	Lon          float64 `json:"lon"`
 	ProviderCode string  `json:"providerCode"`
+	// Operator is the provider-declared operator code (TJ, MRTJ, KCI…) —
+	// the client keys official brand marks off it; empty when unsurveyed.
+	Operator string `json:"operator,omitempty"`
 }
 
 type RouteRef struct {
@@ -71,6 +75,45 @@ type StationDetail struct {
 	Source       SourceMeta    `json:"source"`
 }
 
+// Departure is one scheduled boarding — Asia/Jakarta wall clock.
+type Departure struct {
+	Time       string  `json:"time"` // HH:MM
+	TripNumber *string `json:"tripNumber"`
+	BoundFor   string  `json:"boundFor"`
+}
+
+// DepartureDirection is one boundFor group on a line. PreviousDeparture is
+// the latest boarding already gone inside the lookback window.
+type DepartureDirection struct {
+	BoundFor          string      `json:"boundFor"`
+	Departures        []Departure `json:"departures"`
+	PreviousDeparture *Departure  `json:"previousDeparture,omitempty"`
+}
+
+// DepartureLine groups directions on one provider line. Route is nil when
+// the provider line does not resolve to a canonical route — LineCode then
+// is the only identity shown.
+type DepartureLine struct {
+	LineCode   string               `json:"lineCode"`
+	Route      *RouteRef            `json:"route,omitempty"`
+	Directions []DepartureDirection `json:"directions"`
+}
+
+type DepartureSource struct {
+	Provider    string    `json:"provider"`
+	RequestedAt time.Time `json:"requestedAt"`
+}
+
+// StationDepartures is a station's departure board. Status is fixed
+// "scheduled" — the source is a static timetable, never realtime.
+type StationDepartures struct {
+	Station       StopRef         `json:"station"`
+	Status        string          `json:"status"`
+	WindowMinutes int             `json:"windowMinutes"`
+	Lines         []DepartureLine `json:"lines"`
+	Source        DepartureSource `json:"source"`
+}
+
 // RouteStop is a StopRef plus its position on the route — seq is the
 // flattened provider order across segments; stationNumber is the operator's
 // own number (M01…) when published; segmentKind keeps TRUNK/BRANCH topology.
@@ -85,6 +128,34 @@ type RouteDetail struct {
 	RouteSummary
 	Stops  []RouteStop `json:"stops"`
 	Source SourceMeta  `json:"source"`
+}
+
+// RouteLineProps are the feature properties for one drawable route line.
+// Color follows RouteRef: hex without '#', empty when unpublished. Source
+// says whether the geometry is a real ingested path ('shape') or a straight
+// polyline through ordered stops ('stops').
+type RouteLineProps struct {
+	RouteID    string `json:"routeId"`
+	ShortName  string `json:"shortName"`
+	LongName   string `json:"longName"`
+	Mode       string `json:"mode"`
+	Color      string `json:"color"`
+	AgencyName string `json:"agencyName"`
+	Source     string `json:"source"`
+}
+
+// RouteLineFeature — geometry passes through verbatim from st_asgeojson.
+type RouteLineFeature struct {
+	Type       string          `json:"type"` // "Feature"
+	Geometry   json.RawMessage `json:"geometry"`
+	Properties RouteLineProps  `json:"properties"`
+}
+
+// RouteLineCollection is a GeoJSON FeatureCollection for map rendering —
+// display geometry only, carrying no schedule or realtime meaning.
+type RouteLineCollection struct {
+	Type     string             `json:"type"` // "FeatureCollection"
+	Features []RouteLineFeature `json:"features"`
 }
 
 // ProviderHealth is the registry row plus its ingest freshness signal.

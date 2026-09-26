@@ -23,6 +23,15 @@ get:
         type: string
         format: uuid
       description: Destination stop UUID
+    - name: at
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
+      description: >-
+        Departure context ("leave at") — forwarded upstream for peak/off-peak
+        fare selection and anchors the departures window. Absent = now.
   responses:
     '200':
       description: Normalized plan (itinerary may be null)

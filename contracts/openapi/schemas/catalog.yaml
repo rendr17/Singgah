@@ -50,6 +50,12 @@ StationSummary:
       type: number
     providerCode:
       type: string
+    operator:
+      type: string
+      description: >-
+        Provider-declared operator code (e.g. TJ, MRTJ, KCI, LRTJ, LRTJBDB).
+        Empty when the provider does not survey it — clients key official
+        brand marks off this field.
 
 RouteRef:
   type: object
@@ -317,6 +323,190 @@ JourneyLeg:
         $ref: '#/JourneyStopRef'
     headsign:
       type: string
+    geometry:
+      $ref: '#/LegShape'
+    nextDepartures:
+      type: array
+      description: >-
+        Next scheduled boardings at leg.from matching this leg's line and
+        headsign — populated on the first ride leg only (later boardings
+        would need arrival-time propagation the provider doesn't compute).
+        Absent when the timetable source is unavailable.
+      items:
+        $ref: '#/Departure'
+    alternatives:
+      type: array
+      description: >-
+        Other catalog routes that also carry this leg's endpoints —
+        corridors the rider can board instead of the provider's pick.
+      items:
+        $ref: '#/JourneyLegAlternative'
+
+LegShape:
+  type: object
+  description: >-
+    GeoJSON LineString sliced from an ingested route shape (GTFS) between
+    the leg's endpoints. Absent when the route has no ingested shape that
+    hugs the listed stops — clients then draw the stop-to-stop polyline.
+  required:
+    - type
+    - coordinates
+  properties:
+    type:
+      type: string
+      enum:
+        - LineString
+    coordinates:
+      type: array
+      items:
+        type: array
+        items:
+          type: number
+        minItems: 2
+        maxItems: 2
+      minItems: 2
+
+JourneyLegAlternative:
+  type: object
+  description: >-
+    A corridor that also serves the leg's endpoints. `stops` and `geometry`
+    are derived from this alternative's own route_stops/shape rows — never
+    borrowed from the provider's chosen leg.
+  required:
+    - routeId
+    - line
+    - stops
+  additionalProperties: false
+  properties:
+    routeId:
+      type: string
+      format: uuid
+    line:
+      type: string
+      description: Provider line key, e.g. TJ:2
+    shortName:
+      type: string
+      description: Corridor/line code for chips — "2", "7F"
+    name:
+      type: string
+      description: Corridor long name, e.g. "Pulo Gadung - Monumen Nasional"
+    operator:
+      type: string
+    stationCount:
+      type: integer
+      description: Stop-to-stop hops across the served slice
+    stops:
+      type: array
+      description: Interior stops in ride order — leg endpoints excluded
+      items:
+        $ref: '#/JourneyStopRef'
+    geometry:
+      $ref: '#/LegShape'
+
+Departure:
+  type: object
+  required:
+    - time
+    - tripNumber
+    - boundFor
+  additionalProperties: false
+  properties:
+    time:
+      type: string
+      description: Asia/Jakarta wall clock, HH:MM
+      example: '07:04'
+    tripNumber:
+      anyOf:
+        - type: string
+        - type: 'null'
+      description: Operator trip number — null when the operator publishes none
+    boundFor:
+      type: string
+      description: Terminal station name, matching the leg's headsign
+
+DepartureDirection:
+  type: object
+  description: >-
+    One direction (boundFor) on a line. departures holds upcoming boardings
+    inside the requested window, soonest first; previousDeparture is the
+    latest boarding already gone inside the lookback window, absent when
+    none is seen.
+  required:
+    - boundFor
+    - departures
+  additionalProperties: false
+  properties:
+    boundFor:
+      type: string
+      description: Terminal station name published by the provider
+    departures:
+      type: array
+      items:
+        $ref: '#/Departure'
+    previousDeparture:
+      $ref: '#/Departure'
+
+DepartureLine:
+  type: object
+  description: >-
+    Departures on one provider line serving the station. route is the
+    canonical route when the provider line resolves to one — absent when it
+    does not, in which case lineCode is the only identity shown.
+  required:
+    - lineCode
+    - directions
+  additionalProperties: false
+  properties:
+    lineCode:
+      type: string
+      description: Provider line code, e.g. B — diagnostic identity
+    route:
+      $ref: '#/RouteRef'
+    directions:
+      type: array
+      items:
+        $ref: '#/DepartureDirection'
+
+StationDepartures:
+  type: object
+  description: >-
+    A station's departure board. status is fixed "scheduled" — the source is
+    the provider's static timetable, never realtime. Lines and directions
+    are ordered by soonest upcoming departure.
+  required:
+    - station
+    - status
+    - windowMinutes
+    - lines
+    - source
+  additionalProperties: false
+  properties:
+    station:
+      $ref: '#/StopRef'
+    status:
+      type: string
+      enum:
+        - scheduled
+    windowMinutes:
+      type: integer
+      description: Effective lookahead window the board was computed with
+    lines:
+      type: array
+      items:
+        $ref: '#/DepartureLine'
+    source:
+      type: object
+      required:
+        - provider
+        - requestedAt
+      additionalProperties: false
+      properties:
+        provider:
+          type: string
+        requestedAt:
+          type: string
+          format: date-time
+          description: Server time the board was computed — the anchor for "now"
 
 FareSegment:
   type: object
@@ -399,6 +589,12 @@ JourneyPlan:
       $ref: '#/JourneyStopRef'
     to:
       $ref: '#/JourneyStopRef'
+    at:
+      type: string
+      format: date-time
+      description: >-
+        Requested departure context echoed back — absent when the plan was
+        computed for "leave now".
     itinerary:
       oneOf:
         - $ref: '#/Itinerary'
@@ -416,3 +612,109 @@ JourneyPlan:
         requestedAt:
           type: string
           format: date-time
+
+RouteLineGeometry:
+  type: object
+  description: >-
+    GeoJSON MultiLineString — the merged path for one route. Real ingested
+    shapes and stop-sequence fallbacks both collect into MultiLineString
+    (directions, patterns, and trunk/branch segments stay separate members).
+  required:
+    - type
+    - coordinates
+  properties:
+    type:
+      type: string
+      enum:
+        - MultiLineString
+    coordinates:
+      type: array
+      items:
+        type: array
+        minItems: 2
+        items:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            type: number
+
+RouteLineProperties:
+  type: object
+  required:
+    - routeId
+    - shortName
+    - longName
+    - mode
+    - color
+    - agencyName
+    - source
+  additionalProperties: false
+  properties:
+    routeId:
+      type: string
+      format: uuid
+      description: Canonical route UUID
+    shortName:
+      type: string
+      description: Line designation, e.g. 1, B, M
+    longName:
+      type: string
+    mode:
+      type: string
+      enum:
+        - rail
+        - subway
+        - tram
+        - bus
+        - ferry
+        - other
+    color:
+      type: string
+      description: >-
+        Hex color without leading '#', same convention as RouteRef.color —
+        empty when the operator publishes none
+    agencyName:
+      type: string
+    source:
+      type: string
+      enum:
+        - shape
+        - stops
+      description: >-
+        'shape' = real ingested path geometry (GTFS/OSM); 'stops' =
+        straight polyline through ordered stops — schematic, not surveyed
+
+RouteLineFeature:
+  type: object
+  required:
+    - type
+    - geometry
+    - properties
+  additionalProperties: false
+  properties:
+    type:
+      type: string
+      enum:
+        - Feature
+    geometry:
+      $ref: '#/RouteLineGeometry'
+    properties:
+      $ref: '#/RouteLineProperties'
+
+RouteLineCollection:
+  type: object
+  description: GeoJSON FeatureCollection of route path geometries
+  required:
+    - type
+    - features
+  additionalProperties: false
+  properties:
+    type:
+      type: string
+      enum:
+        - FeatureCollection
+    features:
+      type: array
+      items:
+        $ref: '#/RouteLineFeature'

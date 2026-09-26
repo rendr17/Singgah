@@ -102,6 +102,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/stations/{id}/departures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Station departures board
+         * @description Scheduled departures from one station, grouped by line and direction (boundFor). Source is the provider's static timetable — always "scheduled", never live. Times are Asia/Jakarta wall clock; each direction also carries the most recent past departure when one falls inside the lookback window.
+         */
+        get: operations["getStationDepartures"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/routes": {
         parameters: {
             query?: never;
@@ -154,6 +174,26 @@ export interface paths {
          * @description The provider registry as a health surface: `lastSuccessAt` is the stamp of the most recent successful ingest — its absence means the provider is registered but has never been ingested. `lastAttemptAt` marks the most recent run start; an attempt newer than the last success means the latest ingest failed (or is still running). License, attribution, and known limitations travel with the registry (docs/35, docs/37).
          */
         get: operations["listProviders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/map/lines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Route path geometries for the network map
+         * @description Drawable geometry for every route touching the viewport, returned as a GeoJSON FeatureCollection of MultiLineString features. Real ingested path geometry (GTFS shapes, OSM rail relations) wins; routes with no ingested shape fall back to polylines through their ordered stops — `properties.source` on each feature says which it is ('shape' or 'stops'). Display geometry only; it carries no schedule or realtime meaning.
+         */
+        get: operations["listRouteLines"];
         put?: never;
         post?: never;
         delete?: never;
@@ -217,6 +257,8 @@ export interface components {
             lat: number;
             lon: number;
             providerCode: string;
+            /** @description Provider-declared operator code (e.g. TJ, MRTJ, KCI, LRTJ, LRTJBDB). Empty when the provider does not survey it — clients key official brand marks off this field. */
+            operator?: string;
         };
         RouteRef: {
             /** Format: uuid */
@@ -274,6 +316,48 @@ export interface components {
             facilities: components["schemas"]["Facility"][];
             source: components["schemas"]["SourceMeta"];
         };
+        Departure: {
+            /**
+             * @description Asia/Jakarta wall clock, HH:MM
+             * @example 07:04
+             */
+            time: string;
+            /** @description Operator trip number — null when the operator publishes none */
+            tripNumber: string | null;
+            /** @description Terminal station name, matching the leg's headsign */
+            boundFor: string;
+        };
+        /** @description One direction (boundFor) on a line. departures holds upcoming boardings inside the requested window, soonest first; previousDeparture is the latest boarding already gone inside the lookback window, absent when none is seen. */
+        DepartureDirection: {
+            /** @description Terminal station name published by the provider */
+            boundFor: string;
+            departures: components["schemas"]["Departure"][];
+            previousDeparture?: components["schemas"]["Departure"];
+        };
+        /** @description Departures on one provider line serving the station. route is the canonical route when the provider line resolves to one — absent when it does not, in which case lineCode is the only identity shown. */
+        DepartureLine: {
+            /** @description Provider line code, e.g. B — diagnostic identity */
+            lineCode: string;
+            route?: components["schemas"]["RouteRef"];
+            directions: components["schemas"]["DepartureDirection"][];
+        };
+        /** @description A station's departure board. status is fixed "scheduled" — the source is the provider's static timetable, never realtime. Lines and directions are ordered by soonest upcoming departure. */
+        StationDepartures: {
+            station: components["schemas"]["StopRef"];
+            /** @enum {string} */
+            status: "scheduled";
+            /** @description Effective lookahead window the board was computed with */
+            windowMinutes: number;
+            lines: components["schemas"]["DepartureLine"][];
+            source: {
+                provider: string;
+                /**
+                 * Format: date-time
+                 * @description Server time the board was computed — the anchor for "now"
+                 */
+                requestedAt: string;
+            };
+        };
         RouteSummary: components["schemas"]["RouteRef"] & {
             providerCode: string;
         };
@@ -316,11 +400,72 @@ export interface components {
              */
             lastAttemptAt?: string;
         };
+        /** @description GeoJSON MultiLineString — the merged path for one route. Real ingested shapes and stop-sequence fallbacks both collect into MultiLineString (directions, patterns, and trunk/branch segments stay separate members). */
+        RouteLineGeometry: {
+            /** @enum {string} */
+            type: "MultiLineString";
+            coordinates: number[][][];
+        };
+        RouteLineProperties: {
+            /**
+             * Format: uuid
+             * @description Canonical route UUID
+             */
+            routeId: string;
+            /** @description Line designation, e.g. 1, B, M */
+            shortName: string;
+            longName: string;
+            /** @enum {string} */
+            mode: "rail" | "subway" | "tram" | "bus" | "ferry" | "other";
+            /** @description Hex color without leading '#', same convention as RouteRef.color — empty when the operator publishes none */
+            color: string;
+            agencyName: string;
+            /**
+             * @description 'shape' = real ingested path geometry (GTFS/OSM); 'stops' = straight polyline through ordered stops — schematic, not surveyed
+             * @enum {string}
+             */
+            source: "shape" | "stops";
+        };
+        RouteLineFeature: {
+            /** @enum {string} */
+            type: "Feature";
+            geometry: components["schemas"]["RouteLineGeometry"];
+            properties: components["schemas"]["RouteLineProperties"];
+        };
+        /** @description GeoJSON FeatureCollection of route path geometries */
+        RouteLineCollection: {
+            /** @enum {string} */
+            type: "FeatureCollection";
+            features: components["schemas"]["RouteLineFeature"][];
+        };
         /** @description Stop reference inside an itinerary. `id` is absent when the upstream station ref cannot be resolved to a canonical stop (external service). */
         JourneyStopRef: {
             /** Format: uuid */
             id?: string;
             name: string;
+        };
+        /** @description GeoJSON LineString sliced from an ingested route shape (GTFS) between the leg's endpoints. Absent when the route has no ingested shape that hugs the listed stops — clients then draw the stop-to-stop polyline. */
+        LegShape: {
+            /** @enum {string} */
+            type: "LineString";
+            coordinates: number[][];
+        };
+        /** @description A corridor that also serves the leg's endpoints. `stops` and `geometry` are derived from this alternative's own route_stops/shape rows — never borrowed from the provider's chosen leg. */
+        JourneyLegAlternative: {
+            /** Format: uuid */
+            routeId: string;
+            /** @description Provider line key, e.g. TJ:2 */
+            line: string;
+            /** @description Corridor/line code for chips — "2", "7F" */
+            shortName?: string;
+            /** @description Corridor long name, e.g. "Pulo Gadung - Monumen Nasional" */
+            name?: string;
+            operator?: string;
+            /** @description Stop-to-stop hops across the served slice */
+            stationCount?: number;
+            /** @description Interior stops in ride order — leg endpoints excluded */
+            stops: components["schemas"]["JourneyStopRef"][];
+            geometry?: components["schemas"]["LegShape"];
         };
         JourneyLeg: {
             /** @description walk | ride | raw upstream type for unrecognised legs */
@@ -340,6 +485,11 @@ export interface components {
             /** @description Ordered stops ridden — real sequence from the provider */
             stops?: components["schemas"]["JourneyStopRef"][];
             headsign?: string;
+            geometry?: components["schemas"]["LegShape"];
+            /** @description Next scheduled boardings at leg.from matching this leg's line and headsign — populated on the first ride leg only (later boardings would need arrival-time propagation the provider doesn't compute). Absent when the timetable source is unavailable. */
+            nextDepartures?: components["schemas"]["Departure"][];
+            /** @description Other catalog routes that also carry this leg's endpoints — corridors the rider can board instead of the provider's pick. */
+            alternatives?: components["schemas"]["JourneyLegAlternative"][];
         };
         FareSegment: {
             operator: string;
@@ -374,6 +524,11 @@ export interface components {
         JourneyPlan: {
             from: components["schemas"]["JourneyStopRef"];
             to: components["schemas"]["JourneyStopRef"];
+            /**
+             * Format: date-time
+             * @description Requested departure context echoed back — absent when the plan was computed for "leave now".
+             */
+            at?: string;
             /** @description null when the provider computes no plan for the pair */
             itinerary: components["schemas"]["Itinerary"] | null;
             source: {
@@ -559,6 +714,42 @@ export interface operations {
             };
         };
     };
+    getStationDepartures: {
+        parameters: {
+            query?: {
+                /** @description Minutes ahead of "now" (Asia/Jakarta) to include. 1440 returns the whole service day. */
+                window?: number;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Departures grouped per line and direction */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        departures: components["schemas"]["StationDepartures"];
+                    };
+                };
+            };
+            /** @description Error envelope — shared by all endpoints */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
     listRoutes: {
         parameters: {
             query?: {
@@ -657,6 +848,43 @@ export interface operations {
             };
         };
     };
+    listRouteLines: {
+        parameters: {
+            query: {
+                /**
+                 * @description WGS84 viewport: minLon,minLat,maxLon,maxLat
+                 * @example 106.70,-6.30,106.95,-6.10
+                 */
+                bbox: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Route lines intersecting the viewport */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        lines: components["schemas"]["RouteLineCollection"];
+                    };
+                };
+            };
+            /** @description Error envelope — shared by all endpoints */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
     planJourney: {
         parameters: {
             query: {
@@ -664,6 +892,8 @@ export interface operations {
                 from: string;
                 /** @description Destination stop UUID */
                 to: string;
+                /** @description Departure context ("leave at") — forwarded upstream for peak/off-peak fare selection and anchors the departures window. Absent = now. */
+                at?: string;
             };
             header?: never;
             path?: never;

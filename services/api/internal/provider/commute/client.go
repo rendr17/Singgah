@@ -126,10 +126,14 @@ func (c *Client) Timetable(ctx context.Context, operatorCode, stationCode, from,
 var ErrStationUnknown = errors.New("commute: station unknown upstream")
 
 // Fares computes the provider's station-to-station itinerary — the MVP journey
-// source per docs/23_ROUTING_MAP_GIS.md.
-func (c *Client) Fares(ctx context.Context, fromID, toID string) (*FarePlan, error) {
+// source per docs/23_ROUTING_MAP_GIS.md. at selects the peak/off-peak fare
+// context upstream; nil means "now".
+func (c *Client) Fares(ctx context.Context, fromID, toID string, at *time.Time) (*FarePlan, error) {
 	var env envelope[FarePlan]
 	path := fmt.Sprintf("/fares/%s/%s", url.PathEscape(fromID), url.PathEscape(toID))
+	if at != nil {
+		path += "?at=" + url.QueryEscape(at.Format(time.RFC3339))
+	}
 	if err := c.get(ctx, path, &env); err != nil {
 		return nil, err
 	}

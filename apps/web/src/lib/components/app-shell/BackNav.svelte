@@ -19,4 +19,11 @@
 		margin-bottom: var(--sg-space-4);
 		font-size: var(--sg-font-sm);
 	}
+
+	/* Breadcrumb links still meet the shared touch-target minimum. */
+	.back-nav a {
+		display: inline-flex;
+		align-items: center;
+		min-height: var(--sg-target-min);
+	}
 </style>
