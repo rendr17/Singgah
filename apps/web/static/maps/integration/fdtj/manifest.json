@@ -1,0 +1,32 @@
+{
+  "version": "2026-08c",
+  "build": "584909dc",
+  "source": "2026-08c Peta Integrasi Jakarta FDTJ Web.pdf",
+  "viewBox": [
+    0,
+    0,
+    9513.57,
+    6726.88
+  ],
+  "grid": {
+    "rows": 8,
+    "cols": 8
+  },
+  "tileSize": {
+    "w": 1189.19625,
+    "h": 840.86
+  },
+  "raster": {
+    "format": "webp",
+    "tiers": [
+      0.5,
+      1,
+      2
+    ]
+  },
+  "preview": {
+    "url": "preview.webp",
+    "w": 1280,
+    "h": 905
+  }
+}
