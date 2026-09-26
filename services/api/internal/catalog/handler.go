@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -20,10 +21,12 @@ const defaultLimit = 20
 // Handler serves the catalog endpoints under /api/v1.
 type Handler struct {
 	store Store
+	tt    Timetabler
+	now   func() time.Time
 }
 
-func NewHandler(store Store) *Handler {
-	return &Handler{store: store}
+func NewHandler(store Store, tt Timetabler) *Handler {
+	return &Handler{store: store, tt: tt, now: time.Now}
 }
 
 // RegisterRoutes mounts the domain's paths on an existing mux — the router
@@ -31,8 +34,10 @@ func NewHandler(store Store) *Handler {
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/stations", h.listStations)
 	r.Get("/stations/{id}", h.getStation)
+	r.Get("/stations/{id}/departures", h.getDepartures)
 	r.Get("/routes", h.listRoutes)
 	r.Get("/routes/{id}", h.getRoute)
+	r.Get("/map/lines", h.listRouteLines)
 	r.Get("/providers", h.listProviders)
 }
 
@@ -67,7 +72,7 @@ func (h *Handler) listStations(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, row := range rows {
-			stations = append(stations, stationSummary(row.ID, row.Name, row.Code, row.Kind, row.Lat, row.Lon, row.ProviderCode))
+			stations = append(stations, stationSummary(row.ID, row.Name, row.Code, row.Kind, row.Lat, row.Lon, row.ProviderCode, row.Operator))
 		}
 	} else if q != "" {
 		rows, err := h.store.SearchStops(r.Context(), generated.SearchStopsParams{
@@ -79,7 +84,7 @@ func (h *Handler) listStations(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, row := range rows {
-			stations = append(stations, stationSummary(row.ID, row.Name, row.Code, row.Kind, row.Lat, row.Lon, row.ProviderCode))
+			stations = append(stations, stationSummary(row.ID, row.Name, row.Code, row.Kind, row.Lat, row.Lon, row.ProviderCode, row.Operator))
 		}
 	} else {
 		rows, err := h.store.ListStops(r.Context(), limit)
@@ -88,7 +93,7 @@ func (h *Handler) listStations(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, row := range rows {
-			stations = append(stations, stationSummary(row.ID, row.Name, row.Code, row.Kind, row.Lat, row.Lon, row.ProviderCode))
+			stations = append(stations, stationSummary(row.ID, row.Name, row.Code, row.Kind, row.Lat, row.Lon, row.ProviderCode, row.Operator))
 		}
 	}
 	if stations == nil {
@@ -97,7 +102,7 @@ func (h *Handler) listStations(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, map[string]any{"stations": stations})
 }
 
-func stationSummary(id pgtype.UUID, name string, code pgtype.Text, kind string, lat, lon float64, provider string) StationSummary {
+func stationSummary(id pgtype.UUID, name string, code pgtype.Text, kind string, lat, lon float64, provider, operator string) StationSummary {
 	return StationSummary{
 		ID:           id.String(),
 		Name:         name,
@@ -106,6 +111,7 @@ func stationSummary(id pgtype.UUID, name string, code pgtype.Text, kind string, 
 		Lat:          lat,
 		Lon:          lon,
 		ProviderCode: provider,
+		Operator:     operator,
 	}
 }
 
@@ -166,6 +172,7 @@ func (h *Handler) getStation(w http.ResponseWriter, r *http.Request) {
 			Lat:          stop.Lat,
 			Lon:          stop.Lon,
 			ProviderCode: stop.ProviderCode,
+			Operator:     metaString(stop.Metadata, "operator"),
 		},
 		OfficialName: officialName(stop.Metadata),
 		Source:       sourceMeta(stop.ProviderCode, stop.FetchedAt, stop.SourceUpdatedAt),
@@ -299,13 +306,17 @@ func textOrEmpty(t pgtype.Text) string {
 	return ""
 }
 
-func officialName(metadata []byte) string {
+func metaString(metadata []byte, key string) string {
 	var m map[string]any
 	if err := json.Unmarshal(metadata, &m); err != nil {
 		return ""
 	}
-	s, _ := m["official_name"].(string)
+	s, _ := m[key].(string)
 	return s
+}
+
+func officialName(metadata []byte) string {
+	return metaString(metadata, "official_name")
 }
 
 // facilities reads the adapter-stored amenities out of stop metadata. Types

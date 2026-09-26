@@ -1,0 +1,41 @@
+get:
+  operationId: listRouteLines
+  summary: Route path geometries for the network map
+  description: >-
+    Drawable geometry for every route touching the viewport, returned as a
+    GeoJSON FeatureCollection of MultiLineString features. Real ingested
+    path geometry (GTFS shapes, OSM rail relations) wins; routes with no
+    ingested shape fall back to polylines through their ordered stops —
+    `properties.source` on each feature says which it is ('shape' or
+    'stops'). Display geometry only; it carries no schedule or realtime
+    meaning.
+  tags:
+    - catalog
+  parameters:
+    - name: bbox
+      in: query
+      required: true
+      schema:
+        type: string
+        pattern: '^-?\d+(\.\d+)?,-?\d+(\.\d+)?,-?\d+(\.\d+)?,-?\d+(\.\d+)?$'
+      description: 'WGS84 viewport: minLon,minLat,maxLon,maxLat'
+      example: '106.70,-6.30,106.95,-6.10'
+  responses:
+    '200':
+      description: Route lines intersecting the viewport
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - lines
+            additionalProperties: false
+            properties:
+              lines:
+                $ref: '../schemas/catalog.yaml#/RouteLineCollection'
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

@@ -19,12 +19,16 @@ paths:
     $ref: './paths/stations.yaml'
   /api/v1/stations/{id}:
     $ref: './paths/station-detail.yaml'
+  /api/v1/stations/{id}/departures:
+    $ref: './paths/station-departures.yaml'
   /api/v1/routes:
     $ref: './paths/routes.yaml'
   /api/v1/routes/{id}:
     $ref: './paths/route-detail.yaml'
   /api/v1/providers:
     $ref: './paths/providers.yaml'
+  /api/v1/map/lines:
+    $ref: './paths/map-lines.yaml'
   /api/v1/journeys:
     $ref: './paths/journeys.yaml'
 components:
