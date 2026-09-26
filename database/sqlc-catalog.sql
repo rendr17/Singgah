@@ -24,6 +24,18 @@ CREATE FUNCTION st_y(geometry) RETURNS float8 AS
 $$ SELECT 0::float8 $$ LANGUAGE sql;
 CREATE FUNCTION wgs84_point(float8, float8) RETURNS geography AS
 $$ SELECT NULL::geography $$ LANGUAGE sql;
+CREATE FUNCTION st_geomfromtext(text, int4) RETURNS geometry AS
+$$ SELECT NULL::geometry $$ LANGUAGE sql;
+CREATE FUNCTION st_asgeojson(geometry) RETURNS text AS
+$$ SELECT ''::text $$ LANGUAGE sql;
+CREATE FUNCTION st_linelocatepoint(geometry, geometry) RETURNS float8 AS
+$$ SELECT 0::float8 $$ LANGUAGE sql;
+CREATE FUNCTION st_linesubstring(geometry, float8, float8) RETURNS geometry AS
+$$ SELECT NULL::geometry $$ LANGUAGE sql;
+CREATE FUNCTION st_distance(geometry, geometry) RETURNS float8 AS
+$$ SELECT 0::float8 $$ LANGUAGE sql;
+CREATE FUNCTION unnest(float8[], float8[]) RETURNS TABLE (lon float8, lat float8) AS
+$$ SELECT 0::float8, 0::float8 $$ LANGUAGE sql;
 
 CREATE TABLE providers (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -108,4 +120,15 @@ CREATE TABLE route_stops (
 	segment_kind text,
 	station_number text,
 	PRIMARY KEY (route_id, seq)
+);
+
+CREATE TABLE route_shapes (
+	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+	route_id uuid NOT NULL REFERENCES routes (id),
+	direction_id smallint,
+	shape geometry NOT NULL,
+	source text NOT NULL,
+	source_shape_id text NOT NULL,
+	fetched_at timestamptz,
+	UNIQUE (source, source_shape_id)
 );
