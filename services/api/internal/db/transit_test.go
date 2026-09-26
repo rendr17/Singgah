@@ -4,10 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	generated "singgah/services/api/db/generated"
@@ -376,6 +379,118 @@ func TestListStopsInBBoxQueryFilter(t *testing.T) {
 	}
 }
 
+// Shape picking must follow the leg's listed stops, not just the termini.
+// Regression for TJ:7F — a 60 km variant sharing the termini won the old
+// endpoint-only score by ~2 m while detouring ~600 m+ from the listed halte.
+// Setup mirrors it: the stop-hugging shape starts/ends slightly off the
+// termini (loses endpoint snap); the detour hits them exactly.
+func TestSliceRouteShapePicksStopHuggingShape(t *testing.T) {
+	q, ctx := testQueries(t)
+	provider := upsertProvider(t, q, ctx, uniqueCode(t), "Provider Shapes")
+	agency, err := q.UpsertAgency(ctx, generated.UpsertAgencyParams{
+		ProviderID: provider.ID, ProviderEntityID: "ag", Name: "Agency", Timezone: "Asia/Jakarta",
+	})
+	if err != nil {
+		t.Fatalf("UpsertAgency: %v", err)
+	}
+	route, err := q.UpsertRoute(ctx, generated.UpsertRouteParams{
+		AgencyID: agency.ID, ProviderID: provider.ID, ProviderEntityID: "r7f", Mode: "bus",
+	})
+	if err != nil {
+		t.Fatalf("UpsertRoute: %v", err)
+	}
+	for i, wkt := range []string{
+		// hugs every listed stop but starts/ends ~55 m off the termini
+		"LINESTRING(106.80 -6.1695,106.83 -6.169,106.87 -6.169,106.90 -6.1695)",
+		// termini exact, but swings ~2 km north mid-route
+		"LINESTRING(106.80 -6.170,106.85 -6.150,106.90 -6.170)",
+	} {
+		if _, err := q.UpsertRouteShape(ctx, generated.UpsertRouteShapeParams{
+			RouteID:        route.ID,
+			StGeomfromtext: wkt,
+			Source:         "test",
+			SourceShapeID:  "shape-" + string(rune('a'+i)),
+		}); err != nil {
+			t.Fatalf("UpsertRouteShape %d: %v", i, err)
+		}
+	}
+
+	g, err := q.SliceRouteShape(ctx, generated.SliceRouteShapeParams{
+		RouteID: route.ID,
+		FromLon: 106.80, FromLat: -6.170,
+		ToLon: 106.90, ToLat: -6.170,
+		Lons:     []float64{106.80, 106.83, 106.87, 106.90},
+		Lats:     []float64{-6.170, -6.169, -6.169, -6.170},
+		MaxSnapM: 250,
+	})
+	if err != nil {
+		t.Fatalf("SliceRouteShape: %v", err)
+	}
+	var geom struct {
+		Coordinates [][]float64 `json:"coordinates"`
+	}
+	if err := json.Unmarshal([]byte(g), &geom); err != nil {
+		t.Fatalf("geometry not GeoJSON: %v\n%s", err, g)
+	}
+	// The correct cut must pass ~on top of mid-stop (106.83,-6.169); the
+	// detour's nearest vertex sits ~2.5 km away.
+	near := false
+	for _, c := range geom.Coordinates {
+		if len(c) == 2 && abs(c[0]-106.83)+abs(c[1]+6.169) < 0.001 {
+			near = true
+		}
+	}
+	if !near {
+		t.Fatalf("picked shape does not hug the listed stops: %s", g)
+	}
+}
+
+// Every shape missing a listed stop is worse than no shape — the query
+// returns no row so the client draws the honest stop polyline instead.
+func TestSliceRouteShapeRejectsShapeFarFromStops(t *testing.T) {
+	q, ctx := testQueries(t)
+	provider := upsertProvider(t, q, ctx, uniqueCode(t), "Provider Far")
+	agency, err := q.UpsertAgency(ctx, generated.UpsertAgencyParams{
+		ProviderID: provider.ID, ProviderEntityID: "ag", Name: "Agency", Timezone: "Asia/Jakarta",
+	})
+	if err != nil {
+		t.Fatalf("UpsertAgency: %v", err)
+	}
+	route, err := q.UpsertRoute(ctx, generated.UpsertRouteParams{
+		AgencyID: agency.ID, ProviderID: provider.ID, ProviderEntityID: "rfar", Mode: "bus",
+	})
+	if err != nil {
+		t.Fatalf("UpsertRoute: %v", err)
+	}
+	if _, err := q.UpsertRouteShape(ctx, generated.UpsertRouteShapeParams{
+		RouteID:        route.ID,
+		StGeomfromtext: "LINESTRING(106.80 -6.170,106.85 -6.150,106.90 -6.170)",
+		Source:         "test",
+		SourceShapeID:  "detour",
+	}); err != nil {
+		t.Fatalf("UpsertRouteShape: %v", err)
+	}
+
+	_, err = q.SliceRouteShape(ctx, generated.SliceRouteShapeParams{
+		RouteID: route.ID,
+		FromLon: 106.80, FromLat: -6.170,
+		ToLon: 106.90, ToLat: -6.170,
+		Lons:     []float64{106.80, 106.83, 106.87, 106.90},
+		Lats:     []float64{-6.170, -6.169, -6.169, -6.170},
+		MaxSnapM: 250,
+	})
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("err = %v, want ErrNoRows — a shape 1+ km from a listed stop must be refused", err)
+	}
+}
+
+func abs(f float64) float64 {
+	if f < 0 {
+		return -f
+	}
+	return f
+}
+
 func TestListStopsInBBox(t *testing.T) {
 	q, ctx := testQueries(t)
 	provider := upsertProvider(t, q, ctx, uniqueCode(t), "Provider D")
@@ -415,4 +530,94 @@ func TestListStopsInBBox(t *testing.T) {
 	if len(rows) != 1 || rows[0].ID != inside.ID {
 		t.Fatalf("expected only the inside stop, got %d rows", len(rows))
 	}
+}
+
+// Corridor alternatives: a route carrying both endpoints in descending seq
+// order still serves the ride direction (seq is flattened order, not travel
+// direction); duplicate stop positions order by min-hops pair first.
+func TestListRouteAlternativesAndSlice(t *testing.T) {
+	q, ctx := testQueries(t)
+	provider := upsertProvider(t, q, ctx, uniqueCode(t), "Provider Alts")
+	agency, err := q.UpsertAgency(ctx, generated.UpsertAgencyParams{
+		ProviderID: provider.ID, ProviderEntityID: "ag", Name: "Agency", Timezone: "Asia/Jakarta",
+	})
+	if err != nil {
+		t.Fatalf("UpsertAgency: %v", err)
+	}
+	mkStop := func(eid, name string, lon, lat float64) pgtype.UUID {
+		s, err := q.UpsertStop(ctx, generated.UpsertStopParams{
+			ProviderID: provider.ID, ProviderEntityID: eid, Kind: "stop", Name: name,
+			Wgs84Point: lon, Wgs84Point_2: lat, Metadata: []byte("{}"),
+		})
+		if err != nil {
+			t.Fatalf("UpsertStop %s: %v", eid, err)
+		}
+		return s.ID
+	}
+	a := mkStop("alt-a", "Halte A", 106.80, -6.170)
+	m := mkStop("alt-m", "Halte M", 106.83, -6.170)
+	b := mkStop("alt-b", "Halte B", 106.87, -6.170)
+	mkRoute := func(eid string, stops ...pgtype.UUID) generated.Route {
+		r, err := q.UpsertRoute(ctx, generated.UpsertRouteParams{
+			AgencyID: agency.ID, ProviderID: provider.ID, ProviderEntityID: eid, Mode: "bus",
+		})
+		if err != nil {
+			t.Fatalf("UpsertRoute %s: %v", eid, err)
+		}
+		for i, sid := range stops {
+			if err := q.InsertRouteStop(ctx, generated.InsertRouteStopParams{
+				RouteID: r.ID, StopID: sid, Seq: int32(i + 1),
+			}); err != nil {
+				t.Fatalf("InsertRouteStop %s[%d]: %v", eid, i, err)
+			}
+		}
+		return r
+	}
+	// Chosen route ascending; the alternative's seq runs toward the origin —
+	// like TJ:2 where Monas precedes Sumur Batu in the flattened order.
+	chosen := mkRoute("tj-7f", a, m, b)
+	alt := mkRoute("tj-2", b, m, a)
+	mkRoute("tj-2a", a)                     // missing b — not an alternative
+	mkRoute("tj-9", m, b)                   // missing a — not an alternative
+	dup := mkRoute("tj-dup", a, m, b, a, b) // a×b twice → four seq pairs
+
+	rows, err := q.ListRouteAlternatives(ctx, generated.ListRouteAlternativesParams{
+		StopID: a, StopID_2: b, ID: chosen.ID,
+	})
+	if err != nil {
+		t.Fatalf("ListRouteAlternatives: %v", err)
+	}
+	if len(rows) != 5 {
+		t.Fatalf("alternatives = %d rows, want 5 (tj-2 once + dup's 2x2 pairs)", len(rows))
+	}
+	if rows[0].ID != alt.ID || rows[0].SeqFrom != 3 || rows[0].SeqTo != 1 {
+		t.Fatalf("first alternative = %+v — want tj-2 descending 3->1", rows[0])
+	}
+	// tj-dup contributes every from×to pair, min-hops ones first
+	var dupRows []generated.ListRouteAlternativesRow
+	for _, r := range rows {
+		if r.ID == dup.ID {
+			dupRows = append(dupRows, r)
+		}
+	}
+	if len(dupRows) != 4 || abs32(dupRows[0].SeqFrom-dupRows[0].SeqTo) != 1 {
+		t.Fatalf("dup pairs not min-hops ordered: %+v", dupRows)
+	}
+
+	slice, err := q.ListRouteStopSlice(ctx, generated.ListRouteStopSliceParams{
+		RouteID: alt.ID, Seq: 1, Seq_2: 3,
+	})
+	if err != nil {
+		t.Fatalf("ListRouteStopSlice: %v", err)
+	}
+	if len(slice) != 3 || slice[0].ID != b || slice[2].ID != a {
+		t.Fatalf("slice = %+v — ascending order, caller reverses for the ride", slice)
+	}
+}
+
+func abs32(v int32) int32 {
+	if v < 0 {
+		return -v
+	}
+	return v
 }

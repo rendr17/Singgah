@@ -53,6 +53,16 @@ type Route struct {
 	RemovedAt        pgtype.Timestamptz `json:"removed_at"`
 }
 
+type RouteShape struct {
+	ID            pgtype.UUID        `json:"id"`
+	RouteID       pgtype.UUID        `json:"route_id"`
+	DirectionID   pgtype.Int2        `json:"direction_id"`
+	Shape         interface{}        `json:"shape"`
+	Source        string             `json:"source"`
+	SourceShapeID string             `json:"source_shape_id"`
+	FetchedAt     pgtype.Timestamptz `json:"fetched_at"`
+}
+
 type RouteStop struct {
 	RouteID       pgtype.UUID `json:"route_id"`
 	StopID        pgtype.UUID `json:"stop_id"`

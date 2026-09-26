@@ -247,6 +247,234 @@ func (q *Queries) ListProviders(ctx context.Context) ([]ListProvidersRow, error)
 	return items, nil
 }
 
+const listRouteAlternatives = `-- name: ListRouteAlternatives :many
+SELECT
+	r.id,
+	r.provider_entity_id,
+	r.short_name,
+	r.long_name,
+	ra.seq AS seq_from,
+	rb.seq AS seq_to
+FROM route_stops ra
+JOIN route_stops rb ON rb.route_id = ra.route_id
+JOIN routes r ON r.id = ra.route_id
+WHERE
+	ra.stop_id = $1
+	AND rb.stop_id = $2
+	AND r.id <> $3
+	AND r.provider_id = (SELECT provider_id FROM routes WHERE id = $3)
+	AND r.removed_at IS NULL
+ORDER BY r.provider_entity_id, ABS(ra.seq - rb.seq)
+`
+
+type ListRouteAlternativesParams struct {
+	StopID   pgtype.UUID `json:"stop_id"`
+	StopID_2 pgtype.UUID `json:"stop_id_2"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+type ListRouteAlternativesRow struct {
+	ID               pgtype.UUID `json:"id"`
+	ProviderEntityID string      `json:"provider_entity_id"`
+	ShortName        pgtype.Text `json:"short_name"`
+	LongName         pgtype.Text `json:"long_name"`
+	SeqFrom          int32       `json:"seq_from"`
+	SeqTo            int32       `json:"seq_to"`
+}
+
+// Routes that also carry the leg's endpoints — boardable alternatives to the
+// provider's chosen line ("bisa juga naik koridor 2"). seq is flattened
+// segment order, not travel direction, so both orderings are reported; a
+// stop appearing twice on a route yields several pairs and the caller keeps
+// the min-hops one (rows arrive ordered by ABS(seq diff)). Alternatives stay
+// inside the chosen route's provider — different providers may not share
+// deduplicated stops.
+func (q *Queries) ListRouteAlternatives(ctx context.Context, arg ListRouteAlternativesParams) ([]ListRouteAlternativesRow, error) {
+	rows, err := q.db.Query(ctx, listRouteAlternatives, arg.StopID, arg.StopID_2, arg.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRouteAlternativesRow
+	for rows.Next() {
+		var i ListRouteAlternativesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProviderEntityID,
+			&i.ShortName,
+			&i.LongName,
+			&i.SeqFrom,
+			&i.SeqTo,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRouteLinesInBBox = `-- name: ListRouteLinesInBBox :many
+WITH shape_geoms AS (
+	SELECT
+		route_id,
+		st_collect(shape) AS geom
+	FROM route_shapes
+	GROUP BY route_id
+),
+stop_geoms AS (
+	SELECT route_id, st_collect(geom) AS geom
+	FROM (
+		SELECT
+			rs.route_id,
+			st_makeline(s.location::geometry ORDER BY rs.seq) AS geom
+		FROM route_stops rs
+		JOIN stops s ON s.id = rs.stop_id AND s.removed_at IS NULL
+		GROUP BY rs.route_id, rs.segment_kind
+		HAVING count(*) > 1
+	) seg
+	GROUP BY route_id
+)
+SELECT
+	r.id,
+	r.short_name,
+	r.long_name,
+	r.mode,
+	r.color,
+	a.name AS agency_name,
+	CASE WHEN sg.geom IS NOT NULL THEN 'shape' ELSE 'stops' END AS geom_source,
+	st_asgeojson(COALESCE(sg.geom, stg.geom)) AS geometry
+FROM routes r
+LEFT JOIN agencies a ON a.id = r.agency_id
+LEFT JOIN shape_geoms sg ON sg.route_id = r.id
+LEFT JOIN stop_geoms stg ON stg.route_id = r.id
+WHERE
+	r.removed_at IS NULL
+	AND COALESCE(sg.geom, stg.geom) IS NOT NULL
+	AND st_intersects(
+		COALESCE(sg.geom, stg.geom),
+		st_makeenvelope($1::float8, $2::float8, $3::float8, $4::float8, 4326)
+	)
+ORDER BY r.mode, r.short_name
+`
+
+type ListRouteLinesInBBoxParams struct {
+	Column1 float64 `json:"column_1"`
+	Column2 float64 `json:"column_2"`
+	Column3 float64 `json:"column_3"`
+	Column4 float64 `json:"column_4"`
+}
+
+type ListRouteLinesInBBoxRow struct {
+	ID         pgtype.UUID `json:"id"`
+	ShortName  pgtype.Text `json:"short_name"`
+	LongName   pgtype.Text `json:"long_name"`
+	Mode       string      `json:"mode"`
+	Color      pgtype.Text `json:"color"`
+	AgencyName pgtype.Text `json:"agency_name"`
+	GeomSource string      `json:"geom_source"`
+	Geometry   string      `json:"geometry"`
+}
+
+// One drawable geometry per route for the integrated network map. Real
+// ingested path geometry wins (route_shapes merged across directions and
+// patterns into a MultiLineString); routes with no shape fall back to
+// polylines through their ordered stops — one linestring per segment_kind
+// so trunk and branches don't zigzag across each other. geom_source tells
+// the client which it got. $1..$4 is the WGS84 viewport envelope; a route
+// is returned when its geometry touches it.
+func (q *Queries) ListRouteLinesInBBox(ctx context.Context, arg ListRouteLinesInBBoxParams) ([]ListRouteLinesInBBoxRow, error) {
+	rows, err := q.db.Query(ctx, listRouteLinesInBBox,
+		arg.Column1,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRouteLinesInBBoxRow
+	for rows.Next() {
+		var i ListRouteLinesInBBoxRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ShortName,
+			&i.LongName,
+			&i.Mode,
+			&i.Color,
+			&i.AgencyName,
+			&i.GeomSource,
+			&i.Geometry,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRouteStopSlice = `-- name: ListRouteStopSlice :many
+SELECT
+	s.id,
+	s.name,
+	rs.seq,
+	st_x(s.location::geometry) AS lon,
+	st_y(s.location::geometry) AS lat
+FROM route_stops rs
+JOIN stops s ON s.id = rs.stop_id
+WHERE rs.route_id = $1 AND rs.seq BETWEEN $2 AND $3 AND s.removed_at IS NULL
+ORDER BY rs.seq
+`
+
+type ListRouteStopSliceParams struct {
+	RouteID pgtype.UUID `json:"route_id"`
+	Seq     int32       `json:"seq"`
+	Seq_2   int32       `json:"seq_2"`
+}
+
+type ListRouteStopSliceRow struct {
+	ID   pgtype.UUID `json:"id"`
+	Name string      `json:"name"`
+	Seq  int32       `json:"seq"`
+	Lon  float64     `json:"lon"`
+	Lat  float64     `json:"lat"`
+}
+
+// Stops between two seq positions on a route, seq-ascending — the caller
+// reverses when the ride runs the other way. Used to describe a corridor
+// alternative the provider didn't pick.
+func (q *Queries) ListRouteStopSlice(ctx context.Context, arg ListRouteStopSliceParams) ([]ListRouteStopSliceRow, error) {
+	rows, err := q.db.Query(ctx, listRouteStopSlice, arg.RouteID, arg.Seq, arg.Seq_2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRouteStopSliceRow
+	for rows.Next() {
+		var i ListRouteStopSliceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Seq,
+			&i.Lon,
+			&i.Lat,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRoutes = `-- name: ListRoutes :many
 SELECT
 	r.id,
@@ -381,6 +609,43 @@ func (q *Queries) ListRoutesServingStop(ctx context.Context, id pgtype.UUID) ([]
 	return items, nil
 }
 
+const listStopCoords = `-- name: ListStopCoords :many
+SELECT
+	id,
+	st_x(location::geometry) AS lon,
+	st_y(location::geometry) AS lat
+FROM stops
+WHERE id = ANY($1::uuid[])
+`
+
+type ListStopCoordsRow struct {
+	ID  pgtype.UUID `json:"id"`
+	Lon float64     `json:"lon"`
+	Lat float64     `json:"lat"`
+}
+
+// lon/lat for a set of canonical stop ids — journey legs resolve provider
+// refs to UUIDs first, then need coordinates for shape slicing.
+func (q *Queries) ListStopCoords(ctx context.Context, ids []pgtype.UUID) ([]ListStopCoordsRow, error) {
+	rows, err := q.db.Query(ctx, listStopCoords, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListStopCoordsRow
+	for rows.Next() {
+		var i ListStopCoordsRow
+		if err := rows.Scan(&i.ID, &i.Lon, &i.Lat); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listStopIDsByProviderEntityIDs = `-- name: ListStopIDsByProviderEntityIDs :many
 SELECT s.id, s.provider_entity_id
 FROM stops s
@@ -428,7 +693,8 @@ SELECT
 	s.name,
 	st_x(s.location::geometry) AS lon,
 	st_y(s.location::geometry) AS lat,
-	p.code AS provider_code
+	p.code AS provider_code,
+	coalesce(s.metadata->>'operator', '')::text AS operator
 FROM stops s
 JOIN providers p ON p.id = s.provider_id
 WHERE s.removed_at IS NULL
@@ -444,6 +710,7 @@ type ListStopsRow struct {
 	Lon          float64     `json:"lon"`
 	Lat          float64     `json:"lat"`
 	ProviderCode string      `json:"provider_code"`
+	Operator     string      `json:"operator"`
 }
 
 // Unfiltered stop list — the catalog's reference set is small enough that a
@@ -465,6 +732,7 @@ func (q *Queries) ListStops(ctx context.Context, limit int32) ([]ListStopsRow, e
 			&i.Lon,
 			&i.Lat,
 			&i.ProviderCode,
+			&i.Operator,
 		); err != nil {
 			return nil, err
 		}
@@ -484,7 +752,8 @@ SELECT
 	s.name,
 	st_x(s.location::geometry) AS lon,
 	st_y(s.location::geometry) AS lat,
-	p.code AS provider_code
+	p.code AS provider_code,
+	coalesce(s.metadata->>'operator', '')::text AS operator
 FROM stops s
 JOIN providers p ON p.id = s.provider_id
 WHERE
@@ -516,6 +785,7 @@ type ListStopsInBBoxRow struct {
 	Lon          float64     `json:"lon"`
 	Lat          float64     `json:"lat"`
 	ProviderCode string      `json:"provider_code"`
+	Operator     string      `json:"operator"`
 }
 
 // Stops inside a WGS84 envelope (minLon,minLat,maxLon,maxLat) — the map's
@@ -546,6 +816,7 @@ func (q *Queries) ListStopsInBBox(ctx context.Context, arg ListStopsInBBoxParams
 			&i.Lon,
 			&i.Lat,
 			&i.ProviderCode,
+			&i.Operator,
 		); err != nil {
 			return nil, err
 		}
@@ -799,7 +1070,8 @@ SELECT
 	s.name,
 	st_x(s.location::geometry) AS lon,
 	st_y(s.location::geometry) AS lat,
-	p.code AS provider_code
+	p.code AS provider_code,
+	coalesce(s.metadata->>'operator', '')::text AS operator
 FROM stops s
 JOIN providers p ON p.id = s.provider_id
 WHERE
@@ -827,6 +1099,7 @@ type SearchStopsRow struct {
 	Lon          float64     `json:"lon"`
 	Lat          float64     `json:"lat"`
 	ProviderCode string      `json:"provider_code"`
+	Operator     string      `json:"operator"`
 }
 
 // Text search across display name, station code, and the operator's official
@@ -851,6 +1124,7 @@ func (q *Queries) SearchStops(ctx context.Context, arg SearchStopsParams) ([]Sea
 			&i.Lon,
 			&i.Lat,
 			&i.ProviderCode,
+			&i.Operator,
 		); err != nil {
 			return nil, err
 		}
@@ -860,6 +1134,76 @@ func (q *Queries) SearchStops(ctx context.Context, arg SearchStopsParams) ([]Sea
 		return nil, err
 	}
 	return items, nil
+}
+
+const sliceRouteShape = `-- name: SliceRouteShape :one
+WITH pts AS (
+	SELECT st_setsrid(st_makepoint(u.lon, u.lat), 4326) AS g
+	FROM unnest($2::float8[], $3::float8[]) AS u(lon, lat)
+),
+cand AS (
+	SELECT
+		st_linesubstring(
+			shape,
+			least(
+				st_linelocatepoint(shape, st_setsrid(st_makepoint($4::float8, $5::float8), 4326)),
+				st_linelocatepoint(shape, st_setsrid(st_makepoint($6::float8, $7::float8), 4326))
+			),
+			greatest(
+				st_linelocatepoint(shape, st_setsrid(st_makepoint($4::float8, $5::float8), 4326)),
+				st_linelocatepoint(shape, st_setsrid(st_makepoint($6::float8, $7::float8), 4326))
+			)
+		) AS slice
+	FROM route_shapes
+	WHERE route_id = $8::uuid
+),
+scored AS (
+	SELECT
+		c.slice,
+		sum(st_distance(c.slice::geography, p.g::geography)) AS snap_m,
+		max(st_distance(c.slice::geography, p.g::geography)) AS worst_m
+	FROM cand c
+	LEFT JOIN pts p ON true
+	GROUP BY c.slice
+)
+SELECT st_asgeojson(slice) AS geometry
+FROM scored
+WHERE worst_m IS NULL OR worst_m <= $1::float8
+ORDER BY snap_m NULLS LAST
+LIMIT 1
+`
+
+type SliceRouteShapeParams struct {
+	MaxSnapM float64     `json:"max_snap_m"`
+	Lons     []float64   `json:"lons"`
+	Lats     []float64   `json:"lats"`
+	FromLon  float64     `json:"from_lon"`
+	FromLat  float64     `json:"from_lat"`
+	ToLon    float64     `json:"to_lon"`
+	ToLat    float64     `json:"to_lat"`
+	RouteID  pgtype.UUID `json:"route_id"`
+}
+
+// Cut a route's shape between a leg's endpoints, then pick the candidate
+// whose CUT hugs the leg's whole stop sequence. Endpoint snap alone can't
+// tell same-termini variants apart: on TJ:7F a 60 km pattern beat the true
+// shape by ~2 m at the termini while running 600+ m from the listed halte.
+// A best cut still beyond max_snap_m from a listed stop is worse than no
+// shape — no row, and the client draws the honest stop-to-stop polyline.
+func (q *Queries) SliceRouteShape(ctx context.Context, arg SliceRouteShapeParams) (string, error) {
+	row := q.db.QueryRow(ctx, sliceRouteShape,
+		arg.MaxSnapM,
+		arg.Lons,
+		arg.Lats,
+		arg.FromLon,
+		arg.FromLat,
+		arg.ToLon,
+		arg.ToLat,
+		arg.RouteID,
+	)
+	var geometry string
+	err := row.Scan(&geometry)
+	return geometry, err
 }
 
 const touchProviderLastAttempt = `-- name: TouchProviderLastAttempt :exec
@@ -1096,6 +1440,50 @@ func (q *Queries) UpsertRoute(ctx context.Context, arg UpsertRouteParams) (Route
 		&i.RemovedAt,
 	)
 	return i, err
+}
+
+const upsertRouteShape = `-- name: UpsertRouteShape :one
+INSERT INTO route_shapes (
+	route_id,
+	direction_id,
+	shape,
+	source,
+	source_shape_id,
+	fetched_at
+) VALUES (
+	$1, $2, st_geomfromtext($3, 4326), $4, $5, $6
+)
+ON CONFLICT (source, source_shape_id) DO UPDATE SET
+	route_id = excluded.route_id,
+	direction_id = excluded.direction_id,
+	shape = excluded.shape,
+	fetched_at = excluded.fetched_at
+RETURNING id
+`
+
+type UpsertRouteShapeParams struct {
+	RouteID        pgtype.UUID        `json:"route_id"`
+	DirectionID    pgtype.Int2        `json:"direction_id"`
+	StGeomfromtext string             `json:"st_geomfromtext"`
+	Source         string             `json:"source"`
+	SourceShapeID  string             `json:"source_shape_id"`
+	FetchedAt      pgtype.Timestamptz `json:"fetched_at"`
+}
+
+// Shape ingest replaces by (source, source_shape_id) — a republished GTFS
+// feed updates geometry in place. Shape arrives as WKT LINESTRING.
+func (q *Queries) UpsertRouteShape(ctx context.Context, arg UpsertRouteShapeParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, upsertRouteShape,
+		arg.RouteID,
+		arg.DirectionID,
+		arg.StGeomfromtext,
+		arg.Source,
+		arg.SourceShapeID,
+		arg.FetchedAt,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const upsertStop = `-- name: UpsertStop :one

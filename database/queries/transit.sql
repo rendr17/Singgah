@@ -197,7 +197,8 @@ SELECT
 	s.name,
 	st_x(s.location::geometry) AS lon,
 	st_y(s.location::geometry) AS lat,
-	p.code AS provider_code
+	p.code AS provider_code,
+	coalesce(s.metadata->>'operator', '')::text AS operator
 FROM stops s
 JOIN providers p ON p.id = s.provider_id
 WHERE s.removed_at IS NULL
@@ -216,7 +217,8 @@ SELECT
 	s.name,
 	st_x(s.location::geometry) AS lon,
 	st_y(s.location::geometry) AS lat,
-	p.code AS provider_code
+	p.code AS provider_code,
+	coalesce(s.metadata->>'operator', '')::text AS operator
 FROM stops s
 JOIN providers p ON p.id = s.provider_id
 WHERE
@@ -241,7 +243,8 @@ SELECT
 	s.name,
 	st_x(s.location::geometry) AS lon,
 	st_y(s.location::geometry) AS lat,
-	p.code AS provider_code
+	p.code AS provider_code,
+	coalesce(s.metadata->>'operator', '')::text AS operator
 FROM stops s
 JOIN providers p ON p.id = s.provider_id
 WHERE
@@ -361,6 +364,47 @@ JOIN stops s ON s.id = rs.stop_id
 WHERE rs.route_id = $1 AND s.removed_at IS NULL
 ORDER BY rs.seq;
 
+-- name: ListRouteAlternatives :many
+-- Routes that also carry the leg's endpoints — boardable alternatives to the
+-- provider's chosen line ("bisa juga naik koridor 2"). seq is flattened
+-- segment order, not travel direction, so both orderings are reported; a
+-- stop appearing twice on a route yields several pairs and the caller keeps
+-- the min-hops one (rows arrive ordered by ABS(seq diff)). Alternatives stay
+-- inside the chosen route's provider — different providers may not share
+-- deduplicated stops.
+SELECT
+	r.id,
+	r.provider_entity_id,
+	r.short_name,
+	r.long_name,
+	ra.seq AS seq_from,
+	rb.seq AS seq_to
+FROM route_stops ra
+JOIN route_stops rb ON rb.route_id = ra.route_id
+JOIN routes r ON r.id = ra.route_id
+WHERE
+	ra.stop_id = $1
+	AND rb.stop_id = $2
+	AND r.id <> $3
+	AND r.provider_id = (SELECT provider_id FROM routes WHERE id = $3)
+	AND r.removed_at IS NULL
+ORDER BY r.provider_entity_id, ABS(ra.seq - rb.seq);
+
+-- name: ListRouteStopSlice :many
+-- Stops between two seq positions on a route, seq-ascending — the caller
+-- reverses when the ride runs the other way. Used to describe a corridor
+-- alternative the provider didn't pick.
+SELECT
+	s.id,
+	s.name,
+	rs.seq,
+	st_x(s.location::geometry) AS lon,
+	st_y(s.location::geometry) AS lat
+FROM route_stops rs
+JOIN stops s ON s.id = rs.stop_id
+WHERE rs.route_id = $1 AND rs.seq BETWEEN $2 AND $3 AND s.removed_at IS NULL
+ORDER BY rs.seq;
+
 -- name: DeleteRouteStops :exec
 -- Route sequence is replaced atomically inside the ingest transaction:
 -- delete-then-insert keeps re-ingest idempotent with no stale positions.
@@ -418,3 +462,125 @@ SELECT
 	last_attempt_at
 FROM providers
 ORDER BY code;
+
+-- name: UpsertRouteShape :one
+-- Shape ingest replaces by (source, source_shape_id) — a republished GTFS
+-- feed updates geometry in place. Shape arrives as WKT LINESTRING.
+INSERT INTO route_shapes (
+	route_id,
+	direction_id,
+	shape,
+	source,
+	source_shape_id,
+	fetched_at
+) VALUES (
+	$1, $2, st_geomfromtext($3, 4326), $4, $5, $6
+)
+ON CONFLICT (source, source_shape_id) DO UPDATE SET
+	route_id = excluded.route_id,
+	direction_id = excluded.direction_id,
+	shape = excluded.shape,
+	fetched_at = excluded.fetched_at
+RETURNING id;
+
+-- name: ListStopCoords :many
+-- lon/lat for a set of canonical stop ids — journey legs resolve provider
+-- refs to UUIDs first, then need coordinates for shape slicing.
+SELECT
+	id,
+	st_x(location::geometry) AS lon,
+	st_y(location::geometry) AS lat
+FROM stops
+WHERE id = ANY(sqlc.arg(ids)::uuid[]);
+
+-- name: SliceRouteShape :one
+-- Cut a route's shape between a leg's endpoints, then pick the candidate
+-- whose CUT hugs the leg's whole stop sequence. Endpoint snap alone can't
+-- tell same-termini variants apart: on TJ:7F a 60 km pattern beat the true
+-- shape by ~2 m at the termini while running 600+ m from the listed halte.
+-- A best cut still beyond max_snap_m from a listed stop is worse than no
+-- shape — no row, and the client draws the honest stop-to-stop polyline.
+WITH pts AS (
+	SELECT st_setsrid(st_makepoint(u.lon, u.lat), 4326) AS g
+	FROM unnest(sqlc.arg('lons')::float8[], sqlc.arg('lats')::float8[]) AS u(lon, lat)
+),
+cand AS (
+	SELECT
+		st_linesubstring(
+			shape,
+			least(
+				st_linelocatepoint(shape, st_setsrid(st_makepoint(sqlc.arg('from_lon')::float8, sqlc.arg('from_lat')::float8), 4326)),
+				st_linelocatepoint(shape, st_setsrid(st_makepoint(sqlc.arg('to_lon')::float8, sqlc.arg('to_lat')::float8), 4326))
+			),
+			greatest(
+				st_linelocatepoint(shape, st_setsrid(st_makepoint(sqlc.arg('from_lon')::float8, sqlc.arg('from_lat')::float8), 4326)),
+				st_linelocatepoint(shape, st_setsrid(st_makepoint(sqlc.arg('to_lon')::float8, sqlc.arg('to_lat')::float8), 4326))
+			)
+		) AS slice
+	FROM route_shapes
+	WHERE route_id = sqlc.arg('route_id')::uuid
+),
+scored AS (
+	SELECT
+		c.slice,
+		sum(st_distance(c.slice::geography, p.g::geography)) AS snap_m,
+		max(st_distance(c.slice::geography, p.g::geography)) AS worst_m
+	FROM cand c
+	LEFT JOIN pts p ON true
+	GROUP BY c.slice
+)
+SELECT st_asgeojson(slice) AS geometry
+FROM scored
+WHERE worst_m IS NULL OR worst_m <= sqlc.arg('max_snap_m')::float8
+ORDER BY snap_m NULLS LAST
+LIMIT 1;
+
+-- name: ListRouteLinesInBBox :many
+-- One drawable geometry per route for the integrated network map. Real
+-- ingested path geometry wins (route_shapes merged across directions and
+-- patterns into a MultiLineString); routes with no shape fall back to
+-- polylines through their ordered stops — one linestring per segment_kind
+-- so trunk and branches don't zigzag across each other. geom_source tells
+-- the client which it got. $1..$4 is the WGS84 viewport envelope; a route
+-- is returned when its geometry touches it.
+WITH shape_geoms AS (
+	SELECT
+		route_id,
+		st_collect(shape) AS geom
+	FROM route_shapes
+	GROUP BY route_id
+),
+stop_geoms AS (
+	SELECT route_id, st_collect(geom) AS geom
+	FROM (
+		SELECT
+			rs.route_id,
+			st_makeline(s.location::geometry ORDER BY rs.seq) AS geom
+		FROM route_stops rs
+		JOIN stops s ON s.id = rs.stop_id AND s.removed_at IS NULL
+		GROUP BY rs.route_id, rs.segment_kind
+		HAVING count(*) > 1
+	) seg
+	GROUP BY route_id
+)
+SELECT
+	r.id,
+	r.short_name,
+	r.long_name,
+	r.mode,
+	r.color,
+	a.name AS agency_name,
+	CASE WHEN sg.geom IS NOT NULL THEN 'shape' ELSE 'stops' END AS geom_source,
+	st_asgeojson(COALESCE(sg.geom, stg.geom)) AS geometry
+FROM routes r
+LEFT JOIN agencies a ON a.id = r.agency_id
+LEFT JOIN shape_geoms sg ON sg.route_id = r.id
+LEFT JOIN stop_geoms stg ON stg.route_id = r.id
+WHERE
+	r.removed_at IS NULL
+	AND COALESCE(sg.geom, stg.geom) IS NOT NULL
+	AND st_intersects(
+		COALESCE(sg.geom, stg.geom),
+		st_makeenvelope($1::float8, $2::float8, $3::float8, $4::float8, 4326)
+	)
+ORDER BY r.mode, r.short_name;
