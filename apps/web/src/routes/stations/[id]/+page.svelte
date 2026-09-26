@@ -2,14 +2,14 @@
 	import type { PageProps } from './$types';
 	import { resolve } from '$app/paths';
 	import { browser } from '$app/environment';
-	import { env } from '$env/dynamic/public';
 	import BackNav from '$lib/components/app-shell/BackNav.svelte';
 	import DepartureBoard from '$lib/components/station/DepartureBoard.svelte';
+	import { basemapStyleUrl } from '$lib/basemap';
 	import { facilityLabel } from '$lib/facilities';
 	import { SectionHeading, StateBlock } from '@singgah/ui';
 	import { TransitMap, stationsToGeoJSON } from '@singgah/map';
 
-	const STYLE_URL = env.PUBLIC_MAP_STYLE_URL ?? 'https://tiles.openfreemap.org/styles/bright';
+	const STYLE_URL = basemapStyleUrl();
 
 	let { data }: PageProps = $props();
 	const station = $derived(data.station);
