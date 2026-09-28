@@ -29,3 +29,9 @@ UPDATE auth_sessions SET revoked_at = now() WHERE token_hash = $1;
 -- Full account deletion (docs/26 delete path): cascades wipe sessions,
 -- visit_events, and journal_entries for this user.
 DELETE FROM users WHERE id = $1;
+
+-- name: DeleteDeadAuthSessions :execrows
+-- Revoked or expired sessions can never authenticate again — dead weight that
+-- would otherwise grow forever. Runs on a daily in-process tick.
+DELETE FROM auth_sessions
+WHERE revoked_at IS NOT NULL OR expires_at < now();

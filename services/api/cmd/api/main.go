@@ -43,6 +43,7 @@ func main() {
 	deps := httpapi.Deps{Logger: logger, Version: version, CORSOrigin: cfg.CORSOrigin}
 
 	var refreshDone <-chan struct{}
+	var cleanupDone <-chan struct{}
 	if cfg.DatabaseURL != "" {
 		connectCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		pool, err := db.Connect(connectCtx, cfg.DatabaseURL)
@@ -73,6 +74,10 @@ func main() {
 				Pace:       150 * time.Millisecond,
 			}, cfg.ScheduleRefreshInterval, logger)
 			logger.Info("schedule refresh enabled", "interval", cfg.ScheduleRefreshInterval)
+		}
+		if cfg.AuthSessionCleanupInterval > 0 {
+			cleanupDone = auth.StartSessionCleanup(ctx, queries, cfg.AuthSessionCleanupInterval, logger)
+			logger.Info("auth session cleanup enabled", "interval", cfg.AuthSessionCleanupInterval)
 		}
 		logger.Info("database connected")
 	} else {
@@ -112,6 +117,12 @@ func main() {
 			// an in-flight ingest aborts through ctx itself.
 			select {
 			case <-refreshDone:
+			case <-time.After(5 * time.Second):
+			}
+		}
+		if cleanupDone != nil {
+			select {
+			case <-cleanupDone:
 			case <-time.After(5 * time.Second):
 			}
 		}

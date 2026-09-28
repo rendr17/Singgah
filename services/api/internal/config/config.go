@@ -36,6 +36,12 @@ type Config struct {
 	// for staging and fixture servers.
 	GTFSFeedURL string
 
+	// AuthSessionCleanupInterval drives the dead-session sweeper (expired or
+	// revoked rows can never authenticate — deleting them is pure hygiene).
+	// Unlike the schedule refresh it only touches our own tables, so it
+	// defaults on at 24h; AUTH_SESSION_CLEANUP_INTERVAL=0 disables it.
+	AuthSessionCleanupInterval time.Duration
+
 	ReadHeaderTimeout time.Duration
 	ReadTimeout       time.Duration
 	WriteTimeout      time.Duration
@@ -76,6 +82,15 @@ func Load() (Config, error) {
 	cfg.GTFSFeedURL = os.Getenv("GTFS_FEED_URL")
 	if cfg.GTFSFeedURL == "" {
 		cfg.GTFSFeedURL = "https://gtfs.transjakarta.co.id/files/file_gtfs.zip"
+	}
+
+	cfg.AuthSessionCleanupInterval = 24 * time.Hour
+	if v := os.Getenv("AUTH_SESSION_CLEANUP_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || (d > 0 && d < time.Minute) {
+			return Config{}, fmt.Errorf("invalid AUTH_SESSION_CLEANUP_INTERVAL %q", v)
+		}
+		cfg.AuthSessionCleanupInterval = d
 	}
 
 	cfg.CORSOrigin = os.Getenv("CORS_ORIGIN")

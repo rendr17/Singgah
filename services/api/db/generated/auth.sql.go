@@ -42,6 +42,21 @@ func (q *Queries) CreateAnonymousSession(ctx context.Context, arg CreateAnonymou
 	return i, err
 }
 
+const deleteDeadAuthSessions = `-- name: DeleteDeadAuthSessions :execrows
+DELETE FROM auth_sessions
+WHERE revoked_at IS NOT NULL OR expires_at < now()
+`
+
+// Revoked or expired sessions can never authenticate again — dead weight that
+// would otherwise grow forever. Runs on a daily in-process tick.
+func (q *Queries) DeleteDeadAuthSessions(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteDeadAuthSessions)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteUser = `-- name: DeleteUser :exec
 DELETE FROM users WHERE id = $1
 `
