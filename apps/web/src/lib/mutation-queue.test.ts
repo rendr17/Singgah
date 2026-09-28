@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	backoffMs,
+	discardFailed,
+	listFailed,
 	memoryMutationStore,
 	onSettled,
 	queueCheckin,
 	replayQueue,
+	retryFailed,
 	type CheckinBody,
 	type MutationStore,
 	type SendResult
@@ -115,5 +118,48 @@ describe('backoffMs', () => {
 		expect(backoffMs(0)).toBe(30_000);
 		expect(backoffMs(1)).toBe(60_000);
 		expect(backoffMs(20)).toBe(3_600_000);
+	});
+});
+
+describe('failed item ops', () => {
+	it('retryFailed resets the item to pending so the next replay sends it', async () => {
+		const store = memoryMutationStore();
+		await enqueue(store, 'f-1');
+		await replayQueue(store, async () => ({ kind: 'rejected' }));
+		expect((await store.get('f-1'))?.status).toBe('failed');
+
+		await retryFailed(store, 'f-1');
+		const m = (await store.get('f-1'))!;
+		expect(m.status).toBe('pending');
+		expect(m.retryCount).toBe(0);
+		expect(m.nextAttemptAt).toBeLessThanOrEqual(Date.now());
+
+		let sent = 0;
+		await replayQueue(store, async () => {
+			sent++;
+			return { kind: 'ok' };
+		});
+		expect(sent).toBe(1);
+		expect(await store.get('f-1')).toBeUndefined();
+	});
+
+	it('discardFailed removes the item permanently', async () => {
+		const store = memoryMutationStore();
+		await enqueue(store, 'f-2');
+		await replayQueue(store, async () => ({ kind: 'rejected' }));
+		await discardFailed(store, 'f-2');
+		expect(await store.get('f-2')).toBeUndefined();
+	});
+
+	it('listFailed returns only failed items, oldest first', async () => {
+		const store = memoryMutationStore();
+		await enqueue(store, 'f-3', '2026-01-01T10:00:00Z');
+		await enqueue(store, 'f-4', '2026-01-01T09:00:00Z');
+		await enqueue(store, 'ok-1', '2026-01-01T08:00:00Z');
+		// Reject all → f-3, f-4, ok-1 all failed; mark one pending again.
+		await replayQueue(store, async () => ({ kind: 'rejected' }));
+		await retryFailed(store, 'ok-1');
+		const failed = await listFailed(store);
+		expect(failed.map((m) => m.mutationId)).toEqual(['f-4', 'f-3']);
 	});
 });

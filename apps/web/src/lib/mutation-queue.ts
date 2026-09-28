@@ -96,6 +96,27 @@ export async function queueCheckin(store: MutationStore, body: CheckinBody): Pro
 	});
 }
 
+export async function listFailed(store: MutationStore): Promise<QueuedMutation[]> {
+	return (await store.all())
+		.filter((m) => m.status === 'failed')
+		.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+// Server-rejected items stay visible instead of vanishing — the user can retry
+// (transient-looking rejections like a stopped rate-limit) or discard honestly.
+export async function retryFailed(store: MutationStore, id: string): Promise<void> {
+	const m = await store.get(id);
+	if (!m) return;
+	m.status = 'pending';
+	m.retryCount = 0;
+	m.nextAttemptAt = Date.now();
+	await store.put(m);
+}
+
+export async function discardFailed(store: MutationStore, id: string): Promise<void> {
+	await store.remove(id);
+}
+
 export type SendResult =
 	| { kind: 'ok'; visitStatus?: 'confirmed' | 'low_confidence' }
 	| { kind: 'rejected' }

@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { browser } from '$app/environment';
 	import { authedApi, clearSession } from '$lib/session';
 	import { resolve } from '$app/paths';
 	import { MODE_LABELS, type RouteMode } from '$lib/route-groups';
+	import FailedQueue from '$lib/components/passport/FailedQueue.svelte';
 	import { Button, SectionHeading, StateBlock } from '@singgah/ui';
 	import type { components } from '@singgah/api-client';
 
@@ -155,6 +157,10 @@
 				{/each}
 			</ul>
 		</section>
+	{/if}
+
+	{#if browser}
+		<FailedQueue />
 	{/if}
 
 	<section>
