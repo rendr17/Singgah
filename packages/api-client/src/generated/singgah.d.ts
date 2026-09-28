@@ -275,7 +275,7 @@ export interface paths {
         };
         /**
          * List own visit events
-         * @description Returns the authenticated user's check-ins, newest first.
+         * @description Returns the authenticated user's check-ins, newest first. Keyset pagination — pass `cursor` from the previous page's `nextCursor`; offset would drift because offline replays can land mid-history.
          */
         get: operations["listVisits"];
         put?: never;
@@ -783,6 +783,8 @@ export interface components {
         };
         VisitList: {
             visits: components["schemas"]["Visit"][];
+            /** @description Present when another page exists — pass back as `cursor`. */
+            nextCursor?: string;
         };
         CheckinRequest: {
             /** Format: uuid */
@@ -1373,7 +1375,11 @@ export interface operations {
     };
     listVisits: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+                /** @description Opaque continuation token — emit it verbatim, never build one. */
+                cursor?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;

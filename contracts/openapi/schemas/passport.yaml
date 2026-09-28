@@ -118,6 +118,9 @@ VisitList:
       type: array
       items:
         $ref: '#/Visit'
+    nextCursor:
+      type: string
+      description: Present when another page exists — pass back as `cursor`.
 
 ProgressCount:
   type: object

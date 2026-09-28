@@ -4,9 +4,13 @@ package passport
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -34,7 +38,7 @@ type Store interface {
 	GetStop(ctx context.Context, id pgtype.UUID) (generated.GetStopRow, error)
 	StopDistanceM(ctx context.Context, arg generated.StopDistanceMParams) (float64, error)
 	RecordVisitEvent(ctx context.Context, arg generated.RecordVisitEventParams) (generated.RecordVisitEventRow, error)
-	ListVisitEvents(ctx context.Context, userID pgtype.UUID) ([]generated.VisitEvent, error)
+	ListVisitEvents(ctx context.Context, arg generated.ListVisitEventsParams) ([]generated.VisitEvent, error)
 	PassportProgressTotal(ctx context.Context, userID pgtype.UUID) (generated.PassportProgressTotalRow, error)
 	PassportProgressByMode(ctx context.Context, userID pgtype.UUID) ([]generated.PassportProgressByModeRow, error)
 	PassportProgressByRoute(ctx context.Context, userID pgtype.UUID) ([]generated.PassportProgressByRouteRow, error)
@@ -198,12 +202,73 @@ func (h *Handler) evaluate(req visitRequest, w http.ResponseWriter, r *http.Requ
 	return e, status
 }
 
+// Visit list page bounds — 50 covers a normal scrollback; 200 keeps one
+// response under mobile-friendly size.
+const (
+	visitsDefaultLimit = 50
+	visitsMaxLimit     = 200
+)
+
+// visitCursor encodes the keyset position opaquely so clients never build
+// cursors themselves: "RFC3339Nano|uuid".
+func visitCursor(v generated.VisitEvent) string {
+	return base64.RawURLEncoding.EncodeToString(
+		[]byte(v.ObservedAt.Time.Format(time.RFC3339Nano) + "|" + uuidStr(v.ID)))
+}
+
+func parseVisitCursor(s string) (beforeAt time.Time, beforeID pgtype.UUID, err error) {
+	raw, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		return beforeAt, beforeID, err
+	}
+	ts, id, ok := strings.Cut(string(raw), "|")
+	if !ok {
+		return beforeAt, beforeID, errors.New("malformed cursor")
+	}
+	if beforeAt, err = time.Parse(time.RFC3339Nano, ts); err != nil {
+		return beforeAt, beforeID, err
+	}
+	if err = beforeID.Scan(id); err != nil {
+		return beforeAt, beforeID, err
+	}
+	return beforeAt, beforeID, nil
+}
+
 func (h *Handler) listVisits(w http.ResponseWriter, r *http.Request) {
 	userID, _ := auth.UserIDFrom(r.Context())
-	rows, err := h.store.ListVisitEvents(r.Context(), userID)
+	q := r.URL.Query()
+	limit := int64(visitsDefaultLimit)
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 32)
+		if err != nil || n < 1 || n > visitsMaxLimit {
+			response.Error(w, r, http.StatusBadRequest, "VALIDATION", "limit harus 1-200")
+			return
+		}
+		limit = n
+	}
+	arg := generated.ListVisitEventsParams{
+		UserID: userID,
+		Limit:  int32(limit + 1), // +1 row detects whether a next page exists
+	}
+	if c := q.Get("cursor"); c != "" {
+		at, id, err := parseVisitCursor(c)
+		if err != nil {
+			response.Error(w, r, http.StatusBadRequest, "VALIDATION", "cursor tidak valid")
+			return
+		}
+		arg.BeforeAt = pgtype.Timestamptz{Time: at, Valid: true}
+		arg.BeforeID = id
+	}
+	rows, err := h.store.ListVisitEvents(r.Context(), arg)
 	if err != nil {
 		response.Error(w, r, http.StatusInternalServerError, "INTERNAL", "Gagal memuat kunjungan")
 		return
+	}
+	var nextCursor *string
+	if int64(len(rows)) > limit {
+		c := visitCursor(rows[limit-1])
+		nextCursor = &c
+		rows = rows[:limit]
 	}
 	out := make([]visitDTO, 0, len(rows))
 	for _, v := range rows {
@@ -223,8 +288,9 @@ func (h *Handler) listVisits(w http.ResponseWriter, r *http.Request) {
 		out = append(out, d)
 	}
 	response.JSON(w, http.StatusOK, struct {
-		Visits []visitDTO `json:"visits"`
-	}{Visits: out})
+		Visits     []visitDTO `json:"visits"`
+		NextCursor *string    `json:"nextCursor,omitempty"`
+	}{Visits: out, NextCursor: nextCursor})
 }
 
 func uuidStr(u pgtype.UUID) string {

@@ -39,11 +39,27 @@ post:
 get:
   operationId: listVisits
   summary: List own visit events
-  description: Returns the authenticated user's check-ins, newest first.
+  description: >-
+    Returns the authenticated user's check-ins, newest first. Keyset
+    pagination — pass `cursor` from the previous page's `nextCursor`;
+    offset would drift because offline replays can land mid-history.
   tags:
     - passport
   security:
     - bearerAuth: []
+  parameters:
+    - name: limit
+      in: query
+      schema:
+        type: integer
+        default: 50
+        minimum: 1
+        maximum: 200
+    - name: cursor
+      in: query
+      schema:
+        type: string
+      description: Opaque continuation token — emit it verbatim, never build one.
   responses:
     '200':
       description: Own visit events

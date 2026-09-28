@@ -26,7 +26,13 @@ FROM stops s
 WHERE s.id = sqlc.arg(stop_id) AND s.removed_at IS NULL;
 
 -- name: ListVisitEvents :many
+-- Keyset pagination — offset would drift under appends (offline replays can
+-- land mid-history). The handler fetches limit+1 to learn whether a next
+-- page exists; cursor = (observed_at, id) of the last emitted row.
 SELECT id, user_id, stop_id, client_mutation_id, observed_at, validation_method, distance_m, status, created_at
 FROM visit_events
 WHERE user_id = $1
-ORDER BY observed_at DESC;
+	AND (sqlc.narg('before_at')::timestamptz IS NULL
+		OR (observed_at, id) < (sqlc.narg('before_at'), sqlc.narg('before_id')::uuid))
+ORDER BY observed_at DESC, id DESC
+LIMIT sqlc.arg('limit');

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -76,12 +78,19 @@ func row(v generated.VisitEvent, inserted bool) generated.RecordVisitEventRow {
 	}
 }
 
-func (f *fakeStore) ListVisitEvents(ctx context.Context, userID pgtype.UUID) ([]generated.VisitEvent, error) {
+func (f *fakeStore) ListVisitEvents(ctx context.Context, arg generated.ListVisitEventsParams) ([]generated.VisitEvent, error) {
 	var out []generated.VisitEvent
 	for _, v := range f.rows {
-		if v.UserID == userID {
-			out = append(out, v)
+		if v.UserID != arg.UserID {
+			continue
 		}
+		if arg.BeforeAt.Valid && !v.ObservedAt.Time.Before(arg.BeforeAt.Time) {
+			continue
+		}
+		out = append(out, v)
+	}
+	if int32(len(out)) > arg.Limit {
+		out = out[:arg.Limit]
 	}
 	return out, nil
 }
@@ -192,8 +201,12 @@ func post(t *testing.T, h *Handler, body string) *httptest.ResponseRecorder {
 	return rec
 }
 
+// UnixNano alone collides under Windows' coarse timer — the counter keeps
+// every key distinct.
+var mutationSeq atomic.Int64
+
 func mutationID() string {
-	return fmt.Sprintf("11111111-2222-3333-4444-%012d", time.Now().UnixNano()%1e12)
+	return fmt.Sprintf("11111111-2222-3333-4444-%012d", mutationSeq.Add(1))
 }
 
 func TestCheckinGeofenceConfirmed(t *testing.T) {
@@ -414,5 +427,65 @@ func TestProgress(t *testing.T) {
 	if len(resp.ByCollection) != 1 || resp.ByCollection[0].Slug != "mrt-jakarta" ||
 		resp.ByCollection[0].TotalStops != 13 {
 		t.Fatalf("byCollection: %+v", resp.ByCollection)
+	}
+}
+
+func TestListVisitsPagination(t *testing.T) {
+	store := &fakeStore{stopExists: true, distanceM: 10}
+	h := newHandler(store)
+	base := time.Now().UTC()
+	for i := 0; i < 3; i++ {
+		rec := post(t, h, fmt.Sprintf(`{"stopId":%q,"clientMutationId":%q,"observedAt":%q}`,
+			uuidStr(testStop), mutationID(), base.Add(time.Duration(-i)*time.Hour).Format(time.RFC3339)))
+		if rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
+			t.Fatalf("seed post %d: got %d: %s", i, rec.Code, rec.Body.String())
+		}
+	}
+
+	get := func(url string) (visits []visitDTO, next string) {
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		req = req.WithContext(auth.ContextWithUserID(req.Context(), testUser))
+		rec := httptest.NewRecorder()
+		h.listVisits(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: got %d: %s", url, rec.Code, rec.Body.String())
+		}
+		var resp struct {
+			Visits     []visitDTO `json:"visits"`
+			NextCursor *string    `json:"nextCursor"`
+		}
+		_ = json.NewDecoder(rec.Body).Decode(&resp)
+		if resp.NextCursor != nil {
+			next = *resp.NextCursor
+		}
+		return resp.Visits, next
+	}
+
+	page1, cursor := get("/api/v1/visits?limit=2")
+	if len(page1) != 2 || cursor == "" {
+		t.Fatalf("page1: got %d visits, cursor %q — want 2 + cursor", len(page1), cursor)
+	}
+	page2, cursor2 := get("/api/v1/visits?limit=2&cursor=" + url.QueryEscape(cursor))
+	if len(page2) != 1 || cursor2 != "" {
+		t.Fatalf("page2: got %d visits, cursor %q — want 1, no cursor", len(page2), cursor2)
+	}
+	if page1[0].ID == page2[0].ID {
+		t.Fatal("page2 repeated page1 row")
+	}
+
+	// Bad inputs fail honestly, not silently.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/visits?limit=999", nil)
+	req = req.WithContext(auth.ContextWithUserID(req.Context(), testUser))
+	rec := httptest.NewRecorder()
+	h.listVisits(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("limit=999: got %d want 400", rec.Code)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/visits?cursor=notacursor", nil)
+	req = req.WithContext(auth.ContextWithUserID(req.Context(), testUser))
+	rec = httptest.NewRecorder()
+	h.listVisits(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad cursor: got %d want 400", rec.Code)
 	}
 }

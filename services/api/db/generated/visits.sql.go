@@ -15,11 +15,29 @@ const listVisitEvents = `-- name: ListVisitEvents :many
 SELECT id, user_id, stop_id, client_mutation_id, observed_at, validation_method, distance_m, status, created_at
 FROM visit_events
 WHERE user_id = $1
-ORDER BY observed_at DESC
+	AND ($2::timestamptz IS NULL
+		OR (observed_at, id) < ($2, $3::uuid))
+ORDER BY observed_at DESC, id DESC
+LIMIT $4
 `
 
-func (q *Queries) ListVisitEvents(ctx context.Context, userID pgtype.UUID) ([]VisitEvent, error) {
-	rows, err := q.db.Query(ctx, listVisitEvents, userID)
+type ListVisitEventsParams struct {
+	UserID   pgtype.UUID        `json:"user_id"`
+	BeforeAt pgtype.Timestamptz `json:"before_at"`
+	BeforeID pgtype.UUID        `json:"before_id"`
+	Limit    int32              `json:"limit"`
+}
+
+// Keyset pagination — offset would drift under appends (offline replays can
+// land mid-history). The handler fetches limit+1 to learn whether a next
+// page exists; cursor = (observed_at, id) of the last emitted row.
+func (q *Queries) ListVisitEvents(ctx context.Context, arg ListVisitEventsParams) ([]VisitEvent, error) {
+	rows, err := q.db.Query(ctx, listVisitEvents,
+		arg.UserID,
+		arg.BeforeAt,
+		arg.BeforeID,
+		arg.Limit,
+	)
 	if err != nil {
 		return nil, err
 	}
