@@ -3,6 +3,7 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
+	import { installQueueDriver } from '$lib/mutation-queue';
 	import { onMount } from 'svelte';
 
 	let { children } = $props();
@@ -12,6 +13,7 @@
 	let online = $state(true);
 	onMount(() => {
 		online = navigator.onLine;
+		return installQueueDriver();
 	});
 
 	// Primary nav per docs/05: compact gets a bottom bar, wider layouts a rail.

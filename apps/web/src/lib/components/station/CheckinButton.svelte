@@ -1,10 +1,17 @@
 <script lang="ts">
-	import { authedApi, clearSession } from '$lib/session';
+	import {
+		idbMutationStore,
+		onSettled,
+		queueCheckin,
+		replayQueue,
+		sendCheckin,
+		type CheckinBody
+	} from '$lib/mutation-queue';
 	import { Button } from '@singgah/ui';
 
 	let { stopId }: { stopId: string } = $props();
 
-	type Phase = 'idle' | 'locating' | 'sending' | 'done' | 'error';
+	type Phase = 'idle' | 'locating' | 'sending' | 'queued' | 'done' | 'error';
 	let phase = $state<Phase>('idle');
 	let visitStatus = $state<'confirmed' | 'low_confidence' | null>(null);
 	let mutationId = $state('');
@@ -22,40 +29,68 @@
 		});
 	}
 
+	// The queue is only acknowledged — never called "accepted". When the
+	// background replay resolves this mutationId, flip to the real outcome.
+	async function parkOffline(body: CheckinBody) {
+		onSettled(mutationId, (r) => {
+			if (r.kind === 'ok') {
+				visitStatus = r.visitStatus ?? null;
+				phase = 'done';
+			} else if (r.kind === 'rejected') {
+				phase = 'error';
+			}
+			// 'network' during replay: stay queued — still pending, honestly.
+		});
+		await queueCheckin(idbMutationStore(), body);
+		phase = 'queued';
+	}
+
 	async function checkin() {
 		// Same key on retry → the server replays the recorded visit, never a
 		// duplicate (idempotency contract).
 		if (!mutationId) mutationId = crypto.randomUUID();
 		phase = 'locating';
 		const fix = await locate();
-		phase = 'sending';
-		const { data, error, response } = await authedApi.POST('/api/v1/visits', {
-			body: {
-				stopId,
-				clientMutationId: mutationId,
-				observedAt: new Date().toISOString(),
-				...(fix ? { lat: fix.lat, lon: fix.lon } : {})
-			}
-		});
-		if (error || !data) {
-			// A 401 means the stored token is dead — drop it so the next tap
-			// re-mints instead of failing forever.
-			if (response.status === 401) clearSession();
-			phase = 'error';
+		const body: CheckinBody = {
+			stopId,
+			clientMutationId: mutationId,
+			observedAt: new Date().toISOString(),
+			...(fix ? { lat: fix.lat, lon: fix.lon } : {})
+		};
+		if (!navigator.onLine) {
+			await parkOffline(body);
 			return;
 		}
-		visitStatus = data.visit.status;
-		phase = 'done';
+		phase = 'sending';
+		const result = await sendCheckin(body);
+		if (result.kind === 'ok') {
+			visitStatus = result.visitStatus ?? null;
+			phase = 'done';
+		} else if (result.kind === 'network') {
+			await parkOffline(body);
+		} else {
+			phase = 'error';
+		}
 	}
 </script>
 
 <div class="checkin">
-	{#if phase === 'done' && visitStatus}
+	{#if phase === 'done'}
 		<p class="checkin-done" role="status">
 			Ditandai{visitStatus === 'confirmed'
 				? ' — lokasi terverifikasi.'
-				: ' — tanpa verifikasi lokasi.'}
+				: visitStatus === 'low_confidence'
+					? ' — tanpa verifikasi lokasi.'
+					: '.'}
 		</p>
+	{:else if phase === 'queued'}
+		<p class="checkin-done" role="status">Tertunda — dikirim saat online.</p>
+		<Button
+			variant="ghost"
+			onclick={() => void replayQueue(idbMutationStore(), sendCheckin)}
+		>
+			Kirim sekarang
+		</Button>
 	{:else}
 		<Button disabled={phase === 'locating' || phase === 'sending'} onclick={checkin}>
 			{#if phase === 'locating'}
