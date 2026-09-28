@@ -12,6 +12,7 @@ import (
 	"time"
 
 	generated "singgah/services/api/db/generated"
+	"singgah/services/api/internal/auth"
 	"singgah/services/api/internal/catalog"
 	"singgah/services/api/internal/config"
 	"singgah/services/api/internal/db"
@@ -61,6 +62,7 @@ func main() {
 		}, 5*time.Minute)
 		deps.Catalog = catalog.NewHandler(queries, engSrc)
 		deps.Journey = journey.NewHandler(queries, engSrc, commuteClient)
+		deps.Auth = auth.NewHandler(auth.NewService(queries))
 		if cfg.ScheduleRefreshInterval > 0 {
 			refreshDone = ingest.StartRefresher(ctx, pool, ingest.RefreshConfig{
 				FeedURL:    cfg.GTFSFeedURL,

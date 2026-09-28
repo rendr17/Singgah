@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"singgah/services/api/internal/auth"
 	"singgah/services/api/internal/catalog"
 	"singgah/services/api/internal/health"
 	"singgah/services/api/internal/http/middleware"
@@ -25,6 +26,7 @@ type Deps struct {
 	// simply unmounted (404) — /ready still reports the dependency honestly.
 	Catalog *catalog.Handler
 	Journey *journey.Handler
+	Auth    *auth.Handler
 	// CORSOrigin is the Access-Control-Allow-Origin value ("*" for local dev).
 	CORSOrigin string
 }
@@ -47,6 +49,9 @@ func NewRouter(deps Deps) http.Handler {
 		}
 		if deps.Journey != nil {
 			deps.Journey.RegisterRoutes(v1)
+		}
+		if deps.Auth != nil {
+			deps.Auth.RegisterRoutes(v1)
 		}
 	})
 

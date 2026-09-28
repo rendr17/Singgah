@@ -19,12 +19,32 @@ type Agency struct {
 	SourceUpdatedAt  pgtype.Timestamptz `json:"source_updated_at"`
 }
 
+type AuthSession struct {
+	ID        pgtype.UUID        `json:"id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	TokenHash []byte             `json:"token_hash"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	RevokedAt pgtype.Timestamptz `json:"revoked_at"`
+}
+
 type Frequency struct {
 	TripID         pgtype.UUID `json:"trip_id"`
 	StartSeconds   int32       `json:"start_seconds"`
 	EndSeconds     int32       `json:"end_seconds"`
 	HeadwaySeconds int32       `json:"headway_seconds"`
 	ExactTimes     bool        `json:"exact_times"`
+}
+
+type JournalEntry struct {
+	ID           pgtype.UUID        `json:"id"`
+	UserID       pgtype.UUID        `json:"user_id"`
+	StopID       pgtype.UUID        `json:"stop_id"`
+	VisitEventID pgtype.UUID        `json:"visit_event_id"`
+	Body         string             `json:"body"`
+	Visibility   string             `json:"visibility"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Provider struct {
@@ -134,4 +154,22 @@ type Trip struct {
 	Headsign         pgtype.Text        `json:"headsign"`
 	DirectionID      pgtype.Int2        `json:"direction_id"`
 	FetchedAt        pgtype.Timestamptz `json:"fetched_at"`
+}
+
+type User struct {
+	ID         pgtype.UUID        `json:"id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	LastSeenAt pgtype.Timestamptz `json:"last_seen_at"`
+}
+
+type VisitEvent struct {
+	ID               pgtype.UUID        `json:"id"`
+	UserID           pgtype.UUID        `json:"user_id"`
+	StopID           pgtype.UUID        `json:"stop_id"`
+	ClientMutationID pgtype.UUID        `json:"client_mutation_id"`
+	ObservedAt       pgtype.Timestamptz `json:"observed_at"`
+	ValidationMethod string             `json:"validation_method"`
+	DistanceM        pgtype.Numeric     `json:"distance_m"`
+	Status           string             `json:"status"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
