@@ -26,6 +26,16 @@ type Config struct {
 	// Defaults to "*" — acceptable while every endpoint is unauthenticated.
 	CORSOrigin string
 
+	// ScheduleRefreshInterval enables the in-process schedule refresh loop
+	// when > 0 (e.g. "24h"). The startup run is skipped when both schedule
+	// providers were already refreshed inside the interval. Zero (the
+	// default) keeps ingest a manual cmd/ingest-schedule run.
+	ScheduleRefreshInterval time.Duration
+
+	// GTFSFeedURL is the schedule refresh's TransJakarta feed — overridable
+	// for staging and fixture servers.
+	GTFSFeedURL string
+
 	ReadHeaderTimeout time.Duration
 	ReadTimeout       time.Duration
 	WriteTimeout      time.Duration
@@ -53,6 +63,19 @@ func Load() (Config, error) {
 	cfg.CommuteBaseURL = os.Getenv("COMMUTE_BASE_URL")
 	if cfg.CommuteBaseURL == "" {
 		cfg.CommuteBaseURL = commute.DefaultBaseURL
+	}
+
+	if v := os.Getenv("SCHEDULE_REFRESH_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < time.Minute {
+			return Config{}, fmt.Errorf("invalid SCHEDULE_REFRESH_INTERVAL %q", v)
+		}
+		cfg.ScheduleRefreshInterval = d
+	}
+
+	cfg.GTFSFeedURL = os.Getenv("GTFS_FEED_URL")
+	if cfg.GTFSFeedURL == "" {
+		cfg.GTFSFeedURL = "https://gtfs.transjakarta.co.id/files/file_gtfs.zip"
 	}
 
 	cfg.CORSOrigin = os.Getenv("CORS_ORIGIN")

@@ -16,6 +16,7 @@ import (
 	"singgah/services/api/internal/config"
 	"singgah/services/api/internal/db"
 	httpapi "singgah/services/api/internal/http"
+	"singgah/services/api/internal/ingest"
 	"singgah/services/api/internal/journey"
 	"singgah/services/api/internal/planner"
 	"singgah/services/api/internal/provider/commute"
@@ -39,6 +40,7 @@ func main() {
 
 	deps := httpapi.Deps{Logger: logger, Version: version, CORSOrigin: cfg.CORSOrigin}
 
+	var refreshDone <-chan struct{}
 	if cfg.DatabaseURL != "" {
 		connectCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		pool, err := db.Connect(connectCtx, cfg.DatabaseURL)
@@ -59,6 +61,14 @@ func main() {
 		}, 5*time.Minute)
 		deps.Catalog = catalog.NewHandler(queries, engSrc)
 		deps.Journey = journey.NewHandler(queries, engSrc, commuteClient)
+		if cfg.ScheduleRefreshInterval > 0 {
+			refreshDone = ingest.StartRefresher(ctx, pool, ingest.RefreshConfig{
+				FeedURL:    cfg.GTFSFeedURL,
+				CommuteURL: cfg.CommuteBaseURL,
+				Pace:       150 * time.Millisecond,
+			}, cfg.ScheduleRefreshInterval, logger)
+			logger.Info("schedule refresh enabled", "interval", cfg.ScheduleRefreshInterval)
+		}
 		logger.Info("database connected")
 	} else {
 		logger.Warn("DATABASE_URL unset — database endpoints report unavailable")
@@ -91,6 +101,14 @@ func main() {
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			logger.Error("graceful shutdown failed", "error", err)
 			os.Exit(1)
+		}
+		if refreshDone != nil {
+			// The refresher's ctx is already done — the loop exits promptly;
+			// an in-flight ingest aborts through ctx itself.
+			select {
+			case <-refreshDone:
+			case <-time.After(5 * time.Second):
+			}
 		}
 	}
 }
