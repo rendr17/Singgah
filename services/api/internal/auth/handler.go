@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"singgah/services/api/internal/http/middleware"
 	"singgah/services/api/internal/http/response"
 )
 
@@ -21,7 +22,8 @@ func NewHandler(svc *Service) *Handler {
 }
 
 func (h *Handler) RegisterRoutes(r chi.Router) {
-	r.Post("/auth/session", h.createSession)
+	// Session minting is unauthenticated — bounded per-IP (docs/26).
+	r.With(middleware.RateLimit(10, time.Minute)).Post("/auth/session", h.createSession)
 	r.With(h.svc.RequireUser).Delete("/auth/session", h.revokeSession)
 	r.With(h.svc.RequireUser).Delete("/auth/account", h.deleteAccount)
 }

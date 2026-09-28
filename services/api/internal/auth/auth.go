@@ -103,6 +103,12 @@ func UserIDFrom(ctx context.Context) (pgtype.UUID, bool) {
 	return id, ok
 }
 
+// ContextWithUserID stores a user ID in ctx — the write side of UserIDFrom,
+// used by RequireUser and by tests simulating an authenticated request.
+func ContextWithUserID(ctx context.Context, id pgtype.UUID) context.Context {
+	return context.WithValue(ctx, userIDKey{}, id)
+}
+
 // RequireUser gates a route on a valid Authorization: Bearer token.
 func (s *Service) RequireUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -116,7 +122,7 @@ func (s *Service) RequireUser(next http.Handler) http.Handler {
 			response.Error(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Sesi tidak valid atau kedaluwarsa")
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userIDKey{}, userID)))
+		next.ServeHTTP(w, r.WithContext(ContextWithUserID(r.Context(), userID)))
 	})
 }
 

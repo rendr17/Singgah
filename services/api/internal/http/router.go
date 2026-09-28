@@ -14,6 +14,7 @@ import (
 	"singgah/services/api/internal/http/middleware"
 	"singgah/services/api/internal/http/response"
 	"singgah/services/api/internal/journey"
+	"singgah/services/api/internal/passport"
 )
 
 // Deps carries the router's runtime dependencies — constructed once in main.
@@ -24,9 +25,10 @@ type Deps struct {
 	DB health.Pinger
 	// Catalog and Journey are nil without a database; their routes are then
 	// simply unmounted (404) — /ready still reports the dependency honestly.
-	Catalog *catalog.Handler
-	Journey *journey.Handler
-	Auth    *auth.Handler
+	Catalog  *catalog.Handler
+	Journey  *journey.Handler
+	Auth     *auth.Handler
+	Passport *passport.Handler
 	// CORSOrigin is the Access-Control-Allow-Origin value ("*" for local dev).
 	CORSOrigin string
 }
@@ -52,6 +54,9 @@ func NewRouter(deps Deps) http.Handler {
 		}
 		if deps.Auth != nil {
 			deps.Auth.RegisterRoutes(v1)
+		}
+		if deps.Passport != nil {
+			deps.Passport.RegisterRoutes(v1)
 		}
 	})
 

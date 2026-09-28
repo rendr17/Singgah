@@ -1,0 +1,39 @@
+post:
+  operationId: createSession
+  summary: Create anonymous session
+  description: >-
+    Mints a fresh anonymous user + session (ADR-010). No registration or
+    personal data — the returned token IS the account credential; losing it
+    loses the passport. Rate-limited per client IP.
+  tags:
+    - auth
+  responses:
+    '201':
+      description: New session
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/passport.yaml#/Session'
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
+delete:
+  operationId: revokeSession
+  summary: Revoke current session
+  description: Invalidates the bearer token used for this request ("logout").
+  tags:
+    - auth
+  security:
+    - bearerAuth: []
+  responses:
+    '204':
+      description: Session revoked
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

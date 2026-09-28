@@ -222,6 +222,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create anonymous session
+         * @description Mints a fresh anonymous user + session (ADR-010). No registration or personal data — the returned token IS the account credential; losing it loses the passport. Rate-limited per client IP.
+         */
+        post: operations["createSession"];
+        /**
+         * Revoke current session
+         * @description Invalidates the bearer token used for this request ("logout").
+         */
+        delete: operations["revokeSession"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete account and all owned data
+         * @description Deletes the user row; FK cascades permanently remove sessions, visit events, and journal entries (docs/26 delete path).
+         */
+        delete: operations["deleteAccount"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/visits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List own visit events
+         * @description Returns the authenticated user's check-ins, newest first.
+         */
+        get: operations["listVisits"];
+        put?: never;
+        /**
+         * Check in at a station/stop
+         * @description Records a visit event for the authenticated user (docs/16). Send `lat` + `lon` together for a geofence-verified check-in (confirmed when within ~200 m); omit them for a manual, unverified check-in. Either way the visit is recorded — confidence is marked, never faked. Safe to replay: `clientMutationId` dedupes offline-queue retries. Rate-limited per IP.
+         */
+        post: operations["checkin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -594,6 +662,68 @@ export interface components {
                  */
                 snapshotAt: string;
             };
+        };
+        Session: {
+            /** @description Opaque bearer token (256-bit, base64url). Shown exactly once — only its SHA-256 hash is stored server-side (ADR-010). */
+            token: string;
+            /** Format: date-time */
+            expiresAt: string;
+            /** Format: uuid */
+            userId: string;
+        };
+        Visit: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            stopId: string;
+            /** Format: date-time */
+            observedAt: string;
+            /**
+             * @description Derived server-side from evidence, never claimed by the client: `geofence` when a device fix was evaluated, `manual` when none was supplied, `trip` reserved for dwell/trip-context check-ins.
+             * @enum {string}
+             */
+            validationMethod: "geofence" | "manual" | "trip";
+            /**
+             * @description `confirmed` = fix inside the geofence radius; `low_confidence` = outside it or no fix at all. Low-confidence visits are still recorded honestly (docs/42: mark, don't block).
+             * @enum {string}
+             */
+            status: "confirmed" | "low_confidence";
+            /**
+             * Format: double
+             * @description Meters between the fix and the stop (geofence check-ins only).
+             */
+            distanceM?: number;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        VisitList: {
+            visits: components["schemas"]["Visit"][];
+        };
+        CheckinRequest: {
+            /** Format: uuid */
+            stopId: string;
+            /**
+             * Format: uuid
+             * @description Client-generated idempotency key (docs/24). Replays with the same key return the original row with `replayed: true`, never a duplicate.
+             */
+            clientMutationId: string;
+            /**
+             * Format: date-time
+             * @description When the user says the visit happened (client clock).
+             */
+            observedAt: string;
+            /**
+             * Format: double
+             * @description Device fix latitude. Must be sent together with `lon`; omitting both records a manual (unverified) check-in.
+             */
+            lat?: number;
+            /** Format: double */
+            lon?: number;
+        };
+        CheckinResponse: {
+            visit: components["schemas"]["Visit"];
+            /** @description true when the idempotency key matched an existing row. */
+            replayed: boolean;
         };
     };
     responses: never;
@@ -979,6 +1109,160 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JourneyPlan"];
+                };
+            };
+            /** @description Error envelope — shared by all endpoints */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    createSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description New session */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Session"];
+                };
+            };
+            /** @description Error envelope — shared by all endpoints */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    revokeSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error envelope — shared by all endpoints */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    deleteAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Account and all owned data deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error envelope — shared by all endpoints */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    listVisits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Own visit events */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VisitList"];
+                };
+            };
+            /** @description Error envelope — shared by all endpoints */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    checkin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CheckinRequest"];
+            };
+        };
+        responses: {
+            /** @description Idempotent replay — returns the already-recorded visit */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckinResponse"];
+                };
+            };
+            /** @description Visit recorded */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckinResponse"];
                 };
             };
             /** @description Error envelope — shared by all endpoints */

@@ -1,0 +1,59 @@
+post:
+  operationId: checkin
+  summary: Check in at a station/stop
+  description: >-
+    Records a visit event for the authenticated user (docs/16). Send `lat` +
+    `lon` together for a geofence-verified check-in (confirmed when within
+    ~200 m); omit them for a manual, unverified check-in. Either way the
+    visit is recorded — confidence is marked, never faked. Safe to replay:
+    `clientMutationId` dedupes offline-queue retries. Rate-limited per IP.
+  tags:
+    - passport
+  security:
+    - bearerAuth: []
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../schemas/passport.yaml#/CheckinRequest'
+  responses:
+    '201':
+      description: Visit recorded
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/passport.yaml#/CheckinResponse'
+    '200':
+      description: Idempotent replay — returns the already-recorded visit
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/passport.yaml#/CheckinResponse'
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
+get:
+  operationId: listVisits
+  summary: List own visit events
+  description: Returns the authenticated user's check-ins, newest first.
+  tags:
+    - passport
+  security:
+    - bearerAuth: []
+  responses:
+    '200':
+      description: Own visit events
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/passport.yaml#/VisitList'
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

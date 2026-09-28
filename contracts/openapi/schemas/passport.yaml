@@ -1,0 +1,120 @@
+Session:
+  type: object
+  required:
+    - token
+    - expiresAt
+    - userId
+  additionalProperties: false
+  properties:
+    token:
+      type: string
+      description: >-
+        Opaque bearer token (256-bit, base64url). Shown exactly once — only
+        its SHA-256 hash is stored server-side (ADR-010).
+    expiresAt:
+      type: string
+      format: date-time
+    userId:
+      type: string
+      format: uuid
+
+CheckinRequest:
+  type: object
+  required:
+    - stopId
+    - clientMutationId
+    - observedAt
+  additionalProperties: false
+  properties:
+    stopId:
+      type: string
+      format: uuid
+    clientMutationId:
+      type: string
+      format: uuid
+      description: >-
+        Client-generated idempotency key (docs/24). Replays with the same key
+        return the original row with `replayed: true`, never a duplicate.
+    observedAt:
+      type: string
+      format: date-time
+      description: When the user says the visit happened (client clock).
+    lat:
+      type: number
+      format: double
+      minimum: -90
+      maximum: 90
+      description: >-
+        Device fix latitude. Must be sent together with `lon`; omitting both
+        records a manual (unverified) check-in.
+    lon:
+      type: number
+      format: double
+      minimum: -180
+      maximum: 180
+
+Visit:
+  type: object
+  required:
+    - id
+    - stopId
+    - observedAt
+    - validationMethod
+    - status
+    - createdAt
+  additionalProperties: false
+  properties:
+    id:
+      type: string
+      format: uuid
+    stopId:
+      type: string
+      format: uuid
+    observedAt:
+      type: string
+      format: date-time
+    validationMethod:
+      type: string
+      enum: [geofence, manual, trip]
+      description: >-
+        Derived server-side from evidence, never claimed by the client:
+        `geofence` when a device fix was evaluated, `manual` when none was
+        supplied, `trip` reserved for dwell/trip-context check-ins.
+    status:
+      type: string
+      enum: [confirmed, low_confidence]
+      description: >-
+        `confirmed` = fix inside the geofence radius; `low_confidence` =
+        outside it or no fix at all. Low-confidence visits are still
+        recorded honestly (docs/42: mark, don't block).
+    distanceM:
+      type: number
+      format: double
+      description: Meters between the fix and the stop (geofence check-ins only).
+    createdAt:
+      type: string
+      format: date-time
+
+CheckinResponse:
+  type: object
+  required:
+    - visit
+    - replayed
+  additionalProperties: false
+  properties:
+    visit:
+      $ref: '#/Visit'
+    replayed:
+      type: boolean
+      description: true when the idempotency key matched an existing row.
+
+VisitList:
+  type: object
+  required:
+    - visits
+  additionalProperties: false
+  properties:
+    visits:
+      type: array
+      items:
+        $ref: '#/Visit'

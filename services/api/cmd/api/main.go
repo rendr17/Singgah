@@ -19,6 +19,7 @@ import (
 	httpapi "singgah/services/api/internal/http"
 	"singgah/services/api/internal/ingest"
 	"singgah/services/api/internal/journey"
+	"singgah/services/api/internal/passport"
 	"singgah/services/api/internal/planner"
 	"singgah/services/api/internal/provider/commute"
 )
@@ -62,7 +63,9 @@ func main() {
 		}, 5*time.Minute)
 		deps.Catalog = catalog.NewHandler(queries, engSrc)
 		deps.Journey = journey.NewHandler(queries, engSrc, commuteClient)
-		deps.Auth = auth.NewHandler(auth.NewService(queries))
+		authSvc := auth.NewService(queries)
+		deps.Auth = auth.NewHandler(authSvc)
+		deps.Passport = passport.NewHandler(queries, authSvc)
 		if cfg.ScheduleRefreshInterval > 0 {
 			refreshDone = ingest.StartRefresher(ctx, pool, ingest.RefreshConfig{
 				FeedURL:    cfg.GTFSFeedURL,

@@ -1,0 +1,19 @@
+delete:
+  operationId: deleteAccount
+  summary: Delete account and all owned data
+  description: >-
+    Deletes the user row; FK cascades permanently remove sessions, visit
+    events, and journal entries (docs/26 delete path).
+  tags:
+    - auth
+  security:
+    - bearerAuth: []
+  responses:
+    '204':
+      description: Account and all owned data deleted
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
