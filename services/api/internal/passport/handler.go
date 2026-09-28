@@ -26,11 +26,18 @@ const geofenceRadiusM = 200
 // observedAtFutureSlack tolerates small client clock skew on observed_at.
 const observedAtFutureSlack = 15 * time.Minute
 
+// observedAtMin rejects garbage timestamps: a Singgah visit cannot predate
+// the product, and anything earlier is client junk, not a real trip.
+var observedAtMin = time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)
+
 type Store interface {
 	GetStop(ctx context.Context, id pgtype.UUID) (generated.GetStopRow, error)
 	StopDistanceM(ctx context.Context, arg generated.StopDistanceMParams) (float64, error)
 	RecordVisitEvent(ctx context.Context, arg generated.RecordVisitEventParams) (generated.RecordVisitEventRow, error)
 	ListVisitEvents(ctx context.Context, userID pgtype.UUID) ([]generated.VisitEvent, error)
+	PassportProgressTotal(ctx context.Context, userID pgtype.UUID) (generated.PassportProgressTotalRow, error)
+	PassportProgressByMode(ctx context.Context, userID pgtype.UUID) ([]generated.PassportProgressByModeRow, error)
+	PassportProgressByRoute(ctx context.Context, userID pgtype.UUID) ([]generated.PassportProgressByRouteRow, error)
 }
 
 type Handler struct {
@@ -46,6 +53,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.With(middleware.RateLimit(20, time.Minute), h.auth.RequireUser).
 		Post("/visits", h.createVisit)
 	r.With(h.auth.RequireUser).Get("/visits", h.listVisits)
+	r.With(h.auth.RequireUser).Get("/passport/progress", h.progress)
 }
 
 type visitRequest struct {
@@ -88,6 +96,14 @@ func (h *Handler) createVisit(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		response.Error(w, r, http.StatusInternalServerError, "INTERNAL", "Gagal merekam kunjungan")
+		return
+	}
+	if !row.WasInserted &&
+		(row.StopID != params.stopID || !row.ObservedAt.Time.Equal(*req.ObservedAt)) {
+		// The idempotency key was reused for a DIFFERENT visit — report the
+		// conflict honestly instead of masquerading as a successful replay.
+		response.Error(w, r, http.StatusConflict, "IDEMPOTENCY_CONFLICT",
+			"clientMutationId sudah dipakai untuk kunjungan lain")
 		return
 	}
 	out := visitDTO{
@@ -137,6 +153,9 @@ func (h *Handler) evaluate(req visitRequest, w http.ResponseWriter, r *http.Requ
 	}
 	if req.ObservedAt == nil {
 		return bad("observedAt wajib diisi")
+	}
+	if req.ObservedAt.Before(observedAtMin) {
+		return bad("observedAt terlalu lampau")
 	}
 	if time.Until(*req.ObservedAt) > observedAtFutureSlack {
 		return bad("observedAt tidak boleh jauh di masa depan")

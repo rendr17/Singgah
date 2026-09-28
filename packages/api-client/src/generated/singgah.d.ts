@@ -290,6 +290,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/passport/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Passport progress
+         * @description Distinct catalog stops the user has visited over stops the network serves — overall, per mode, and per corridor (route). Low-confidence visits count toward progress; passport progress is personal (docs/42). Geography and collection breakdowns land with their own features.
+         */
+        get: operations["getPassportProgress"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -724,6 +744,27 @@ export interface components {
             visit: components["schemas"]["Visit"];
             /** @description true when the idempotency key matched an existing row. */
             replayed: boolean;
+        };
+        ProgressCount: {
+            /** Format: int64 */
+            visitedStops: number;
+            /** Format: int64 */
+            totalStops: number;
+        };
+        PassportProgress: components["schemas"]["ProgressCount"] & {
+            byMode: (components["schemas"]["ProgressCount"] & {
+                mode: string;
+            })[];
+            byRoute: (components["schemas"]["ProgressCount"] & {
+                /** Format: uuid */
+                routeId: string;
+                /** @description Provider entity id of the corridor, e.g. "TJ:4B". */
+                routeKey: string;
+                name: string;
+                mode: string;
+                /** @description Corridor hex color (no leading */
+                color?: string;
+            })[];
         };
     };
     responses: never;
@@ -1263,6 +1304,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CheckinResponse"];
+                };
+            };
+            /** @description Error envelope — shared by all endpoints */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    getPassportProgress: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Progress counters */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PassportProgress"];
                 };
             };
             /** @description Error envelope — shared by all endpoints */

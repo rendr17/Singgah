@@ -1,0 +1,25 @@
+get:
+  operationId: getPassportProgress
+  summary: Passport progress
+  description: >-
+    Distinct catalog stops the user has visited over stops the network
+    serves — overall, per mode, and per corridor (route). Low-confidence
+    visits count toward progress; passport progress is personal (docs/42).
+    Geography and collection breakdowns land with their own features.
+  tags:
+    - passport
+  security:
+    - bearerAuth: []
+  responses:
+    '200':
+      description: Progress counters
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/passport.yaml#/PassportProgress'
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

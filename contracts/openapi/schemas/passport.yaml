@@ -118,3 +118,58 @@ VisitList:
       type: array
       items:
         $ref: '#/Visit'
+
+ProgressCount:
+  type: object
+  required: [visitedStops, totalStops]
+  additionalProperties: false
+  properties:
+    visitedStops:
+      type: integer
+      format: int64
+      minimum: 0
+    totalStops:
+      type: integer
+      format: int64
+      minimum: 0
+
+PassportProgress:
+  allOf:
+    - $ref: '#/ProgressCount'
+    - type: object
+      required: [byMode, byRoute]
+      additionalProperties: false
+      properties:
+        byMode:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/ProgressCount'
+              - type: object
+                required: [mode]
+                additionalProperties: false
+                properties:
+                  mode:
+                    type: string
+        byRoute:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/ProgressCount'
+              - type: object
+                required: [routeId, routeKey, name, mode]
+                additionalProperties: false
+                properties:
+                  routeId:
+                    type: string
+                    format: uuid
+                  routeKey:
+                    type: string
+                    description: Provider entity id of the corridor, e.g. "TJ:4B".
+                  name:
+                    type: string
+                  mode:
+                    type: string
+                  color:
+                    type: string
+                    description: Corridor hex color (no leading #) when known.

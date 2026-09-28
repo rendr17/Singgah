@@ -26,6 +26,9 @@ type fakeStore struct {
 	distErr    error
 	rows       []generated.VisitEvent
 	inserted   int
+	totalStops int64
+	byMode     []generated.PassportProgressByModeRow
+	byRoute    []generated.PassportProgressByRouteRow
 }
 
 func (f *fakeStore) GetStop(ctx context.Context, id pgtype.UUID) (generated.GetStopRow, error) {
@@ -78,6 +81,24 @@ func (f *fakeStore) ListVisitEvents(ctx context.Context, userID pgtype.UUID) ([]
 		}
 	}
 	return out, nil
+}
+
+func (f *fakeStore) PassportProgressTotal(ctx context.Context, userID pgtype.UUID) (generated.PassportProgressTotalRow, error) {
+	seen := map[pgtype.UUID]bool{}
+	for _, v := range f.rows {
+		if v.UserID == userID {
+			seen[v.StopID] = true
+		}
+	}
+	return generated.PassportProgressTotalRow{TotalStops: f.totalStops, VisitedStops: int64(len(seen))}, nil
+}
+
+func (f *fakeStore) PassportProgressByMode(ctx context.Context, userID pgtype.UUID) ([]generated.PassportProgressByModeRow, error) {
+	return f.byMode, nil
+}
+
+func (f *fakeStore) PassportProgressByRoute(ctx context.Context, userID pgtype.UUID) ([]generated.PassportProgressByRouteRow, error) {
+	return f.byRoute, nil
 }
 
 func newHandler(f *fakeStore) *Handler {
@@ -180,17 +201,38 @@ func TestCheckinValidation(t *testing.T) {
 	h := newHandler(&fakeStore{stopExists: true})
 	stop, at := uuidStr(testStop), time.Now().UTC().Format(time.RFC3339)
 	for name, body := range map[string]string{
-		"bad json":        `{`,
-		"bad stop":        fmt.Sprintf(`{"stopId":"nope","clientMutationId":%q,"observedAt":%q}`, mutationID(), at),
-		"missing mutation": fmt.Sprintf(`{"stopId":%q,"observedAt":%q}`, stop, at),
+		"bad json":           `{`,
+		"bad stop":           fmt.Sprintf(`{"stopId":"nope","clientMutationId":%q,"observedAt":%q}`, mutationID(), at),
+		"missing mutation":   fmt.Sprintf(`{"stopId":%q,"observedAt":%q}`, stop, at),
 		"missing observedAt": fmt.Sprintf(`{"stopId":%q,"clientMutationId":%q}`, stop, mutationID()),
-		"future observedAt": fmt.Sprintf(`{"stopId":%q,"clientMutationId":%q,"observedAt":%q}`, stop, mutationID(), time.Now().Add(2*time.Hour).UTC().Format(time.RFC3339)),
-		"lat only":        fmt.Sprintf(`{"stopId":%q,"clientMutationId":%q,"observedAt":%q,"lat":-6.2}`, stop, mutationID(), at),
-		"lat range":       fmt.Sprintf(`{"stopId":%q,"clientMutationId":%q,"observedAt":%q,"lat":-91,"lon":0}`, stop, mutationID(), at),
+		"future observedAt":  fmt.Sprintf(`{"stopId":%q,"clientMutationId":%q,"observedAt":%q}`, stop, mutationID(), time.Now().Add(2*time.Hour).UTC().Format(time.RFC3339)),
+		"lat only":           fmt.Sprintf(`{"stopId":%q,"clientMutationId":%q,"observedAt":%q,"lat":-6.2}`, stop, mutationID(), at),
+		"lat range":          fmt.Sprintf(`{"stopId":%q,"clientMutationId":%q,"observedAt":%q,"lat":-91,"lon":0}`, stop, mutationID(), at),
 	} {
 		if rec := post(t, h, body); rec.Code != http.StatusBadRequest {
 			t.Fatalf("%s: got %d want 400 (%s)", name, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+func TestCheckinReplayDifferentPayloadConflicts(t *testing.T) {
+	store := &fakeStore{stopExists: true, distanceM: 50}
+	h := newHandler(store)
+	mut := mutationID()
+	at := time.Now().UTC().Format(time.RFC3339)
+	stop := uuidStr(testStop)
+	post(t, h, fmt.Sprintf(`{"stopId":%q,"clientMutationId":%q,"observedAt":%q}`, stop, mut, at))
+	// Same key, different stop → conflict, not silent replay.
+	otherStop := uuidStr(pgtype.UUID{Bytes: [16]byte{6}, Valid: true})
+	rec := post(t, h, fmt.Sprintf(`{"stopId":%q,"clientMutationId":%q,"observedAt":%q}`, otherStop, mut, at))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("stop mismatch: got %d want 409", rec.Code)
+	}
+	// Same key, different observedAt → conflict too.
+	rec = post(t, h, fmt.Sprintf(`{"stopId":%q,"clientMutationId":%q,"observedAt":%q}`,
+		stop, mut, time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("observedAt mismatch: got %d want 409", rec.Code)
 	}
 }
 
@@ -229,5 +271,57 @@ func TestListVisitsOnlyOwn(t *testing.T) {
 	_ = json.NewDecoder(rec.Body).Decode(&resp)
 	if len(resp.Visits) != 1 {
 		t.Fatalf("own list: got %d want 1", len(resp.Visits))
+	}
+}
+
+func TestProgress(t *testing.T) {
+	color := "25B8EB"
+	store := &fakeStore{
+		stopExists: true,
+		distanceM:  50,
+		totalStops: 400,
+		byMode: []generated.PassportProgressByModeRow{
+			{Mode: "bus", TotalStops: 245, VisitedStops: 1},
+			{Mode: "rail", TotalStops: 158, VisitedStops: 0},
+		},
+		byRoute: []generated.PassportProgressByRouteRow{
+			{RouteKey: "TJ:4B", Mode: "bus", Color: pgtype.Text{String: color, Valid: true}, TotalStops: 12, VisitedStops: 1},
+		},
+	}
+	h := newHandler(store)
+	post(t, h, fmt.Sprintf(`{"stopId":%q,"clientMutationId":%q,"observedAt":%q}`,
+		uuidStr(testStop), mutationID(), time.Now().UTC().Format(time.RFC3339)))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/passport/progress", nil)
+	req = req.WithContext(auth.ContextWithUserID(req.Context(), testUser))
+	rec := httptest.NewRecorder()
+	h.progress(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		VisitedStops int64 `json:"visitedStops"`
+		TotalStops   int64 `json:"totalStops"`
+		ByMode       []struct {
+			Mode         string `json:"mode"`
+			VisitedStops int64  `json:"visitedStops"`
+			TotalStops   int64  `json:"totalStops"`
+		} `json:"byMode"`
+		ByRoute []struct {
+			RouteKey string `json:"routeKey"`
+			Color    string `json:"color"`
+		} `json:"byRoute"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.VisitedStops != 1 || resp.TotalStops != 400 {
+		t.Fatalf("total: got %d/%d want 1/400", resp.VisitedStops, resp.TotalStops)
+	}
+	if len(resp.ByMode) != 2 || resp.ByMode[0].Mode != "bus" {
+		t.Fatalf("byMode: %+v", resp.ByMode)
+	}
+	if len(resp.ByRoute) != 1 || resp.ByRoute[0].RouteKey != "TJ:4B" || resp.ByRoute[0].Color != color {
+		t.Fatalf("byRoute: %+v", resp.ByRoute)
 	}
 }
