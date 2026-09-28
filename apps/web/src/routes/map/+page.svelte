@@ -92,7 +92,7 @@
 				const p = await unwrap(api.GET('/api/v1/journeys', { params: { query: { from, to } } }));
 				if (cancelled || mapStore.fromStationId !== from || mapStore.toStationId !== to) return;
 				journey = p;
-				mapStore.selectJourney(p.itinerary ? `${from}:${to}` : undefined);
+				mapStore.selectJourney(p.itineraries.length > 0 ? `${from}:${to}` : undefined);
 			} catch (e) {
 				if (cancelled || mapStore.fromStationId !== from || mapStore.toStationId !== to) return;
 				journeyError = e instanceof Error ? e.message : 'Rencana rute gagal dimuat.';
@@ -106,7 +106,7 @@
 	});
 
 	const journeyRoute = $derived(
-		journey?.itinerary ? journeyToGeoJSON(journey.itinerary.legs) : undefined
+		journey?.itineraries[0] ? journeyToGeoJSON(journey.itineraries[0].legs) : undefined
 	);
 
 	// Integration-map assets are authored static files — loaded once, not
@@ -639,16 +639,16 @@
 				<StateBlock kind="loading">Mencari rute…</StateBlock>
 			{:else if journeyError}
 				<StateBlock kind="error">{journeyError}</StateBlock>
-			{:else if journey?.itinerary}
-				{@const itin = journey.itinerary}
+			{:else if journey?.itineraries[0]}
+				{@const itin = journey.itineraries[0]}
 				<header class="journey-head">
 					<StatusBadge status={itin.status} />
-					{#if itin.fare?.total != null}
-						<span class="fare">Rp{itin.fare.total.toLocaleString('id-ID')}</span>
+					{#if journey.fareReference?.total != null}
+						<span class="fare">Rp{journey.fareReference.total.toLocaleString('id-ID')}</span>
 					{/if}
 					<span class="sg-meta">
-						{(itin.totalDistanceM / 1000).toFixed(1)} km · {itin.rideLegs} naik
-						{#if itin.walkTransfers > 0}· {itin.walkTransfers} transit jalan{/if}
+						{Math.floor(itin.durationSec / 60)} mnt · {itin.rideLegs} naik
+						{#if itin.transfers > 0}· {itin.transfers} transit{/if}
 					</span>
 				</header>
 
@@ -715,11 +715,11 @@
 					{/each}
 				</ol>
 
-				{#if itin.fare && itin.fare.segments.length > 1}
+				{#if journey.fareReference && journey.fareReference.segments.length > 0}
 					<details class="fare-detail">
-						<summary>Rincian tarif</summary>
+						<summary>Estimasi tarif koridor (referensi)</summary>
 						<ul>
-							{#each itin.fare.segments as seg, i (i)}
+							{#each journey.fareReference.segments as seg, i (i)}
 								<li>
 									{seg.operator}: {seg.from.name} → {seg.to.name} — Rp{seg.amount.toLocaleString(
 										'id-ID'

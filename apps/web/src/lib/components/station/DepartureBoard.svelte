@@ -31,21 +31,30 @@
 					<span class="dir-next">
 						{#if dir.departures.length > 0}
 							{@const dep = dir.departures[0]}
-							<strong class="sg-tabular">{fmtTime(dep.time)}</strong>
+							<strong class="sg-tabular"
+								>{fmtTime(dep.time)}{#if dep.estimated}<span
+										class="est"
+										title="Estimasi — layanan headway, bukan jadwal pasti">≈</span
+									>{/if}</strong
+							>
 							{@const label = countdownLabel(minutesUntil(dep.time, now))}
 							{#if label}<span class="countdown">{label}</span>{/if}
 						{:else}
 							<span class="sg-meta">—</span>
 						{/if}
 						{#if dir.previousDeparture}
-							<span class="prev sg-meta">lalu {fmtTime(dir.previousDeparture.time)}</span>
+							<span class="prev sg-meta"
+							>lalu {fmtTime(dir.previousDeparture.time)}{dir.previousDeparture.estimated
+								? '≈'
+								: ''}</span
+						>
 						{/if}
 					</span>
 					{#if !compact && dir.departures.length > 1}
 						<span class="later sg-meta sg-tabular">
 							{dir.departures
 								.slice(1)
-								.map((d) => fmtTime(d.time))
+								.map((d) => fmtTime(d.time) + (d.estimated ? '≈' : ''))
 								.join(' · ')}
 						</span>
 					{/if}

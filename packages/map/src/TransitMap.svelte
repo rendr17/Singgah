@@ -1,7 +1,12 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { FeatureCollection, LineString, MultiLineString, Point } from 'geojson';
-	import type { ExpressionSpecification, Map as MLMap, GeoJSONSource } from 'maplibre-gl';
+	import type {
+		ExpressionSpecification,
+		FilterSpecification,
+		Map as MLMap,
+		GeoJSONSource
+	} from 'maplibre-gl';
 	import 'maplibre-gl/dist/maplibre-gl.css';
 	import { OPERATOR_ICON_URLS, operatorIcon } from './operators';
 
@@ -119,6 +124,21 @@
 				});
 				m.on('load', () => {
 					if (cancelled) return;
+					// Singgah paints its own stop/station marks — drop the basemap's
+					// transit POIs (station, bus_stop, ferry_terminal) so icons and
+					// labels don't double up (71_ICONS_MAP_STYLE.md). Wraps the
+					// style's existing filter instead of re-declaring its kind list.
+					if (m!.getLayer('pois')) {
+						const notTransit: ExpressionSpecification = [
+							'!',
+							['in', ['get', 'kind'], ['literal', ['station', 'bus_stop', 'ferry_terminal']]]
+						];
+						const base = m!.getFilter('pois');
+						m!.setFilter(
+							'pois',
+							(base ? ['all', base, notTransit] : notTransit) as FilterSpecification
+						);
+					}
 					m!.addSource(LINES, { type: 'geojson', data: lines ?? EMPTY_FC });
 					// Network lines sit under the station dots — registered first so
 					// clusters/stations paint on top of them.

@@ -28,3 +28,7 @@ Thumbs.db
 
 # Vite timestamp artifacts
 vite.config.*.timestamp-*
+
+# Go build artifacts
+bin/
+services/api/bin/

@@ -54,6 +54,7 @@ describe('journeyToGeoJSON', () => {
 				type: 'ride',
 				from: { name: 'A' },
 				to: { name: 'B' },
+				color: '312F92',
 				geometry: line([
 					[106.8, -6.2],
 					[106.81, -6.21]
@@ -71,6 +72,8 @@ describe('journeyToGeoJSON', () => {
 		]);
 		const [leg1, leg2, orig, dest] = fc.features;
 		expect(leg1.geometry.type).toBe('LineString');
+		expect(leg1.properties?.color).toBe('312F92');
+		expect(leg2.properties?.color).toBe('');
 		expect(leg2.geometry.type).toBe('LineString');
 		expect(orig.geometry).toEqual({ type: 'Point', coordinates: [106.8, -6.2] });
 		expect(orig.properties).toEqual({ endpoint: true, name: 'A' });

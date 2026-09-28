@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import type { components } from '@singgah/api-client';
+	import { badgeTextColor } from '$lib/route-groups';
 
 	type StopRef = components['schemas']['JourneyStopRef'];
 	type Leg = components['schemas']['JourneyLeg'];
@@ -28,6 +29,49 @@
 		return line?.split(':').pop() ?? '';
 	}
 
+	// Ride legs wear the corridor's published catalog color; absent it the rail
+	// falls back to the agency-level hue (tokens: design-tokens/transit.css).
+	// `ink` flags hues where dark badge text out-contrasts white.
+	const OPERATOR_LINE: Record<string, { color: string; ink?: boolean }> = {
+		TJ: { color: 'var(--sg-line-tj)', ink: true },
+		KCI: { color: 'var(--sg-line-krl)' },
+		MRTJ: { color: 'var(--sg-line-mrt)' },
+		LRTJ: { color: 'var(--sg-line-lrt)' },
+		LRTJBDB: { color: 'var(--sg-line-lrt)' }
+	};
+
+	function legLine(leg: Leg, alt?: Alt) {
+		const hex = alt?.color ?? leg.color;
+		if (hex) return { color: `#${hex}`, ink: badgeTextColor(hex) === '#141719' };
+		return (
+			OPERATOR_LINE[alt?.operator ?? leg.operator ?? ''] ?? {
+				color: 'var(--sg-line-default)'
+			}
+		);
+	}
+
+	// The origin connector borrows the first leg's ride hue/walk dash so the
+	// rail reads continuously from trip start.
+	const firstLeg = $derived(legs[0]);
+	const firstLine = $derived(
+		firstLeg?.type === 'ride'
+			? legLine(
+					firstLeg,
+					selected[0] !== undefined ? firstLeg.alternatives?.[selected[0]] : undefined
+				)
+			: null
+	);
+
+	// hhmm renders an ISO instant in Asia/Jakarta wall clock — the leg times
+	// the planner emits are UTC instants of WIB schedule values.
+	function hhmm(iso: string) {
+		return new Date(iso).toLocaleTimeString('id-ID', {
+			hour: '2-digit',
+			minute: '2-digit',
+			timeZone: 'Asia/Jakarta'
+		});
+	}
+
 	function pick(i: number, j: number | null, leg: Leg) {
 		if (j === null) delete selected[i];
 		else selected[i] = j;
@@ -36,7 +80,13 @@
 </script>
 
 <ol class="timeline">
-	<li class="leg">
+	<li
+		class="leg"
+		class:leg--ride={firstLine !== null}
+		class:leg--walk={firstLeg?.type === 'walk'}
+		style:--leg-color={firstLine?.color ?? null}
+		style:--leg-ink={firstLine?.ink ? 'var(--sg-text)' : 'var(--sg-brand-contrast)'}
+	>
 		<span class="stop endpoint"><strong>{from.name}</strong></span>
 	</li>
 	{#each legs as leg, i (i)}
@@ -50,12 +100,24 @@
 			</li>
 		{:else}
 			{@const alt = selected[i] !== undefined ? leg.alternatives?.[selected[i]] : undefined}
-			<li class="leg leg--ride">
+			{@const line = legLine(leg, alt)}
+			{@const code = alt ? alt.shortName || shortCode(alt.line) : shortCode(leg.line)}
+			<li
+				class="leg leg--ride"
+				style:--leg-color={line.color}
+				style:--leg-ink={line.ink ? 'var(--sg-text)' : 'var(--sg-brand-contrast)'}
+			>
+				{#if code}
+					<span class="line-badge" aria-hidden="true">{code}</span>
+				{/if}
 				<p class="seg">
-					Naik <strong>{alt?.line ?? leg.line}</strong> arah {alt
+					{#if leg.depAt}<span class="time">{hhmm(leg.depAt)}</span> ·
+					{/if}Naik
+					<strong>{alt?.line ?? leg.line}</strong> arah {alt
 						? leg.to.name
 						: leg.headsign || leg.to.name}{#if alt?.stationCount ?? leg.stationCount}
-						· {alt?.stationCount ?? leg.stationCount} perhentian{/if}
+						· {alt?.stationCount ?? leg.stationCount} perhentian{/if}{#if leg.estimated}
+						· <em>estimasi</em>{/if}
 				</p>
 				{#if leg.alternatives && leg.alternatives.length > 0}
 					<p class="alts">
@@ -91,7 +153,10 @@
 						{/if}
 					</span>
 				{/each}
-				<span class="stop endpoint"><strong>{leg.to.name}</strong></span>
+				<span class="stop endpoint"
+					><strong>{leg.to.name}</strong>{#if leg.arrAt}
+						<span class="time">· {hhmm(leg.arrAt)}</span>{/if}</span
+				>
 			</li>
 		{/if}
 	{/each}
@@ -120,12 +185,13 @@
 		inset-inline-start: 0;
 		top: 0.7em;
 		bottom: 0;
-		width: 2px;
+		width: 3px;
 		background: var(--sg-border);
 	}
 
 	.leg--ride::before {
-		background: var(--sg-brand);
+		width: 4px;
+		background: var(--leg-color, var(--sg-line-default));
 	}
 
 	.leg--walk::before {
@@ -150,7 +216,7 @@
 	.stop::before {
 		content: '';
 		position: absolute;
-		inset-inline-start: calc(-1 * var(--sg-space-4) - 4px);
+		inset-inline-start: calc(-1 * var(--sg-space-4) - 3px);
 		top: 0.65em;
 		width: 0.625rem;
 		height: 0.625rem;
@@ -161,11 +227,15 @@
 	}
 
 	.endpoint::before {
+		inset-inline-start: calc(-1 * var(--sg-space-4) - 5px);
+		width: 0.875rem;
+		height: 0.875rem;
+		border-width: 3px;
 		border-color: var(--sg-text);
 	}
 
-	.leg--ride .endpoint::before {
-		border-color: var(--sg-brand);
+	.leg--ride .stop::before {
+		border-color: var(--leg-color, var(--sg-line-default));
 	}
 
 	.seg {
@@ -201,14 +271,41 @@
 		cursor: pointer;
 	}
 	.alt--on {
-		background: var(--sg-brand);
+		background: var(--leg-color, var(--sg-brand));
 		border-color: transparent;
-		color: var(--sg-brand-contrast);
+		color: var(--leg-ink, var(--sg-brand-contrast));
+	}
+
+	/* Corridor code lozenge on the rail — names the colored line so the hue is
+	   never the only carrier of "which corridor". */
+	.line-badge {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		box-sizing: border-box;
+		min-width: 1.5rem;
+		height: 1.5rem;
+		padding-inline: var(--sg-space-1);
+		margin-inline-start: calc(-1 * var(--sg-space-4) - 10px);
+		margin-block: var(--sg-space-1);
+		border-radius: var(--sg-radius-pill);
+		background: var(--leg-color, var(--sg-line-default));
+		color: var(--leg-ink, var(--sg-brand-contrast));
+		font-size: var(--sg-text-meta);
+		font-weight: var(--sg-weight-bold);
+		font-variant-numeric: tabular-nums;
+		line-height: 1;
 	}
 
 	.departures {
 		margin: 0 0 var(--sg-space-1);
 		font-weight: var(--sg-weight-semibold);
 		font-variant-numeric: tabular-nums;
+	}
+
+	.time {
+		font-variant-numeric: tabular-nums;
+		font-weight: var(--sg-weight-semibold);
+		color: var(--sg-text);
 	}
 </style>

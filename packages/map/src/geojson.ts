@@ -41,6 +41,8 @@ export interface MapJourneyLeg {
 	type: string;
 	from?: { name: string };
 	to?: { name: string };
+	/** Corridor color, hex without '#' — the trail wears the line's hue. */
+	color?: string;
 	geometry?: { type: 'LineString'; coordinates: Position[] };
 }
 
@@ -51,7 +53,7 @@ export function journeyToGeoJSON(legs: MapJourneyLeg[]): FeatureCollection {
 		features.push({
 			type: 'Feature',
 			geometry: leg.geometry as LineString,
-			properties: { dashed: false }
+			properties: { dashed: false, color: leg.color ?? '' }
 		});
 	}
 	const first = features[0]?.geometry as LineString | undefined;

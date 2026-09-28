@@ -13,6 +13,7 @@
 
 	type Station = components['schemas']['StationSummary'];
 	type Plan = components['schemas']['JourneyPlan'];
+	type Itinerary = components['schemas']['Itinerary'];
 
 	let fromStation = $state<Station | null>(null);
 	let toStation = $state<Station | null>(null);
@@ -22,13 +23,35 @@
 	// True when the shown plan came from localStorage after a failed fetch —
 	// the banner must say so instead of letting stale data pass as fresh.
 	let planFromCache = $state(false);
-	// datetime-local value; empty = leave now. Fed into `at` on submit.
-	let departAt = $state('');
+	// Serialized query of the displayed plan — itinerary detail links and
+	// the cache key share it.
+	let planKey = $state('');
 
-	const loadCached = (fromId: string, toId: string, at: string) =>
-		loadCachedPlan(localStorage, fromId, toId, at);
-	const saveCached = (fromId: string, toId: string, at: string, p: Plan) =>
-		saveCachedPlan(localStorage, fromId, toId, at, p);
+	// anchor toggles between depart-at and arrive-by on one datetime field.
+	let anchor = $state<'depart' | 'arrive'>('depart');
+	// datetime-local value; empty = leave now (depart) / ASAP (arrive is ignored empty).
+	let departAt = $state('');
+	let modes = $state<Set<string>>(new Set());
+	let maxWalk = $state('');
+	let maxTransfers = $state('');
+	let stepFree = $state(false);
+
+	const MODE_OPTIONS = [
+		['rail', 'KRL'],
+		['subway', 'MRT'],
+		['tram', 'LRT'],
+		['bus', 'Bus']
+	] as const;
+
+	const LABELS: Record<string, string> = {
+		fastest: 'Tercepat',
+		fewest_transfers: 'Transit tersedikit',
+		least_walking: 'Jalan tersedikit',
+		alternative: 'Alternatif'
+	};
+
+	const loadCached = (key: string) => loadCachedPlan(localStorage, key);
+	const saveCached = (key: string, p: Plan) => saveCachedPlan(localStorage, key, p);
 
 	// toLocalInput renders an ISO instant for <input type="datetime-local"> —
 	// the field is device-local by definition, so it gets a local reading.
@@ -37,6 +60,87 @@
 		if (Number.isNaN(d.getTime())) return '';
 		const p = (n: number) => String(n).padStart(2, '0');
 		return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+	}
+
+	function fmtTime(iso: string) {
+		return new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+	}
+	function fmtDur(sec: number) {
+		const h = Math.floor(sec / 3600);
+		const m = Math.round((sec % 3600) / 60);
+		return h > 0 ? `${h} j ${m} mnt` : `${m} mnt`;
+	}
+
+	// buildParams is the single serializer for the request, the shareable
+	// URL, and the cache key — all three must stay identical.
+	function buildParams(): URLSearchParams {
+		const p = new URLSearchParams();
+		p.set('from', fromStation!.id);
+		p.set('to', toStation!.id);
+		const t = departAt ? new Date(departAt).toISOString() : '';
+		if (t) p.set(anchor === 'arrive' ? 'arriveBy' : 'at', t);
+		const mm = [...modes].sort().join(',');
+		if (mm) p.set('modes', mm);
+		if (maxWalk) p.set('maxWalkM', maxWalk);
+		if (maxTransfers) p.set('maxTransfers', maxTransfers);
+		if (stepFree) p.set('stepFree', 'true');
+		return p;
+	}
+
+	// Timeline takes the same params; the itinerary index picks which one.
+	function detailHref(i: number, key: string): string {
+		return `/journey?${key}&i=${i}`;
+	}
+
+	function toggleMode(m: string) {
+		const next = new Set(modes);
+		if (next.has(m)) next.delete(m);
+		else next.add(m);
+		modes = next;
+	}
+
+	async function submit() {
+		if (!fromStation || !toStation) return;
+		planning = true;
+		planError = '';
+		plan = null;
+		planFromCache = false;
+		const params = buildParams();
+		const key = params.toString();
+		const q = Object.fromEntries(params) as Record<string, string>;
+		try {
+			plan = await unwrap(
+				api.GET('/api/v1/journeys', {
+					params: {
+						query: {
+							from: q.from,
+							to: q.to,
+							at: q.at,
+							arriveBy: q.arriveBy,
+							modes: q.modes,
+							maxWalkM: q.maxWalkM ? Number(q.maxWalkM) : undefined,
+							maxTransfers: q.maxTransfers ? Number(q.maxTransfers) : undefined,
+							stepFree: q.stepFree ? true : undefined
+						}
+					}
+				})
+			);
+			saveCached(key, plan);
+			planKey = key;
+			// Keep the plan shareable: the URL is the snapshot, not app state.
+			replaceState(resolve(`/plan?${key}` as `/plan?${string}`), page.state);
+		} catch (e) {
+			const cached = loadCached(key);
+			if (cached) {
+				plan = cached;
+				planFromCache = true;
+				planKey = key;
+			} else {
+				planError = e instanceof Error ? e.message : 'Pencarian rute gagal.';
+			}
+		} finally {
+			planning = false;
+		}
 	}
 
 	let fromQuery = $state('');
@@ -52,56 +156,21 @@
 		}
 	}
 
-	// Timeline screen takes the same params; station ids come from the picked
-	// fields first, falling back to the plan's own refs (cached shared links).
-	const detail = $derived.by(() => {
-		const from = fromStation?.id ?? plan?.from.id;
-		const to = toStation?.id ?? plan?.to.id;
-		if (!plan || !from || !to) return null;
-		return { from, to, at: plan.at ? `&at=${encodeURIComponent(plan.at)}` : '' };
-	});
-
-	async function submit() {
-		if (!fromStation || !toStation) return;
-		planning = true;
-		planError = '';
-		plan = null;
-		planFromCache = false;
-		const at = departAt ? new Date(departAt).toISOString() : '';
-		try {
-			plan = await unwrap(
-				api.GET('/api/v1/journeys', {
-					params: { query: { from: fromStation.id, to: toStation.id, at: at || undefined } }
-				})
-			);
-			saveCached(fromStation.id, toStation.id, at, plan);
-			// Keep the plan shareable: the URL is the snapshot, not app state.
-			replaceState(
-				resolve(
-					`/plan?from=${fromStation.id}&to=${toStation.id}${at ? '&at=' + encodeURIComponent(at) : ''}`
-				),
-				page.state
-			);
-		} catch (e) {
-			const cached = loadCached(fromStation.id, toStation.id, at);
-			if (cached) {
-				plan = cached;
-				planFromCache = true;
-			} else {
-				planError = e instanceof Error ? e.message : 'Pencarian rute gagal.';
-			}
-		} finally {
-			planning = false;
-		}
-	}
-
-	// Shared links arrive as /plan?from=<uuid>&to=<uuid> — resolve each to its
-	// station so the fields show real names, then plan automatically.
+	// Shared links carry the full query — restore every input, then plan.
 	onMount(async () => {
-		const fromId = page.url.searchParams.get('from');
-		const toId = page.url.searchParams.get('to');
-		const atId = page.url.searchParams.get('at');
-		if (atId) departAt = toLocalInput(atId);
+		const sp = page.url.searchParams;
+		const fromId = sp.get('from');
+		const toId = sp.get('to');
+		if (sp.get('arriveBy')) {
+			anchor = 'arrive';
+			departAt = toLocalInput(sp.get('arriveBy')!);
+		} else if (sp.get('at')) {
+			departAt = toLocalInput(sp.get('at')!);
+		}
+		if (sp.get('modes')) modes = new Set(sp.get('modes')!.split(','));
+		maxWalk = sp.get('maxWalkM') ?? '';
+		maxTransfers = sp.get('maxTransfers') ?? '';
+		stepFree = sp.get('stepFree') === 'true' || sp.get('stepFree') === '1';
 		let ready = true;
 		for (const [which, id] of [
 			['from', fromId],
@@ -122,11 +191,14 @@
 			await submit();
 		} else if (fromId && toId) {
 			// Offline open of a shared link: station names can't be resolved,
-			// but the cached copy for this exact pair still renders.
-			const cached = loadCached(fromId, toId, atId ?? '');
+			// but the cached copy for this exact query still renders.
+			const params = new URLSearchParams();
+			for (const [k, v] of sp) params.set(k, v);
+			const cached = loadCached(params.toString());
 			if (cached) {
 				plan = cached;
 				planFromCache = true;
+				planKey = params.toString();
 			}
 		}
 	});
@@ -165,7 +237,71 @@
 			bind:selected={toStation}
 		/>
 	</div>
-	<TextField id="at" type="datetime-local" label="Berangkat" bind:value={departAt} />
+
+	<div class="anchor" role="group" aria-label="Patokan waktu">
+		<button
+			type="button"
+			class="anchor-btn"
+			class:anchor-btn--on={anchor === 'depart'}
+			aria-pressed={anchor === 'depart'}
+			onclick={() => (anchor = 'depart')}>Berangkat</button
+		>
+		<button
+			type="button"
+			class="anchor-btn"
+			class:anchor-btn--on={anchor === 'arrive'}
+			aria-pressed={anchor === 'arrive'}
+			onclick={() => (anchor = 'arrive')}>Tiba sebelum</button
+		>
+	</div>
+	<TextField
+		id="at"
+		type="datetime-local"
+		label={anchor === 'depart' ? 'Berangkat' : 'Tiba sebelum'}
+		bind:value={departAt}
+	/>
+
+	<fieldset class="opts">
+		<legend>Mode</legend>
+		<div class="chips">
+			{#each MODE_OPTIONS as [value, label] (value)}
+				<button
+					type="button"
+					class="chip"
+					class:chip--on={modes.has(value)}
+					aria-pressed={modes.has(value)}
+					onclick={() => toggleMode(value)}>{label}</button
+				>
+			{/each}
+		</div>
+	</fieldset>
+
+	<div class="opts-row">
+		<label>
+			Jalan maks.
+			<select bind:value={maxWalk}>
+				<option value="">Bebas</option>
+				<option value="200">200 m</option>
+				<option value="500">500 m</option>
+				<option value="1000">1 km</option>
+			</select>
+		</label>
+		<label>
+			Transit maks.
+			<select bind:value={maxTransfers}>
+				<option value="">Bebas</option>
+				<option value="0">Tanpa transit</option>
+				<option value="1">1</option>
+				<option value="2">2</option>
+				<option value="3">3</option>
+			</select>
+		</label>
+	</div>
+	<label class="check">
+		<input type="checkbox" bind:checked={stepFree} />
+		Bebas tangga (lift)
+	</label>
+
 	<Button type="submit" disabled={!fromStation || !toStation || planning}>
 		{planning ? 'Mencari…' : 'Cari rute'}
 	</Button>
@@ -185,101 +321,40 @@
 			Rute tersimpan — data per {new Date(plan.source.requestedAt).toLocaleString('id-ID')}
 		</p>
 	{/if}
-	{#if plan.itinerary === null}
+	{#if plan.itineraries.length === 0}
 		<StateBlock kind="empty">
-			Provider tidak menemukan rute antara {plan.from.name} dan {plan.to.name}.
+			Tidak ada rute terjadwal antara {plan.from.name} dan {plan.to.name}
+			{#if plan.query.stepFree || (plan.query.modes?.length ?? 0) > 0}
+				dengan filter ini
+			{/if}.
 		</StateBlock>
 	{:else}
-		{@const itin = plan.itinerary}
-		<Surface class="result">
-			{#if plan.at}
-				<p class="sg-meta plan-for">
-					Untuk berangkat {new Date(plan.at).toLocaleString('id-ID', {
-						dateStyle: 'medium',
-						timeStyle: 'short'
-					})}
-				</p>
-			{/if}
-			<header class="result-head">
-				<StatusBadge status={itin.status} />
-				{#if itin.fare?.total != null}
-					<span class="fare">Rp{itin.fare.total.toLocaleString('id-ID')}</span>
-				{/if}
-				<span class="sg-meta">
-					{(itin.totalDistanceM / 1000).toFixed(1)} km · {itin.rideLegs} naik
-					{#if itin.walkTransfers > 0}· {itin.walkTransfers} transit jalan{/if}
-				</span>
-			</header>
-
-			<ol class="legs">
-				{#each itin.legs as leg, i (i)}
-					<li class={['leg', `leg--${leg.type}`]}>
-						{#if leg.type === 'walk'}
-							<span class="leg-icon" aria-hidden="true">↔</span>
-							<span>
-								Jalan ke {leg.to.name}
-								{#if leg.distanceM}<span class="sg-meta">
-										· {Math.round(leg.distanceM)} m</span
-									>{/if}
+		<ol class="itins">
+			{#each plan.itineraries as itin, i (i)}
+				{@const key = planKey}
+				<li>
+					<a class="itin" href={resolve(detailHref(i, key) as `/journey?${string}`)}>
+						<header class="itin-head">
+							<span class="label">{LABELS[itin.label] ?? itin.label}</span>
+							<StatusBadge status={itin.status} />
+							<span class="sg-tabular itin-time">
+								{fmtTime(itin.departAt)} → {fmtTime(itin.arriveAt)}
 							</span>
-						{:else}
-							<span class="leg-icon" aria-hidden="true">●</span>
-							<span>
-								<strong>{leg.line}</strong> arah {leg.headsign || leg.to.name}
-								<span class="sg-meta">
-									· {leg.stationCount} perhentian
-									{#if leg.distanceM}· {(leg.distanceM / 1000).toFixed(1)} km{/if}
-								</span>
-								{#if leg.nextDepartures && leg.nextDepartures.length > 0}
-									<span class="departures">
-										Berangkat {leg.nextDepartures.map((d) => d.time).join(' · ')}
-									</span>
-								{/if}
-								{#if leg.stops && leg.stops.length > 2}
-									<details>
-										<summary>{leg.stops.length} stasiun dilewati</summary>
-										<ul>
-											{#each leg.stops as stop, j (j)}
-												<li>
-													{#if stop.id}
-														<a href={resolve('/stations/[id]', { id: stop.id })}>{stop.name}</a>
-													{:else}
-														{stop.name}
-													{/if}
-												</li>
-											{/each}
-										</ul>
-									</details>
-								{/if}
-							</span>
-						{/if}
-					</li>
-				{/each}
-			</ol>
-
-			{#if itin.fare && itin.fare.segments.length > 1}
-				<details class="fare-detail">
-					<summary>Rincian tarif</summary>
-					<ul>
-						{#each itin.fare.segments as seg, i (i)}
-							<li>
-								{seg.operator}: {seg.from.name} → {seg.to.name} — Rp{seg.amount.toLocaleString(
-									'id-ID'
-								)}
-							</li>
-						{/each}
-					</ul>
-				</details>
-			{/if}
-
-			{#if detail}
-				<p class="detail-link">
-					<a href={resolve(`/journey?from=${detail.from}&to=${detail.to}${detail.at}`)}
-						>Rincian perjalanan →</a
-					>
-				</p>
-			{/if}
-		</Surface>
+						</header>
+						<p class="sg-meta itin-meta">
+							{fmtDur(itin.durationSec)}
+							{#if itin.transfers > 0}· {itin.transfers} transit{/if}
+							{#if itin.walkM > 0}· jalan {itin.walkM} m{/if}
+						</p>
+					</a>
+				</li>
+			{/each}
+		</ol>
+		{#if plan.fareReference?.total != null}
+			<p class="sg-meta fare-ref">
+				Estimasi tarif koridor: Rp{plan.fareReference.total.toLocaleString('id-ID')} (referensi)
+			</p>
+		{/if}
 	{/if}
 {/if}
 
@@ -297,50 +372,121 @@
 		font-weight: var(--sg-weight-bold);
 		margin-bottom: var(--sg-space-1);
 	}
-	.plan-for {
-		margin: 0 0 var(--sg-space-2);
+
+	.anchor {
+		display: inline-flex;
+		border: 1px solid var(--sg-border);
+		border-radius: var(--sg-radius-button);
+		overflow: hidden;
 	}
-	.result {
-		max-width: 36rem;
+	.anchor-btn {
+		min-height: var(--sg-target-min);
+		padding: 0 var(--sg-space-3);
+		border: 0;
+		background: var(--sg-surface);
+		color: var(--sg-text);
+		font-weight: var(--sg-weight-bold);
+		cursor: pointer;
 	}
-	.result-head {
+	.anchor-btn--on {
+		background: var(--sg-brand);
+		color: var(--sg-brand-contrast);
+	}
+
+	.opts {
+		border: 0;
+		padding: 0;
+		margin: 0;
+	}
+	.opts legend {
+		font-size: var(--sg-text-secondary);
+		font-weight: var(--sg-weight-bold);
+		padding: 0;
+		margin-bottom: var(--sg-space-1);
+	}
+	.chips {
 		display: flex;
-		align-items: center;
+		flex-wrap: wrap;
+		gap: var(--sg-space-1);
+	}
+	.chip {
+		min-height: var(--sg-target-min);
+		padding: 0 var(--sg-space-3);
+		border: 1px solid var(--sg-border);
+		border-radius: var(--sg-radius-pill);
+		background: var(--sg-surface);
+		color: var(--sg-text);
+		font-weight: var(--sg-weight-bold);
+		cursor: pointer;
+	}
+	.chip--on {
+		background: var(--sg-brand);
+		border-color: transparent;
+		color: var(--sg-brand-contrast);
+	}
+
+	.opts-row {
+		display: flex;
 		gap: var(--sg-space-3);
 		flex-wrap: wrap;
 	}
-	.fare {
+	.opts-row label {
+		display: flex;
+		flex-direction: column;
+		gap: var(--sg-space-1);
+		font-size: var(--sg-text-secondary);
 		font-weight: var(--sg-weight-bold);
-		font-variant-numeric: tabular-nums;
 	}
-	.legs {
+	.opts-row select {
+		min-height: var(--sg-target-min);
+		padding: 0 var(--sg-space-2);
+		border: 1px solid var(--sg-border);
+		border-radius: var(--sg-radius-button);
+		background: var(--sg-surface);
+		color: var(--sg-text);
+	}
+	.check {
+		display: flex;
+		align-items: center;
+		gap: var(--sg-space-2);
+		font-size: var(--sg-text-secondary);
+		min-height: var(--sg-target-min);
+	}
+
+	.itins {
 		list-style: none;
 		padding: 0;
 		margin: var(--sg-space-3) 0 0;
 		display: flex;
 		flex-direction: column;
-		gap: var(--sg-space-3);
-	}
-	.leg {
-		display: flex;
 		gap: var(--sg-space-2);
+		max-width: 36rem;
 	}
-	.leg-icon {
-		color: var(--sg-brand);
-	}
-	.departures {
+	.itin {
 		display: block;
-		margin-top: var(--sg-space-1);
-		font-weight: var(--sg-weight-semibold);
+		padding: var(--sg-space-3);
+		border: 1px solid var(--sg-border);
+		border-radius: var(--sg-radius-card);
+		background: var(--sg-surface);
+		text-decoration: none;
+		color: var(--sg-text);
+	}
+	.itin-head {
+		display: flex;
+		align-items: center;
+		gap: var(--sg-space-2);
+		flex-wrap: wrap;
+	}
+	.label {
+		font-weight: var(--sg-weight-bold);
+	}
+	.itin-time {
 		font-variant-numeric: tabular-nums;
 	}
-	summary {
-		cursor: pointer;
-		font-size: var(--sg-text-secondary);
-		color: var(--sg-text-muted);
-	}
-	details ul {
+	.itin-meta {
 		margin: var(--sg-space-1) 0 0;
-		padding-left: var(--sg-space-4);
+	}
+	.fare-ref {
+		margin-block-start: var(--sg-space-3);
 	}
 </style>

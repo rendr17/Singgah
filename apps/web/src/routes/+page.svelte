@@ -7,6 +7,7 @@
 	import UiPreview from '$lib/dev/UiPreview.svelte';
 	import MapModeSwitcher from '$lib/components/map/MapModeSwitcher.svelte';
 	import MapSearch from '$lib/components/map/MapSearch.svelte';
+	import ModeIcon from '$lib/components/map/ModeIcon.svelte';
 	import StationCombobox from '$lib/components/station/StationCombobox.svelte';
 	import DepartureBoard from '$lib/components/station/DepartureBoard.svelte';
 	import JourneyTimeline from '$lib/components/journey/JourneyTimeline.svelte';
@@ -172,10 +173,10 @@
 					params: { query: { from: fromStation.id, to: toStation.id } }
 				})
 			);
-			saveCachedPlan(localStorage, fromStation.id, toStation.id, '', plan);
+			saveCachedPlan(localStorage, `from=${fromStation.id}&to=${toStation.id}`, plan);
 			planRoute = await routeGeoJSON(plan);
 		} catch (e) {
-			const cached = loadCachedPlan(localStorage, fromStation.id, toStation.id, '');
+			const cached = loadCachedPlan(localStorage, `from=${fromStation.id}&to=${toStation.id}`);
 			if (cached) {
 				plan = cached;
 				planFromCache = true;
@@ -198,7 +199,7 @@
 	}
 
 	async function routeGeoJSON(p: Plan): Promise<FeatureCollection | undefined> {
-		const itin = p.itinerary;
+		const itin = p.itineraries[0];
 		if (!itin) return undefined;
 		// Effective legs: a chosen corridor alternative supplies its own line,
 		// stop slice and shape — endpoints and walk legs stay the plan's.
@@ -721,19 +722,21 @@
 						Rute tersimpan — data per {new Date(plan.source.requestedAt).toLocaleString('id-ID')}
 					</StateBlock>
 				{/if}
-				{#if plan.itinerary === null}
+				{#if plan.itineraries.length === 0}
 					<StateBlock kind="empty">
-						Provider tidak menemukan rute antara {plan.from.name} dan {plan.to.name}.
+						Tidak ada rute terjadwal antara {plan.from.name} dan {plan.to.name}.
 					</StateBlock>
 				{:else}
-					{@const itin = plan.itinerary}
+					{@const itin = plan.itineraries[0]}
 					<div class="plan-summary">
 						<StatusBadge status={itin.status} />
 						<span class="sg-meta">
-							{#if itin.fare?.total != null}Rp{itin.fare.total.toLocaleString('id-ID')} ·
+							{#if plan.fareReference?.total != null}Rp{plan.fareReference.total.toLocaleString(
+									'id-ID'
+								)} ·
 							{/if}
-							{(itin.totalDistanceM / 1000).toFixed(1)} km · {itin.rideLegs} naik
-							{#if itin.walkTransfers > 0}· {itin.walkTransfers} transit jalan{/if}
+							{Math.floor(itin.durationSec / 60)} mnt · {itin.rideLegs} naik
+							{#if itin.transfers > 0}· {itin.transfers} transit{/if}
 						</span>
 					</div>
 					<details class="plan-detail">
@@ -848,10 +851,10 @@
 			<StateBlock kind="loading">Memuat peta…</StateBlock>
 		{/if}
 		<ul class="legend" aria-label="Legenda operator">
-			<li><i style:background-color="var(--sg-line-krl)"></i>KRL</li>
-			<li><i style:background-color="var(--sg-line-mrt)"></i>MRT</li>
-			<li><i style:background-color="var(--sg-line-tj)"></i>TransJakarta</li>
-			<li><i style:background-color="var(--sg-line-lrt)"></i>LRT</li>
+			<li><i style:color="var(--sg-line-krl)"><ModeIcon mode="commuter" /></i>KRL</li>
+			<li><i style:color="var(--sg-line-mrt)"><ModeIcon mode="metro" /></i>MRT</li>
+			<li><i style:color="var(--sg-line-tj)"><ModeIcon mode="bus" /></i>TransJakarta</li>
+			<li><i style:color="var(--sg-line-lrt)"><ModeIcon mode="light-rail" /></i>LRT</li>
 		</ul>
 
 		{#if inspectorState !== 'idle' || inspector}
@@ -1385,9 +1388,7 @@
 		}
 
 		.legend i {
-			inline-size: 0.625rem;
-			block-size: 0.625rem;
-			border-radius: 50%;
+			display: inline-flex;
 		}
 
 		.inspector {
