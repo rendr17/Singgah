@@ -14,6 +14,7 @@ import (
 	generated "singgah/services/api/db/generated"
 	"singgah/services/api/internal/auth"
 	"singgah/services/api/internal/catalog"
+	"singgah/services/api/internal/collections"
 	"singgah/services/api/internal/config"
 	"singgah/services/api/internal/db"
 	httpapi "singgah/services/api/internal/http"
@@ -67,6 +68,7 @@ func main() {
 		authSvc := auth.NewService(queries)
 		deps.Auth = auth.NewHandler(authSvc)
 		deps.Passport = passport.NewHandler(queries, authSvc)
+		deps.Collections = collections.NewHandler(queries)
 		if cfg.ScheduleRefreshInterval > 0 {
 			refreshDone = ingest.StartRefresher(ctx, pool, ingest.RefreshConfig{
 				FeedURL:    cfg.GTFSFeedURL,

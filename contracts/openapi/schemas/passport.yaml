@@ -185,7 +185,7 @@ PassportProgress:
   allOf:
     - $ref: '#/ProgressCount'
     - type: object
-      required: [byMode, byRoute]
+      required: [byMode, byRoute, byCollection]
       additionalProperties: false
       properties:
         byMode:
@@ -221,3 +221,21 @@ PassportProgress:
                   color:
                     type: string
                     description: Corridor hex color (no leading #) when known.
+        byCollection:
+          type: array
+          description: >-
+            Progress inside each published curated collection (docs/42).
+          items:
+            allOf:
+              - $ref: '#/ProgressCount'
+              - type: object
+                required: [collectionId, slug, title]
+                additionalProperties: false
+                properties:
+                  collectionId:
+                    type: string
+                    format: uuid
+                  slug:
+                    type: string
+                  title:
+                    type: string

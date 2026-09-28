@@ -1,0 +1,35 @@
+CollectionSummary:
+  type: object
+  required: [id, slug, title, kind, itemCount]
+  additionalProperties: false
+  properties:
+    id:
+      type: string
+      format: uuid
+    slug:
+      type: string
+    title:
+      type: string
+    description:
+      type: string
+    kind:
+      type: string
+      enum: [curated, algorithmic]
+      description: >-
+        Editorial provenance (docs/13): 'curated' = editor-picked set;
+        'algorithmic' = computed set, labeled so it never poses as curation.
+    itemCount:
+      type: integer
+      format: int64
+      minimum: 0
+      description: Number of catalog stops in the set.
+
+CollectionList:
+  type: object
+  required: [collections]
+  additionalProperties: false
+  properties:
+    collections:
+      type: array
+      items:
+        $ref: '#/CollectionSummary'

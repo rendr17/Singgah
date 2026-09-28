@@ -219,3 +219,23 @@ CREATE INDEX journal_entries_user_ix ON journal_entries (user_id);
 
 -- 000010: user-owned rows cascade on account deletion.
 -- (FK actions aren't visible to sqlc; documented here for reviewers.)
+
+-- 000011: curated passport collections.
+CREATE TABLE collections (
+	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+	slug text NOT NULL UNIQUE,
+	title text NOT NULL,
+	description text,
+	kind text NOT NULL DEFAULT 'curated' CHECK (kind IN ('curated', 'algorithmic')),
+	status text NOT NULL DEFAULT 'published' CHECK (status IN ('draft', 'published')),
+	created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE collection_items (
+	collection_id uuid NOT NULL REFERENCES collections (id) ON DELETE CASCADE,
+	sequence smallint NOT NULL,
+	stop_id uuid NOT NULL REFERENCES stops (id),
+	PRIMARY KEY (collection_id, sequence),
+	UNIQUE (collection_id, stop_id)
+);
+CREATE INDEX collection_items_stop_idx ON collection_items (stop_id);

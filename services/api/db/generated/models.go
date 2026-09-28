@@ -28,6 +28,22 @@ type AuthSession struct {
 	RevokedAt pgtype.Timestamptz `json:"revoked_at"`
 }
 
+type Collection struct {
+	ID          pgtype.UUID        `json:"id"`
+	Slug        string             `json:"slug"`
+	Title       string             `json:"title"`
+	Description pgtype.Text        `json:"description"`
+	Kind        string             `json:"kind"`
+	Status      string             `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type CollectionItem struct {
+	CollectionID pgtype.UUID `json:"collection_id"`
+	Sequence     int16       `json:"sequence"`
+	StopID       pgtype.UUID `json:"stop_id"`
+}
+
 type Frequency struct {
 	TripID         pgtype.UUID `json:"trip_id"`
 	StartSeconds   int32       `json:"start_seconds"`

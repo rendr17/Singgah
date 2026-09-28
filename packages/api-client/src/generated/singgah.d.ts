@@ -355,6 +355,26 @@ export interface paths {
         patch: operations["updateJournalEntry"];
         trace?: never;
     };
+    "/api/v1/collections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Published collections
+         * @description Curated editorial stop sets that passport progress can be measured against (docs/42). `kind` keeps the docs/13 distinction explicit — 'curated' sets are editor-picked, 'algorithmic' ones must never masquerade as curation. Draft collections never appear here.
+         */
+        get: operations["listCollections"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -810,6 +830,13 @@ export interface components {
                 /** @description Corridor hex color (no leading */
                 color?: string;
             })[];
+            /** @description Progress inside each published curated collection (docs/42). */
+            byCollection: (components["schemas"]["ProgressCount"] & {
+                /** Format: uuid */
+                collectionId: string;
+                slug: string;
+                title: string;
+            })[];
         };
         JournalEntry: {
             /** Format: uuid */
@@ -843,6 +870,26 @@ export interface components {
              * @description PATCH only — optimistic version check against `updatedAt`.
              */
             baseUpdatedAt?: string;
+        };
+        CollectionSummary: {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            title: string;
+            description?: string;
+            /**
+             * @description Editorial provenance (docs/13): 'curated' = editor-picked set; 'algorithmic' = computed set, labeled so it never poses as curation.
+             * @enum {string}
+             */
+            kind: "curated" | "algorithmic";
+            /**
+             * Format: int64
+             * @description Number of catalog stops in the set.
+             */
+            itemCount: number;
+        };
+        CollectionList: {
+            collections: components["schemas"]["CollectionSummary"][];
         };
     };
     responses: never;
@@ -1545,6 +1592,35 @@ export interface operations {
                     "application/json": {
                         entry: components["schemas"]["JournalEntry"];
                     };
+                };
+            };
+            /** @description Error envelope — shared by all endpoints */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    listCollections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Published collections */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionList"];
                 };
             };
             /** @description Error envelope — shared by all endpoints */

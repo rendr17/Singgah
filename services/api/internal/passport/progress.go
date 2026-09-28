@@ -26,6 +26,13 @@ type progressRoute struct {
 	progressCount
 }
 
+type progressCollection struct {
+	CollectionID string `json:"collectionId"`
+	Slug         string `json:"slug"`
+	Title        string `json:"title"`
+	progressCount
+}
+
 func (h *Handler) progress(w http.ResponseWriter, r *http.Request) {
 	userID, _ := auth.UserIDFrom(r.Context())
 	total, err := h.store.PassportProgressTotal(r.Context(), userID)
@@ -39,6 +46,11 @@ func (h *Handler) progress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	routes, err := h.store.PassportProgressByRoute(r.Context(), userID)
+	if err != nil {
+		response.Error(w, r, http.StatusInternalServerError, "INTERNAL", "Gagal menghitung progres")
+		return
+	}
+	colls, err := h.store.PassportProgressByCollection(r.Context(), userID)
 	if err != nil {
 		response.Error(w, r, http.StatusInternalServerError, "INTERNAL", "Gagal menghitung progres")
 		return
@@ -73,13 +85,24 @@ func (h *Handler) progress(w http.ResponseWriter, r *http.Request) {
 			},
 		})
 	}
+	byCollection := make([]progressCollection, 0, len(colls))
+	for _, c := range colls {
+		byCollection = append(byCollection, progressCollection{
+			CollectionID:  uuidStr(c.ID),
+			Slug:          c.Slug,
+			Title:         c.Title,
+			progressCount: progressCount{Visited: c.VisitedStops, Total: c.TotalStops},
+		})
+	}
 	response.JSON(w, http.StatusOK, struct {
 		progressCount
-		ByMode  []progressMode  `json:"byMode"`
-		ByRoute []progressRoute `json:"byRoute"`
+		ByMode       []progressMode       `json:"byMode"`
+		ByRoute      []progressRoute      `json:"byRoute"`
+		ByCollection []progressCollection `json:"byCollection"`
 	}{
 		progressCount: progressCount{Visited: total.VisitedStops, Total: total.TotalStops},
 		ByMode:        byMode,
 		ByRoute:       byRoute,
+		ByCollection:  byCollection,
 	})
 }

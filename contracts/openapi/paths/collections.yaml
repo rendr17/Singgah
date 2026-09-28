@@ -1,0 +1,23 @@
+get:
+  operationId: listCollections
+  summary: Published collections
+  description: >-
+    Curated editorial stop sets that passport progress can be measured
+    against (docs/42). `kind` keeps the docs/13 distinction explicit —
+    'curated' sets are editor-picked, 'algorithmic' ones must never
+    masquerade as curation. Draft collections never appear here.
+  tags:
+    - collections
+  responses:
+    '200':
+      description: Published collections
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/collections.yaml#/CollectionList'
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

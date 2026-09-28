@@ -29,6 +29,7 @@ type fakeStore struct {
 	totalStops int64
 	byMode     []generated.PassportProgressByModeRow
 	byRoute    []generated.PassportProgressByRouteRow
+	byColl     []generated.PassportProgressByCollectionRow
 	entries    []generated.JournalEntry
 	jseq       int
 }
@@ -101,6 +102,10 @@ func (f *fakeStore) PassportProgressByMode(ctx context.Context, userID pgtype.UU
 
 func (f *fakeStore) PassportProgressByRoute(ctx context.Context, userID pgtype.UUID) ([]generated.PassportProgressByRouteRow, error) {
 	return f.byRoute, nil
+}
+
+func (f *fakeStore) PassportProgressByCollection(ctx context.Context, userID pgtype.UUID) ([]generated.PassportProgressByCollectionRow, error) {
+	return f.byColl, nil
 }
 
 // --- journal ---
@@ -360,6 +365,9 @@ func TestProgress(t *testing.T) {
 		byRoute: []generated.PassportProgressByRouteRow{
 			{RouteKey: "TJ:4B", Mode: "bus", Color: pgtype.Text{String: color, Valid: true}, TotalStops: 12, VisitedStops: 1},
 		},
+		byColl: []generated.PassportProgressByCollectionRow{
+			{Slug: "mrt-jakarta", Title: "MRT Jakarta", TotalStops: 13, VisitedStops: 0},
+		},
 	}
 	h := newHandler(store)
 	post(t, h, fmt.Sprintf(`{"stopId":%q,"clientMutationId":%q,"observedAt":%q}`,
@@ -384,6 +392,12 @@ func TestProgress(t *testing.T) {
 			RouteKey string `json:"routeKey"`
 			Color    string `json:"color"`
 		} `json:"byRoute"`
+		ByCollection []struct {
+			Slug         string `json:"slug"`
+			Title        string `json:"title"`
+			VisitedStops int64  `json:"visitedStops"`
+			TotalStops   int64  `json:"totalStops"`
+		} `json:"byCollection"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
@@ -396,5 +410,9 @@ func TestProgress(t *testing.T) {
 	}
 	if len(resp.ByRoute) != 1 || resp.ByRoute[0].RouteKey != "TJ:4B" || resp.ByRoute[0].Color != color {
 		t.Fatalf("byRoute: %+v", resp.ByRoute)
+	}
+	if len(resp.ByCollection) != 1 || resp.ByCollection[0].Slug != "mrt-jakarta" ||
+		resp.ByCollection[0].TotalStops != 13 {
+		t.Fatalf("byCollection: %+v", resp.ByCollection)
 	}
 }

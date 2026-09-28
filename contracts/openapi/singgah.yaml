@@ -43,6 +43,8 @@ paths:
     $ref: './paths/journal.yaml'
   /api/v1/journal/{id}:
     $ref: './paths/journal-detail.yaml'
+  /api/v1/collections:
+    $ref: './paths/collections.yaml'
 components:
   securitySchemes:
     bearerAuth:
@@ -63,3 +65,5 @@ tags:
     description: Anonymous session identity (ADR-010)
   - name: passport
     description: User-owned check-ins, progress, and journal
+  - name: collections
+    description: Curated editorial stop sets (docs/42 progress targets)

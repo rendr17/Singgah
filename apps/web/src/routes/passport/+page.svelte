@@ -76,6 +76,36 @@
 		</ul>
 	</section>
 
+	{#if progress.byCollection.length > 0}
+		<section>
+			<SectionHeading>Koleksi</SectionHeading>
+			<ul class="sg-list modes">
+				{#each progress.byCollection as c (c.collectionId)}
+					<li>
+						<div class="bar-row">
+							<span class="bar-label">{c.title}</span>
+							<span class="bar-count">{c.visitedStops}/{c.totalStops}</span>
+						</div>
+						<div
+							class="bar"
+							role="progressbar"
+							aria-valuenow={c.visitedStops}
+							aria-valuemax={c.totalStops}
+							aria-label="Progres {c.title}"
+						>
+							<div
+								class="bar-fill"
+								style:width={(c.totalStops
+									? (c.visitedStops / c.totalStops) * 100
+									: 0) + '%'}
+							></div>
+						</div>
+					</li>
+				{/each}
+			</ul>
+		</section>
+	{/if}
+
 	<section>
 		<SectionHeading>Koridor yang sudah dilewati</SectionHeading>
 		{#if visitedRoutes.length === 0}

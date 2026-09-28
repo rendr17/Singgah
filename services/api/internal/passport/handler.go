@@ -38,6 +38,7 @@ type Store interface {
 	PassportProgressTotal(ctx context.Context, userID pgtype.UUID) (generated.PassportProgressTotalRow, error)
 	PassportProgressByMode(ctx context.Context, userID pgtype.UUID) ([]generated.PassportProgressByModeRow, error)
 	PassportProgressByRoute(ctx context.Context, userID pgtype.UUID) ([]generated.PassportProgressByRouteRow, error)
+	PassportProgressByCollection(ctx context.Context, userID pgtype.UUID) ([]generated.PassportProgressByCollectionRow, error)
 	journalStore
 }
 
