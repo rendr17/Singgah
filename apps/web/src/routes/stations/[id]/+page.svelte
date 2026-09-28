@@ -5,6 +5,7 @@
 	import BackNav from '$lib/components/app-shell/BackNav.svelte';
 	import CheckinButton from '$lib/components/station/CheckinButton.svelte';
 	import DepartureBoard from '$lib/components/station/DepartureBoard.svelte';
+	import JournalNoteForm from '$lib/components/station/JournalNoteForm.svelte';
 	import { basemapStyleUrl } from '$lib/basemap';
 	import { facilityLabel } from '$lib/facilities';
 	import { SectionHeading, StateBlock } from '@singgah/ui';
@@ -38,6 +39,13 @@
 
 	{#if browser}
 		<CheckinButton stopId={station.id} />
+	{/if}
+
+	{#if browser}
+		<section class="journal-section">
+			<SectionHeading>Catatan</SectionHeading>
+			<JournalNoteForm stopId={station.id} />
+		</section>
 	{/if}
 
 	{#if browser}
