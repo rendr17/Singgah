@@ -52,6 +52,12 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 			case "NO_TOPOLOGY":
 				return ErrNoTopology
 			}
+			// Timetable upstreams return 404 "Unknown Station Code …" for
+			// operators with no published timetable (TJ) — the same honest
+			// absence as a station the provider doesn't know.
+			if resp.StatusCode == http.StatusNotFound {
+				return ErrStationUnknown
+			}
 			return fmt.Errorf("commute: %s: %s", path, e.Message)
 		}
 		return fmt.Errorf("commute: %s: HTTP %d", path, resp.StatusCode)

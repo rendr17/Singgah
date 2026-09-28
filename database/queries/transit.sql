@@ -285,6 +285,32 @@ WHERE
 	)
 ORDER BY r.short_name;
 
+-- name: ListRoutesServingStops :many
+-- Batch variant of ListRoutesServingStop — one round trip fills the
+-- serving-line badges for every hit in a station text search.
+SELECT
+	s.id AS stop_id,
+	r.id,
+	r.short_name,
+	r.long_name,
+	r.mode,
+	r.color,
+	a.code AS agency_code,
+	a.name AS agency_name
+FROM stops s
+JOIN routes r ON r.provider_id = s.provider_id
+JOIN agencies a ON a.id = r.agency_id
+WHERE
+	s.id = ANY($1::uuid[])
+	AND s.removed_at IS NULL
+	AND r.removed_at IS NULL
+	AND EXISTS (
+		SELECT 1
+		FROM jsonb_array_elements_text(s.metadata->'lines') AS line_key
+		WHERE line_key = r.provider_entity_id
+	)
+ORDER BY s.id, r.short_name;
+
 -- name: ListTransfersFromStop :many
 SELECT
 	t.id,
@@ -377,6 +403,7 @@ SELECT
 	r.provider_entity_id,
 	r.short_name,
 	r.long_name,
+	r.color,
 	ra.seq AS seq_from,
 	rb.seq AS seq_to
 FROM route_stops ra
@@ -389,6 +416,15 @@ WHERE
 	AND r.provider_id = (SELECT provider_id FROM routes WHERE id = $3)
 	AND r.removed_at IS NULL
 ORDER BY r.provider_entity_id, ABS(ra.seq - rb.seq);
+
+-- name: ListRouteColors :many
+-- Corridor colors for the routes a journey plan touches — one batched lookup
+-- so each leg/alternative can wear its corridor's catalog color.
+SELECT
+	id,
+	color
+FROM routes
+WHERE id = ANY($1::uuid[]) AND removed_at IS NULL;
 
 -- name: ListRouteStopSlice :many
 -- Stops between two seq positions on a route, seq-ascending — the caller

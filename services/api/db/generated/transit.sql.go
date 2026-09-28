@@ -253,6 +253,7 @@ SELECT
 	r.provider_entity_id,
 	r.short_name,
 	r.long_name,
+	r.color,
 	ra.seq AS seq_from,
 	rb.seq AS seq_to
 FROM route_stops ra
@@ -278,6 +279,7 @@ type ListRouteAlternativesRow struct {
 	ProviderEntityID string      `json:"provider_entity_id"`
 	ShortName        pgtype.Text `json:"short_name"`
 	LongName         pgtype.Text `json:"long_name"`
+	Color            pgtype.Text `json:"color"`
 	SeqFrom          int32       `json:"seq_from"`
 	SeqTo            int32       `json:"seq_to"`
 }
@@ -303,9 +305,45 @@ func (q *Queries) ListRouteAlternatives(ctx context.Context, arg ListRouteAltern
 			&i.ProviderEntityID,
 			&i.ShortName,
 			&i.LongName,
+			&i.Color,
 			&i.SeqFrom,
 			&i.SeqTo,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRouteColors = `-- name: ListRouteColors :many
+SELECT
+	id,
+	color
+FROM routes
+WHERE id = ANY($1::uuid[]) AND removed_at IS NULL
+`
+
+type ListRouteColorsRow struct {
+	ID    pgtype.UUID `json:"id"`
+	Color pgtype.Text `json:"color"`
+}
+
+// Corridor colors for the routes a journey plan touches — one batched lookup
+// so each leg/alternative can wear its corridor's catalog color.
+func (q *Queries) ListRouteColors(ctx context.Context, dollar_1 []pgtype.UUID) ([]ListRouteColorsRow, error) {
+	rows, err := q.db.Query(ctx, listRouteColors, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRouteColorsRow
+	for rows.Next() {
+		var i ListRouteColorsRow
+		if err := rows.Scan(&i.ID, &i.Color); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -591,6 +629,73 @@ func (q *Queries) ListRoutesServingStop(ctx context.Context, id pgtype.UUID) ([]
 	for rows.Next() {
 		var i ListRoutesServingStopRow
 		if err := rows.Scan(
+			&i.ID,
+			&i.ShortName,
+			&i.LongName,
+			&i.Mode,
+			&i.Color,
+			&i.AgencyCode,
+			&i.AgencyName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRoutesServingStops = `-- name: ListRoutesServingStops :many
+SELECT
+	s.id AS stop_id,
+	r.id,
+	r.short_name,
+	r.long_name,
+	r.mode,
+	r.color,
+	a.code AS agency_code,
+	a.name AS agency_name
+FROM stops s
+JOIN routes r ON r.provider_id = s.provider_id
+JOIN agencies a ON a.id = r.agency_id
+WHERE
+	s.id = ANY($1::uuid[])
+	AND s.removed_at IS NULL
+	AND r.removed_at IS NULL
+	AND EXISTS (
+		SELECT 1
+		FROM jsonb_array_elements_text(s.metadata->'lines') AS line_key
+		WHERE line_key = r.provider_entity_id
+	)
+ORDER BY s.id, r.short_name
+`
+
+type ListRoutesServingStopsRow struct {
+	StopID     pgtype.UUID `json:"stop_id"`
+	ID         pgtype.UUID `json:"id"`
+	ShortName  pgtype.Text `json:"short_name"`
+	LongName   pgtype.Text `json:"long_name"`
+	Mode       string      `json:"mode"`
+	Color      pgtype.Text `json:"color"`
+	AgencyCode pgtype.Text `json:"agency_code"`
+	AgencyName string      `json:"agency_name"`
+}
+
+// Batch variant of ListRoutesServingStop — one round trip fills the
+// serving-line badges for every hit in a station text search.
+func (q *Queries) ListRoutesServingStops(ctx context.Context, dollar_1 []pgtype.UUID) ([]ListRoutesServingStopsRow, error) {
+	rows, err := q.db.Query(ctx, listRoutesServingStops, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRoutesServingStopsRow
+	for rows.Next() {
+		var i ListRoutesServingStopsRow
+		if err := rows.Scan(
+			&i.StopID,
 			&i.ID,
 			&i.ShortName,
 			&i.LongName,

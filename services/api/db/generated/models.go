@@ -19,6 +19,14 @@ type Agency struct {
 	SourceUpdatedAt  pgtype.Timestamptz `json:"source_updated_at"`
 }
 
+type Frequency struct {
+	TripID         pgtype.UUID `json:"trip_id"`
+	StartSeconds   int32       `json:"start_seconds"`
+	EndSeconds     int32       `json:"end_seconds"`
+	HeadwaySeconds int32       `json:"headway_seconds"`
+	ExactTimes     bool        `json:"exact_times"`
+}
+
 type Provider struct {
 	ID                 pgtype.UUID        `json:"id"`
 	Code               string             `json:"code"`
@@ -71,6 +79,16 @@ type RouteStop struct {
 	StationNumber pgtype.Text `json:"station_number"`
 }
 
+type Service struct {
+	ID               pgtype.UUID        `json:"id"`
+	ProviderID       pgtype.UUID        `json:"provider_id"`
+	ProviderEntityID string             `json:"provider_entity_id"`
+	DayMask          int16              `json:"day_mask"`
+	StartDate        pgtype.Date        `json:"start_date"`
+	EndDate          pgtype.Date        `json:"end_date"`
+	FetchedAt        pgtype.Timestamptz `json:"fetched_at"`
+}
+
 type Stop struct {
 	ID               pgtype.UUID        `json:"id"`
 	ProviderID       pgtype.UUID        `json:"provider_id"`
@@ -86,6 +104,15 @@ type Stop struct {
 	RemovedAt        pgtype.Timestamptz `json:"removed_at"`
 }
 
+type StopTime struct {
+	TripID           pgtype.UUID `json:"trip_id"`
+	StopID           pgtype.UUID `json:"stop_id"`
+	Seq              int32       `json:"seq"`
+	ArrivalSeconds   int32       `json:"arrival_seconds"`
+	DepartureSeconds int32       `json:"departure_seconds"`
+	Derived          bool        `json:"derived"`
+}
+
 type Transfer struct {
 	ID                 pgtype.UUID        `json:"id"`
 	FromStopID         pgtype.UUID        `json:"from_stop_id"`
@@ -96,4 +123,15 @@ type Transfer struct {
 	Accessibility      []byte             `json:"accessibility"`
 	FareContext        []byte             `json:"fare_context"`
 	FetchedAt          pgtype.Timestamptz `json:"fetched_at"`
+}
+
+type Trip struct {
+	ID               pgtype.UUID        `json:"id"`
+	RouteID          pgtype.UUID        `json:"route_id"`
+	ServiceID        pgtype.UUID        `json:"service_id"`
+	ProviderID       pgtype.UUID        `json:"provider_id"`
+	ProviderEntityID string             `json:"provider_entity_id"`
+	Headsign         pgtype.Text        `json:"headsign"`
+	DirectionID      pgtype.Int2        `json:"direction_id"`
+	FetchedAt        pgtype.Timestamptz `json:"fetched_at"`
 }

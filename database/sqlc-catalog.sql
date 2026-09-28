@@ -132,3 +132,45 @@ CREATE TABLE route_shapes (
 	fetched_at timestamptz,
 	UNIQUE (source, source_shape_id)
 );
+
+CREATE TABLE services (
+	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+	provider_id uuid NOT NULL REFERENCES providers (id),
+	provider_entity_id text NOT NULL,
+	day_mask smallint NOT NULL,
+	start_date date NOT NULL,
+	end_date date NOT NULL,
+	fetched_at timestamptz,
+	UNIQUE (provider_id, provider_entity_id)
+);
+
+CREATE TABLE trips (
+	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+	route_id uuid NOT NULL REFERENCES routes (id),
+	service_id uuid NOT NULL REFERENCES services (id),
+	provider_id uuid NOT NULL REFERENCES providers (id),
+	provider_entity_id text NOT NULL,
+	headsign text,
+	direction_id smallint,
+	fetched_at timestamptz,
+	UNIQUE (provider_id, provider_entity_id)
+);
+
+CREATE TABLE stop_times (
+	trip_id uuid NOT NULL REFERENCES trips (id) ON DELETE CASCADE,
+	stop_id uuid NOT NULL REFERENCES stops (id),
+	seq integer NOT NULL,
+	arrival_seconds integer NOT NULL,
+	departure_seconds integer NOT NULL,
+	derived boolean NOT NULL DEFAULT false,
+	PRIMARY KEY (trip_id, seq)
+);
+
+CREATE TABLE frequencies (
+	trip_id uuid NOT NULL REFERENCES trips (id) ON DELETE CASCADE,
+	start_seconds integer NOT NULL,
+	end_seconds integer NOT NULL,
+	headway_seconds integer NOT NULL CHECK (headway_seconds > 0),
+	exact_times boolean NOT NULL DEFAULT false,
+	PRIMARY KEY (trip_id, start_seconds)
+);

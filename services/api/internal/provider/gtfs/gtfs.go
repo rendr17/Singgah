@@ -6,13 +6,44 @@ package gtfs
 
 import (
 	"archive/zip"
+	"bytes"
 	"encoding/csv"
 	"fmt"
 	"io"
+	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
+
+// OpenFeed reads a GTFS zip from an http(s) URL or a local file path —
+// shared by the shape and schedule ingest commands.
+func OpenFeed(spec string) (*zip.Reader, error) {
+	if strings.HasPrefix(spec, "http://") || strings.HasPrefix(spec, "https://") {
+		// Bound the download: the in-process refresher shares this path and a
+		// hung feed must not block the loop past its 30-minute run budget.
+		resp, err := (&http.Client{Timeout: 2 * time.Minute}).Get(spec) //nolint:gosec — operator-provided URL is the point
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("feed download: HTTP %d", resp.StatusCode)
+		}
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		return zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	}
+	body, err := os.ReadFile(spec)
+	if err != nil {
+		return nil, err
+	}
+	return zip.NewReader(bytes.NewReader(body), int64(len(body)))
+}
 
 // Point is one vertex of a shape, WGS84.
 type Point struct {
