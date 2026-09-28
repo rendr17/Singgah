@@ -133,6 +133,54 @@ ProgressCount:
       format: int64
       minimum: 0
 
+JournalRequest:
+  type: object
+  required: [body]
+  additionalProperties: false
+  properties:
+    stopId:
+      type: string
+      format: uuid
+    visitEventId:
+      type: string
+      format: uuid
+      description: Link to one of the caller's own visit events.
+    body:
+      type: string
+      minLength: 1
+      maxLength: 2000
+    baseUpdatedAt:
+      type: string
+      format: date-time
+      description: PATCH only — optimistic version check against `updatedAt`.
+
+JournalEntry:
+  type: object
+  required: [id, body, visibility, createdAt, updatedAt]
+  additionalProperties: false
+  properties:
+    id:
+      type: string
+      format: uuid
+    stopId:
+      type: string
+      format: uuid
+    visitEventId:
+      type: string
+      format: uuid
+    body:
+      type: string
+    visibility:
+      type: string
+      enum: [private]
+      description: Private by default — the only value the API accepts today.
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+
 PassportProgress:
   allOf:
     - $ref: '#/ProgressCount'

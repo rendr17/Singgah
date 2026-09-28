@@ -310,6 +310,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/journal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List own journal entries
+         * @description Newest first, capped by `limit`.
+         */
+        get: operations["listJournalEntries"];
+        put?: never;
+        /**
+         * Create journal entry
+         * @description Private note linked optionally to a stop and/or one of the user's own visit events (docs/16). `visitEventId` referencing another user's visit answers 404 — foreign ids are never revealed.
+         */
+        post: operations["createJournalEntry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/journal/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete journal entry */
+        delete: operations["deleteJournalEntry"];
+        options?: never;
+        head?: never;
+        /**
+         * Update journal entry
+         * @description Last-write-wins by default. Send `baseUpdatedAt` (the `updatedAt` the client read) for an optimistic version check — a mismatch answers 409 instead of overwriting (docs/24).
+         */
+        patch: operations["updateJournalEntry"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -765,6 +810,39 @@ export interface components {
                 /** @description Corridor hex color (no leading */
                 color?: string;
             })[];
+        };
+        JournalEntry: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            stopId?: string;
+            /** Format: uuid */
+            visitEventId?: string;
+            body: string;
+            /**
+             * @description Private by default — the only value the API accepts today.
+             * @enum {string}
+             */
+            visibility: "private";
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        JournalRequest: {
+            /** Format: uuid */
+            stopId?: string;
+            /**
+             * Format: uuid
+             * @description Link to one of the caller's own visit events.
+             */
+            visitEventId?: string;
+            body: string;
+            /**
+             * Format: date-time
+             * @description PATCH only — optimistic version check against `updatedAt`.
+             */
+            baseUpdatedAt?: string;
         };
     };
     responses: never;
@@ -1333,6 +1411,140 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PassportProgress"];
+                };
+            };
+            /** @description Error envelope — shared by all endpoints */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    listJournalEntries: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Own entries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        entries: components["schemas"]["JournalEntry"][];
+                    };
+                };
+            };
+            /** @description Error envelope — shared by all endpoints */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    createJournalEntry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JournalRequest"];
+            };
+        };
+        responses: {
+            /** @description Entry created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        entry: components["schemas"]["JournalEntry"];
+                    };
+                };
+            };
+            /** @description Error envelope — shared by all endpoints */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    deleteJournalEntry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Entry deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error envelope — shared by all endpoints */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    updateJournalEntry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JournalRequest"];
+            };
+        };
+        responses: {
+            /** @description Entry updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        entry: components["schemas"]["JournalEntry"];
+                    };
                 };
             };
             /** @description Error envelope — shared by all endpoints */

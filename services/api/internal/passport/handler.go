@@ -38,6 +38,7 @@ type Store interface {
 	PassportProgressTotal(ctx context.Context, userID pgtype.UUID) (generated.PassportProgressTotalRow, error)
 	PassportProgressByMode(ctx context.Context, userID pgtype.UUID) ([]generated.PassportProgressByModeRow, error)
 	PassportProgressByRoute(ctx context.Context, userID pgtype.UUID) ([]generated.PassportProgressByRouteRow, error)
+	journalStore
 }
 
 type Handler struct {
@@ -54,6 +55,11 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		Post("/visits", h.createVisit)
 	r.With(h.auth.RequireUser).Get("/visits", h.listVisits)
 	r.With(h.auth.RequireUser).Get("/passport/progress", h.progress)
+	r.With(middleware.RateLimit(20, time.Minute), h.auth.RequireUser).
+		Post("/journal", h.createEntry)
+	r.With(h.auth.RequireUser).Get("/journal", h.listEntries)
+	r.With(h.auth.RequireUser).Patch("/journal/{entryID}", h.updateEntry)
+	r.With(h.auth.RequireUser).Delete("/journal/{entryID}", h.deleteEntry)
 }
 
 type visitRequest struct {

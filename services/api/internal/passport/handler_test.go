@@ -29,6 +29,8 @@ type fakeStore struct {
 	totalStops int64
 	byMode     []generated.PassportProgressByModeRow
 	byRoute    []generated.PassportProgressByRouteRow
+	entries    []generated.JournalEntry
+	jseq       int
 }
 
 func (f *fakeStore) GetStop(ctx context.Context, id pgtype.UUID) (generated.GetStopRow, error) {
@@ -99,6 +101,77 @@ func (f *fakeStore) PassportProgressByMode(ctx context.Context, userID pgtype.UU
 
 func (f *fakeStore) PassportProgressByRoute(ctx context.Context, userID pgtype.UUID) ([]generated.PassportProgressByRouteRow, error) {
 	return f.byRoute, nil
+}
+
+// --- journal ---
+
+func (f *fakeStore) CreateJournalEntry(ctx context.Context, arg generated.CreateJournalEntryParams) (generated.JournalEntry, error) {
+	f.jseq++
+	e := generated.JournalEntry{
+		ID:           pgtype.UUID{Bytes: [16]byte{0xA0, byte(f.jseq)}, Valid: true},
+		UserID:       arg.UserID,
+		StopID:       arg.StopID,
+		VisitEventID: arg.VisitEventID,
+		Body:         arg.Body,
+		Visibility:   "private",
+		CreatedAt:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		UpdatedAt:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
+	}
+	f.entries = append(f.entries, e)
+	return e, nil
+}
+
+func (f *fakeStore) GetJournalEntry(ctx context.Context, arg generated.GetJournalEntryParams) (generated.JournalEntry, error) {
+	for _, e := range f.entries {
+		if e.ID == arg.ID && e.UserID == arg.UserID {
+			return e, nil
+		}
+	}
+	return generated.JournalEntry{}, pgx.ErrNoRows
+}
+
+func (f *fakeStore) ListJournalEntries(ctx context.Context, arg generated.ListJournalEntriesParams) ([]generated.JournalEntry, error) {
+	var out []generated.JournalEntry
+	for i := len(f.entries) - 1; i >= 0; i-- {
+		if f.entries[i].UserID == arg.UserID {
+			out = append(out, f.entries[i])
+		}
+	}
+	if int32(len(out)) > arg.Limit {
+		out = out[:arg.Limit]
+	}
+	return out, nil
+}
+
+func (f *fakeStore) UpdateJournalEntry(ctx context.Context, arg generated.UpdateJournalEntryParams) (generated.JournalEntry, error) {
+	for i, e := range f.entries {
+		if e.ID == arg.ID && e.UserID == arg.UserID {
+			e.Body = arg.Body
+			e.UpdatedAt = pgtype.Timestamptz{Time: time.Now().Add(time.Second), Valid: true}
+			f.entries[i] = e
+			return e, nil
+		}
+	}
+	return generated.JournalEntry{}, pgx.ErrNoRows
+}
+
+func (f *fakeStore) DeleteJournalEntry(ctx context.Context, arg generated.DeleteJournalEntryParams) (int64, error) {
+	for i, e := range f.entries {
+		if e.ID == arg.ID && e.UserID == arg.UserID {
+			f.entries = append(f.entries[:i], f.entries[i+1:]...)
+			return 1, nil
+		}
+	}
+	return 0, nil
+}
+
+func (f *fakeStore) GetVisitEventOwner(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	for _, v := range f.rows {
+		if v.ID == id {
+			return v.UserID, nil
+		}
+	}
+	return pgtype.UUID{}, pgx.ErrNoRows
 }
 
 func newHandler(f *fakeStore) *Handler {

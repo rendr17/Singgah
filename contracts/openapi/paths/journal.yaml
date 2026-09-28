@@ -1,0 +1,72 @@
+post:
+  operationId: createJournalEntry
+  summary: Create journal entry
+  description: >-
+    Private note linked optionally to a stop and/or one of the user's own
+    visit events (docs/16). `visitEventId` referencing another user's visit
+    answers 404 — foreign ids are never revealed.
+  tags:
+    - passport
+  security:
+    - bearerAuth: []
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../schemas/passport.yaml#/JournalRequest'
+  responses:
+    '201':
+      description: Entry created
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [entry]
+            additionalProperties: false
+            properties:
+              entry:
+                $ref: '../schemas/passport.yaml#/JournalEntry'
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
+get:
+  operationId: listJournalEntries
+  summary: List own journal entries
+  description: Newest first, capped by `limit`.
+  tags:
+    - passport
+  security:
+    - bearerAuth: []
+  parameters:
+    - name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 200
+  responses:
+    '200':
+      description: Own entries
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [entries]
+            additionalProperties: false
+            properties:
+              entries:
+                type: array
+                items:
+                  $ref: '../schemas/passport.yaml#/JournalEntry'
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

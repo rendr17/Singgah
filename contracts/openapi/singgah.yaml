@@ -39,6 +39,10 @@ paths:
     $ref: './paths/visits.yaml'
   /api/v1/passport/progress:
     $ref: './paths/passport-progress.yaml'
+  /api/v1/journal:
+    $ref: './paths/journal.yaml'
+  /api/v1/journal/{id}:
+    $ref: './paths/journal-detail.yaml'
 components:
   securitySchemes:
     bearerAuth:

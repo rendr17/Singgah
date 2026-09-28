@@ -1,0 +1,65 @@
+patch:
+  operationId: updateJournalEntry
+  summary: Update journal entry
+  description: >-
+    Last-write-wins by default. Send `baseUpdatedAt` (the `updatedAt` the
+    client read) for an optimistic version check — a mismatch answers 409
+    instead of overwriting (docs/24).
+  tags:
+    - passport
+  security:
+    - bearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../schemas/passport.yaml#/JournalRequest'
+  responses:
+    '200':
+      description: Entry updated
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [entry]
+            additionalProperties: false
+            properties:
+              entry:
+                $ref: '../schemas/passport.yaml#/JournalEntry'
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
+delete:
+  operationId: deleteJournalEntry
+  summary: Delete journal entry
+  tags:
+    - passport
+  security:
+    - bearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    '204':
+      description: Entry deleted
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
