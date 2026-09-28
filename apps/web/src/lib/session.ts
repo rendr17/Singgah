@@ -18,7 +18,8 @@ export function parseStoredSession(raw: string | null, now = new Date()): Stored
 		const s = JSON.parse(raw) as Partial<StoredSession>;
 		if (typeof s.token !== 'string' || typeof s.expiresAt !== 'string' || typeof s.userId !== 'string')
 			return null;
-		if (now.getTime() + EXPIRY_MARGIN_MS >= Date.parse(s.expiresAt)) return null;
+		const expiresAt = Date.parse(s.expiresAt);
+		if (Number.isNaN(expiresAt) || now.getTime() + EXPIRY_MARGIN_MS >= expiresAt) return null;
 		return { token: s.token, expiresAt: s.expiresAt, userId: s.userId };
 	} catch {
 		return null;

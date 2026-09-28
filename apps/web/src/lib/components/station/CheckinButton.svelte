@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import {
 		idbMutationStore,
 		onSettled,
@@ -15,6 +16,9 @@
 	let phase = $state<Phase>('idle');
 	let visitStatus = $state<'confirmed' | 'low_confidence' | null>(null);
 	let mutationId = $state('');
+	let unsettle: (() => void) | null = null;
+
+	onDestroy(() => unsettle?.());
 
 	// Location is requested only here — on the explicit tap (docs/16). A denied
 	// or unavailable fix does not block the mark; it degrades to manual honestly.
@@ -32,7 +36,7 @@
 	// The queue is only acknowledged — never called "accepted". When the
 	// background replay resolves this mutationId, flip to the real outcome.
 	async function parkOffline(body: CheckinBody) {
-		onSettled(mutationId, (r) => {
+		unsettle = onSettled(mutationId, (r) => {
 			if (r.kind === 'ok') {
 				visitStatus = r.visitStatus ?? null;
 				phase = 'done';

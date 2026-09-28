@@ -109,8 +109,9 @@ export const sendCheckin = async (body: CheckinBody): Promise<SendResult> => {
 		if (error || !data) {
 			if (!response) return { kind: 'network' };
 			if (response.status === 401) clearSession();
-			// 5xx is transient — retry on the next replay like a network blip.
-			return { kind: response.status >= 500 ? 'network' : 'rejected' };
+			// 429/5xx are transient — retry on the next replay like a network
+			// blip. Marking them 'rejected' would fail the item permanently.
+			return { kind: response.status === 429 || response.status >= 500 ? 'network' : 'rejected' };
 		}
 		return { kind: 'ok', visitStatus: data.visit.status };
 	} catch {

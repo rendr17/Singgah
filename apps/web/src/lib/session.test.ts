@@ -40,7 +40,8 @@ describe('parseStoredSession', () => {
 		['missing storage entry', null],
 		['non-JSON garbage', 'not json'],
 		['missing token', JSON.stringify({ expiresAt: valid.expiresAt, userId: valid.userId })],
-		['non-string fields', JSON.stringify({ token: 1, expiresAt: 2, userId: 3 })]
+		['non-string fields', JSON.stringify({ token: 1, expiresAt: 2, userId: 3 })],
+		['unparseable expiresAt', JSON.stringify({ ...valid, expiresAt: 'not-a-date' })]
 	])('returns null on %s', (_label, raw) => {
 		expect(parseStoredSession(raw)).toBeNull();
 	});
