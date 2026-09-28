@@ -23,6 +23,7 @@ func NewHandler(svc *Service) *Handler {
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/auth/session", h.createSession)
 	r.With(h.svc.RequireUser).Delete("/auth/session", h.revokeSession)
+	r.With(h.svc.RequireUser).Delete("/auth/account", h.deleteAccount)
 }
 
 type sessionResponse struct {
@@ -48,6 +49,15 @@ func (h *Handler) revokeSession(w http.ResponseWriter, r *http.Request) {
 	token, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if err := h.svc.Revoke(r.Context(), token); err != nil {
 		response.Error(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Sesi tidak valid atau kedaluwarsa")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) deleteAccount(w http.ResponseWriter, r *http.Request) {
+	userID, _ := UserIDFrom(r.Context())
+	if err := h.svc.DeleteAccount(r.Context(), userID); err != nil {
+		response.Error(w, r, http.StatusInternalServerError, "INTERNAL", "Gagal menghapus akun")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

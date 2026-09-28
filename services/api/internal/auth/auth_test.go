@@ -25,16 +25,12 @@ func newFakeStore() *fakeStore {
 	return &fakeStore{sessions: map[string]generated.AuthSession{}}
 }
 
-func (f *fakeStore) CreateUser(ctx context.Context) (generated.User, error) {
+func (f *fakeStore) CreateAnonymousSession(ctx context.Context, arg generated.CreateAnonymousSessionParams) (generated.AuthSession, error) {
 	f.users++
 	var id pgtype.UUID
 	id.Bytes[15] = byte(f.users)
 	id.Valid = true
-	return generated.User{ID: id}, nil
-}
-
-func (f *fakeStore) CreateAuthSession(ctx context.Context, arg generated.CreateAuthSessionParams) (generated.AuthSession, error) {
-	sess := generated.AuthSession{UserID: arg.UserID, TokenHash: arg.TokenHash, ExpiresAt: arg.ExpiresAt}
+	sess := generated.AuthSession{UserID: id, TokenHash: arg.TokenHash, ExpiresAt: arg.ExpiresAt}
 	f.sessions[string(arg.TokenHash)] = sess
 	return sess, nil
 }
@@ -59,6 +55,15 @@ func (f *fakeStore) RevokeAuthSession(ctx context.Context, h []byte) error {
 	}
 	sess.RevokedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
 	f.sessions[string(h)] = sess
+	return nil
+}
+
+func (f *fakeStore) DeleteUser(ctx context.Context, id pgtype.UUID) error {
+	for k, sess := range f.sessions {
+		if sess.UserID == id {
+			delete(f.sessions, k)
+		}
+	}
 	return nil
 }
 

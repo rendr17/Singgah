@@ -216,3 +216,6 @@ CREATE TABLE journal_entries (
 	updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX journal_entries_user_ix ON journal_entries (user_id);
+
+-- 000010: user-owned rows cascade on account deletion.
+-- (FK actions aren't visible to sqlc; documented here for reviewers.)

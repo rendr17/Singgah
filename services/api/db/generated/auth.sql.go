@@ -11,21 +11,25 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const createAuthSession = `-- name: CreateAuthSession :one
+const createAnonymousSession = `-- name: CreateAnonymousSession :one
+WITH u AS (
+	INSERT INTO users DEFAULT VALUES RETURNING id
+)
 INSERT INTO auth_sessions (user_id, token_hash, expires_at)
-VALUES ($1, $2, $3)
-RETURNING id, user_id, token_hash, created_at, expires_at, revoked_at
+SELECT id, $1, $2 FROM u
+RETURNING auth_sessions.id, auth_sessions.user_id, auth_sessions.token_hash, auth_sessions.created_at, auth_sessions.expires_at, auth_sessions.revoked_at
 `
 
-type CreateAuthSessionParams struct {
-	UserID    pgtype.UUID        `json:"user_id"`
+type CreateAnonymousSessionParams struct {
 	TokenHash []byte             `json:"token_hash"`
 	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
 }
 
+// Atomic user+session in one statement: a separate CreateUser then
+// CreateAuthSession could leave an orphaned user row on failure.
 // token_hash is SHA-256 of the opaque client token — the raw token is never stored.
-func (q *Queries) CreateAuthSession(ctx context.Context, arg CreateAuthSessionParams) (AuthSession, error) {
-	row := q.db.QueryRow(ctx, createAuthSession, arg.UserID, arg.TokenHash, arg.ExpiresAt)
+func (q *Queries) CreateAnonymousSession(ctx context.Context, arg CreateAnonymousSessionParams) (AuthSession, error) {
+	row := q.db.QueryRow(ctx, createAnonymousSession, arg.TokenHash, arg.ExpiresAt)
 	var i AuthSession
 	err := row.Scan(
 		&i.ID,
@@ -38,16 +42,15 @@ func (q *Queries) CreateAuthSession(ctx context.Context, arg CreateAuthSessionPa
 	return i, err
 }
 
-const createUser = `-- name: CreateUser :one
-INSERT INTO users DEFAULT VALUES RETURNING id, created_at, last_seen_at
+const deleteUser = `-- name: DeleteUser :exec
+DELETE FROM users WHERE id = $1
 `
 
-// Anonymous-first identity (ADR-010): a bare row is the whole account.
-func (q *Queries) CreateUser(ctx context.Context) (User, error) {
-	row := q.db.QueryRow(ctx, createUser)
-	var i User
-	err := row.Scan(&i.ID, &i.CreatedAt, &i.LastSeenAt)
-	return i, err
+// Full account deletion (docs/26 delete path): cascades wipe sessions,
+// visit_events, and journal_entries for this user.
+func (q *Queries) DeleteUser(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteUser, id)
+	return err
 }
 
 const getAuthSessionByTokenHash = `-- name: GetAuthSessionByTokenHash :one

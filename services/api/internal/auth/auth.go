@@ -31,11 +31,11 @@ var ErrUnauthenticated = errors.New("unauthenticated")
 
 // Store is the persistence seam the service needs — generated.Queries satisfies it.
 type Store interface {
-	CreateUser(ctx context.Context) (generated.User, error)
-	CreateAuthSession(ctx context.Context, arg generated.CreateAuthSessionParams) (generated.AuthSession, error)
+	CreateAnonymousSession(ctx context.Context, arg generated.CreateAnonymousSessionParams) (generated.AuthSession, error)
 	GetAuthSessionByTokenHash(ctx context.Context, tokenHash []byte) (generated.AuthSession, error)
 	TouchUserLastSeen(ctx context.Context, id pgtype.UUID) error
 	RevokeAuthSession(ctx context.Context, tokenHash []byte) error
+	DeleteUser(ctx context.Context, id pgtype.UUID) error
 }
 
 type Service struct {
@@ -47,26 +47,22 @@ func NewService(store Store) *Service {
 }
 
 // Issue creates a fresh user + session and returns the raw token — the only
-// place the unhashed token ever exists server-side.
+// place the unhashed token ever exists server-side. User and session are
+// inserted atomically (single CTE statement).
 func (s *Service) Issue(ctx context.Context) (token string, userID pgtype.UUID, expiresAt time.Time, err error) {
 	var raw [tokenBytes]byte
 	if _, err = rand.Read(raw[:]); err != nil {
 		return "", pgtype.UUID{}, time.Time{}, err
 	}
-	user, err := s.store.CreateUser(ctx)
-	if err != nil {
-		return "", pgtype.UUID{}, time.Time{}, err
-	}
 	expiresAt = time.Now().Add(SessionTTL)
-	_, err = s.store.CreateAuthSession(ctx, generated.CreateAuthSessionParams{
-		UserID:    user.ID,
+	sess, err := s.store.CreateAnonymousSession(ctx, generated.CreateAnonymousSessionParams{
 		TokenHash: tokenHash(raw[:]),
 		ExpiresAt: pgtype.Timestamptz{Time: expiresAt, Valid: true},
 	})
 	if err != nil {
 		return "", pgtype.UUID{}, time.Time{}, err
 	}
-	return base64.RawURLEncoding.EncodeToString(raw[:]), user.ID, expiresAt, nil
+	return base64.RawURLEncoding.EncodeToString(raw[:]), sess.UserID, expiresAt, nil
 }
 
 // Authenticate resolves a bearer token to its user ID.
@@ -91,6 +87,12 @@ func (s *Service) Revoke(ctx context.Context, token string) error {
 		return ErrUnauthenticated
 	}
 	return s.store.RevokeAuthSession(ctx, tokenHash(raw))
+}
+
+// DeleteAccount removes the user row; FK cascades wipe their sessions,
+// visit_events, and journal_entries (docs/26 delete path).
+func (s *Service) DeleteAccount(ctx context.Context, userID pgtype.UUID) error {
+	return s.store.DeleteUser(ctx, userID)
 }
 
 type userIDKey struct{}
