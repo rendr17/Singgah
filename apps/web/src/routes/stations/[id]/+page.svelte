@@ -3,6 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { browser } from '$app/environment';
 	import BackNav from '$lib/components/app-shell/BackNav.svelte';
+	import CheckinButton from '$lib/components/station/CheckinButton.svelte';
 	import DepartureBoard from '$lib/components/station/DepartureBoard.svelte';
 	import { basemapStyleUrl } from '$lib/basemap';
 	import { facilityLabel } from '$lib/facilities';
@@ -34,6 +35,10 @@
 		<span>{station.kind}</span> ·
 		<span>{station.lat.toFixed(5)}, {station.lon.toFixed(5)}</span>
 	</p>
+
+	{#if browser}
+		<CheckinButton stopId={station.id} />
+	{/if}
 
 	{#if browser}
 		<div class="mini-map">
