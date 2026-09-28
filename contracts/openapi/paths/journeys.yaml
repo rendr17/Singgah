@@ -1,11 +1,17 @@
 get:
   operationId: planJourney
-  summary: Station-to-station itinerary
+  summary: Station-to-station itineraries
   description: >-
-    One provider-computed itinerary between two canonical station UUIDs.
-    Legs come back normalized to canonical stop/route UUIDs; fares are IDR
-    integers. `itinerary` is null when the upstream source finds no plan —
-    never an error. Always `status: "scheduled"`; no realtime exists yet.
+    Itineraries between two canonical station UUIDs, computed by the
+    in-house schedule planner over the ingested timetable snapshot.
+    `itineraries` is a (possibly empty) list — empty means no plan exists
+    for the filters, never an error. Each itinerary is labelled by the
+    trade-off it wins (fastest / fewest_transfers / least_walking /
+    alternative). Leg times are timetable values; legs built on frequency
+    templates or reconstructed stop_times mark the itinerary
+    `status: "estimated"`. `fareReference` is the provider's corridor fare
+    estimate — optional context that may be absent on upstream outage.
+    No realtime exists yet.
   tags:
     - planner
   parameters:
@@ -30,11 +36,53 @@ get:
         type: string
         format: date-time
       description: >-
-        Departure context ("leave at") — forwarded upstream for peak/off-peak
-        fare selection and anchors the departures window. Absent = now.
+        Departure anchor ("leave at"). Mutually exclusive with `arriveBy`;
+        absent both = leave now.
+    - name: arriveBy
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
+      description: >-
+        Arrival bound ("be there by") — the planner maximizes the departure
+        time instead.
+    - name: modes
+      in: query
+      required: false
+      schema:
+        type: string
+      description: >-
+        Comma-separated mode filter over the catalog vocabulary:
+        rail, subway, tram, bus, ferry, other. Absent = all modes.
+      example: rail,subway
+    - name: maxWalkM
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+      description: Per-transfer walking distance cap in metres.
+    - name: maxTransfers
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+      description: Maximum number of ride transfers (rideLegs - 1).
+    - name: stepFree
+      in: query
+      required: false
+      schema:
+        type: boolean
+      description: >-
+        Only stops with a published elevator amenity are usable as transfer
+        or destination points. Accessibility coverage is partial — a
+        filtered plan may be empty because metadata is incomplete, not
+        because no step-free path exists.
   responses:
     '200':
-      description: Normalized plan (itinerary may be null)
+      description: Computed itineraries (possibly empty)
       content:
         application/json:
           schema:

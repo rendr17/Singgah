@@ -17,6 +17,7 @@ import (
 	"singgah/services/api/internal/db"
 	httpapi "singgah/services/api/internal/http"
 	"singgah/services/api/internal/journey"
+	"singgah/services/api/internal/planner"
 	"singgah/services/api/internal/provider/commute"
 )
 
@@ -33,6 +34,9 @@ func main() {
 	logger := newLogger(cfg.Env)
 	slog.SetDefault(logger)
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	deps := httpapi.Deps{Logger: logger, Version: version, CORSOrigin: cfg.CORSOrigin}
 
 	if cfg.DatabaseURL != "" {
@@ -47,8 +51,14 @@ func main() {
 		deps.DB = pool
 		queries := generated.New(pool)
 		commuteClient := commute.NewClient(cfg.CommuteBaseURL)
-		deps.Catalog = catalog.NewHandler(queries, commuteClient)
-		deps.Journey = journey.NewHandler(queries, commuteClient, commuteClient)
+		// The planner snapshot reloads lazily on a TTL — schedule ingests are
+		// rare, so five minutes keeps responses fresh without churning. The
+		// journey planner and the station departure board share it.
+		engSrc := planner.NewEngineSource(func(ctx context.Context) (*planner.Engine, error) {
+			return planner.Load(ctx, queries)
+		}, 5*time.Minute)
+		deps.Catalog = catalog.NewHandler(queries, engSrc)
+		deps.Journey = journey.NewHandler(queries, engSrc, commuteClient)
 		logger.Info("database connected")
 	} else {
 		logger.Warn("DATABASE_URL unset — database endpoints report unavailable")
@@ -62,9 +72,6 @@ func main() {
 		WriteTimeout:      cfg.WriteTimeout,
 		IdleTimeout:       cfg.IdleTimeout,
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	errCh := make(chan error, 1)
 	go func() {

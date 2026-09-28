@@ -56,6 +56,13 @@ StationSummary:
         Provider-declared operator code (e.g. TJ, MRTJ, KCI, LRTJ, LRTJBDB).
         Empty when the provider does not survey it — clients key official
         brand marks off this field.
+    lines:
+      type: array
+      description: >-
+        Catalog routes serving this stop — populated on text search
+        (combobox badges); absent on bbox and reference listings.
+      items:
+        $ref: '#/RouteRef'
 
 RouteRef:
   type: object
@@ -298,13 +305,22 @@ JourneyLeg:
   properties:
     type:
       type: string
-      description: walk | ride | raw upstream type for unrecognised legs
+      description: walk | ride
     from:
       $ref: '#/JourneyStopRef'
     to:
       $ref: '#/JourneyStopRef'
     distanceM:
       type: number
+      description: Walk distance in metres — walk legs only
+    depAt:
+      type: string
+      format: date-time
+      description: Scheduled departure at the leg's origin (walk legs carry computed times)
+    arrAt:
+      type: string
+      format: date-time
+      description: Scheduled arrival at the leg's destination
     routeId:
       type: string
       format: uuid
@@ -314,31 +330,42 @@ JourneyLeg:
       description: Provider line key, e.g. MRTJ:M — diagnostic only
     operator:
       type: string
+    mode:
+      type: string
+      description: Catalog mode vocabulary — rail | subway | tram | bus | ferry | other
+    color:
+      type: string
+      description: >-
+        Corridor's published color — hex without '#', same convention as
+        RouteRef.color. Absent when the catalog stores none.
     stationCount:
       type: integer
     stops:
       type: array
-      description: Ordered stops ridden — real sequence from the provider
+      description: Ordered stops ridden — real sequence from the schedule
       items:
         $ref: '#/JourneyStopRef'
     headsign:
       type: string
+    estimated:
+      type: boolean
+      description: >-
+        True when the leg's times come from a frequency template or a
+        reconstructed stop_time rather than a published trip time
     geometry:
       $ref: '#/LegShape'
     nextDepartures:
       type: array
       description: >-
-        Next scheduled boardings at leg.from matching this leg's line and
-        headsign — populated on the first ride leg only (later boardings
-        would need arrival-time propagation the provider doesn't compute).
-        Absent when the timetable source is unavailable.
+        Upcoming boardings at leg.from on this route — populated on the
+        first ride leg only, computed from the same schedule snapshot.
       items:
         $ref: '#/Departure'
     alternatives:
       type: array
       description: >-
         Other catalog routes that also carry this leg's endpoints —
-        corridors the rider can board instead of the provider's pick.
+        corridors the rider can board instead of the planner's pick.
       items:
         $ref: '#/JourneyLegAlternative'
 
@@ -392,6 +419,11 @@ JourneyLegAlternative:
       description: Corridor long name, e.g. "Pulo Gadung - Monumen Nasional"
     operator:
       type: string
+    color:
+      type: string
+      description: >-
+        Corridor's published color — hex without '#', same convention as
+        RouteRef.color. Absent when the catalog stores none.
     stationCount:
       type: integer
       description: Stop-to-stop hops across the served slice
@@ -423,6 +455,12 @@ Departure:
     boundFor:
       type: string
       description: Terminal station name, matching the leg's headsign
+    estimated:
+      type: boolean
+      description: >-
+        True when the time comes from a headway template (frequency-based
+        service) or a derived row the source never published — ESTIMATED per
+        docs/09, not a scheduled departure.
 
 DepartureDirection:
   type: object
@@ -471,8 +509,9 @@ StationDepartures:
   type: object
   description: >-
     A station's departure board. status is fixed "scheduled" — the source is
-    the provider's static timetable, never realtime. Lines and directions
-    are ordered by soonest upcoming departure.
+    the in-house schedule snapshot (GTFS + reconstructed timetables), never
+    realtime. Lines and directions are ordered by soonest upcoming
+    departure.
   required:
     - station
     - status
@@ -503,10 +542,15 @@ StationDepartures:
       properties:
         provider:
           type: string
+          description: '"schedule" — the in-house schedule snapshot'
         requestedAt:
           type: string
           format: date-time
           description: Server time the board was computed — the anchor for "now"
+        snapshotAt:
+          type: string
+          format: date-time
+          description: When the planner schedule snapshot was loaded
 
 FareSegment:
   type: object
@@ -549,39 +593,73 @@ Fare:
 
 Itinerary:
   type: object
+  description: >-
+    One end-to-end plan computed by the in-house schedule planner. Labels
+    name the trade-off this option actually wins against the others — an
+    honest differentiator, not a ranking score.
   required:
+    - label
+    - departAt
+    - arriveAt
+    - durationSec
     - legs
     - walkTransfers
     - rideLegs
-    - totalDistanceM
+    - transfers
+    - walkM
     - status
   additionalProperties: false
   properties:
+    label:
+      type: string
+      enum:
+        - fastest
+        - fewest_transfers
+        - least_walking
+        - alternative
+    reason:
+      type: string
+      description: What this option trades off, e.g. "avoids KCI:C"
+    departAt:
+      type: string
+      format: date-time
+    arriveAt:
+      type: string
+      format: date-time
+    durationSec:
+      type: integer
     legs:
       type: array
       items:
         $ref: '#/JourneyLeg'
     walkTransfers:
       type: integer
-      description: Count of walk legs — computed from legs, not the provider's transferCount
+      description: Count of walk legs — computed from legs
     rideLegs:
       type: integer
-    fare:
-      $ref: '#/Fare'
-    totalDistanceM:
-      type: number
+    transfers:
+      type: integer
+      description: rideLegs - 1
+    walkM:
+      type: integer
+      description: Total walking distance across walk legs
     status:
       type: string
       enum:
         - scheduled
-      description: Static provider data — never live until realtime lands
+        - estimated
+      description: >-
+        "scheduled" = every ride time is published; "estimated" = at least
+        one leg rides a frequency template or reconstructed stop_time.
+        Never live until realtime lands
 
 JourneyPlan:
   type: object
   required:
     - from
     - to
-    - itinerary
+    - query
+    - itineraries
     - source
   additionalProperties: false
   properties:
@@ -589,29 +667,59 @@ JourneyPlan:
       $ref: '#/JourneyStopRef'
     to:
       $ref: '#/JourneyStopRef'
-    at:
-      type: string
-      format: date-time
+    query:
+      type: object
+      description: The filters the plan was computed under — echoed back
+      properties:
+        departAt:
+          type: string
+          format: date-time
+          description: Departure anchor — set even for "leave now"
+        arriveBy:
+          type: string
+          format: date-time
+        modes:
+          type: array
+          items:
+            type: string
+        maxWalkM:
+          type: integer
+        maxTransfers:
+          type: integer
+        stepFree:
+          type: boolean
+    itineraries:
+      type: array
       description: >-
-        Requested departure context echoed back — absent when the plan was
-        computed for "leave now".
-    itinerary:
-      oneOf:
-        - $ref: '#/Itinerary'
-        - type: 'null'
-      description: null when the provider computes no plan for the pair
+        Computed plans, best first — empty when no plan exists for the
+        filters. Exactly one carries label "fastest"; the rest earn
+        trade-off labels or plain "alternative".
+      items:
+        $ref: '#/Itinerary'
+    fareReference:
+      $ref: '#/Fare'
+      description: >-
+        Provider corridor fare estimate for the O-D pair — reference
+        context, absent on upstream outage or when the pair is unknown
+        upstream.
     source:
       type: object
       required:
         - provider
         - requestedAt
+        - snapshotAt
       additionalProperties: false
       properties:
         provider:
           type: string
+          description: '"schedule" — in-house planner over ingested data'
         requestedAt:
           type: string
           format: date-time
+        snapshotAt:
+          type: string
+          format: date-time
+          description: When the planner's schedule snapshot was loaded
 
 RouteLineGeometry:
   type: object

@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -14,19 +15,20 @@ import (
 
 	generated "singgah/services/api/db/generated"
 	"singgah/services/api/internal/http/response"
+	"singgah/services/api/internal/planner"
 )
 
 const defaultLimit = 20
 
 // Handler serves the catalog endpoints under /api/v1.
 type Handler struct {
-	store Store
-	tt    Timetabler
-	now   func() time.Time
+	store  Store
+	engine *planner.EngineSource
+	now    func() time.Time
 }
 
-func NewHandler(store Store, tt Timetabler) *Handler {
-	return &Handler{store: store, tt: tt, now: time.Now}
+func NewHandler(store Store, engine *planner.EngineSource) *Handler {
+	return &Handler{store: store, engine: engine, now: time.Now}
 }
 
 // RegisterRoutes mounts the domain's paths on an existing mux — the router
@@ -86,6 +88,7 @@ func (h *Handler) listStations(w http.ResponseWriter, r *http.Request) {
 		for _, row := range rows {
 			stations = append(stations, stationSummary(row.ID, row.Name, row.Code, row.Kind, row.Lat, row.Lon, row.ProviderCode, row.Operator))
 		}
+		h.attachServingLines(r.Context(), stations)
 	} else {
 		rows, err := h.store.ListStops(r.Context(), limit)
 		if err != nil {
@@ -100,6 +103,33 @@ func (h *Handler) listStations(w http.ResponseWriter, r *http.Request) {
 		stations = []StationSummary{}
 	}
 	response.JSON(w, http.StatusOK, map[string]any{"stations": stations})
+}
+
+// attachServingLines fills each search hit's `lines` — the corridor badges a
+// rider scans for in the picker. A lookup failure degrades to no badges,
+// never a failed search.
+func (h *Handler) attachServingLines(ctx context.Context, stations []StationSummary) {
+	ids := make([]pgtype.UUID, 0, len(stations))
+	for _, s := range stations {
+		var id pgtype.UUID
+		if id.Scan(s.ID) == nil {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	rows, err := h.store.ListRoutesServingStops(ctx, ids)
+	if err != nil {
+		return
+	}
+	byStop := map[string][]RouteRef{}
+	for _, l := range rows {
+		byStop[l.StopID.String()] = append(byStop[l.StopID.String()], routeRef(l.ID, l.ShortName, l.LongName, l.Mode, l.Color, l.AgencyCode, pgtype.Text{String: l.AgencyName, Valid: l.AgencyName != ""}))
+	}
+	for i := range stations {
+		stations[i].Lines = byStop[stations[i].ID]
+	}
 }
 
 func stationSummary(id pgtype.UUID, name string, code pgtype.Text, kind string, lat, lon float64, provider, operator string) StationSummary {

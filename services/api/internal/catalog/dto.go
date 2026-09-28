@@ -35,6 +35,9 @@ type StationSummary struct {
 	// Operator is the provider-declared operator code (TJ, MRTJ, KCI…) —
 	// the client keys official brand marks off it; empty when unsurveyed.
 	Operator string `json:"operator,omitempty"`
+	// Lines are the catalog routes serving this stop — populated on text
+	// search (combobox badges); absent on bbox and reference listings.
+	Lines []RouteRef `json:"lines,omitempty"`
 }
 
 type RouteRef struct {
@@ -75,11 +78,14 @@ type StationDetail struct {
 	Source       SourceMeta    `json:"source"`
 }
 
-// Departure is one scheduled boarding — Asia/Jakarta wall clock.
+// Departure is one scheduled boarding — Asia/Jakarta wall clock. Estimated
+// marks a headway template slot or a time the source never published
+// (docs/09: such times are ESTIMATED, not SCHEDULED).
 type Departure struct {
 	Time       string  `json:"time"` // HH:MM
 	TripNumber *string `json:"tripNumber"`
 	BoundFor   string  `json:"boundFor"`
+	Estimated  bool    `json:"estimated,omitempty"`
 }
 
 // DepartureDirection is one boundFor group on a line. PreviousDeparture is
@@ -100,8 +106,9 @@ type DepartureLine struct {
 }
 
 type DepartureSource struct {
-	Provider    string    `json:"provider"`
-	RequestedAt time.Time `json:"requestedAt"`
+	Provider    string     `json:"provider"`
+	RequestedAt time.Time  `json:"requestedAt"`
+	SnapshotAt  *time.Time `json:"snapshotAt,omitempty"`
 }
 
 // StationDepartures is a station's departure board. Status is fixed

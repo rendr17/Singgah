@@ -3,10 +3,11 @@ get:
   summary: Station departures board
   description: >-
     Scheduled departures from one station, grouped by line and direction
-    (boundFor). Source is the provider's static timetable — always
-    "scheduled", never live. Times are Asia/Jakarta wall clock; each
-    direction also carries the most recent past departure when one falls
-    inside the lookback window.
+    (boundFor). Source is the in-house schedule snapshot (GTFS +
+    reconstructed timetables) — always "scheduled", never live;
+    per-departure `estimated` flags headway/derived times. Times are
+    Asia/Jakarta wall clock; each direction also carries the most recent
+    past departure when one falls inside the lookback window.
   tags:
     - catalog
   parameters:

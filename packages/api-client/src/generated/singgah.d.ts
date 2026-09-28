@@ -111,7 +111,7 @@ export interface paths {
         };
         /**
          * Station departures board
-         * @description Scheduled departures from one station, grouped by line and direction (boundFor). Source is the provider's static timetable — always "scheduled", never live. Times are Asia/Jakarta wall clock; each direction also carries the most recent past departure when one falls inside the lookback window.
+         * @description Scheduled departures from one station, grouped by line and direction (boundFor). Source is the in-house schedule snapshot (GTFS + reconstructed timetables) — always "scheduled", never live; per-departure `estimated` flags headway/derived times. Times are Asia/Jakarta wall clock; each direction also carries the most recent past departure when one falls inside the lookback window.
          */
         get: operations["getStationDepartures"];
         put?: never;
@@ -210,8 +210,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Station-to-station itinerary
-         * @description One provider-computed itinerary between two canonical station UUIDs. Legs come back normalized to canonical stop/route UUIDs; fares are IDR integers. `itinerary` is null when the upstream source finds no plan — never an error. Always `status: "scheduled"`; no realtime exists yet.
+         * Station-to-station itineraries
+         * @description Itineraries between two canonical station UUIDs, computed by the in-house schedule planner over the ingested timetable snapshot. `itineraries` is a (possibly empty) list — empty means no plan exists for the filters, never an error. Each itinerary is labelled by the trade-off it wins (fastest / fewest_transfers / least_walking / alternative). Leg times are timetable values; legs built on frequency templates or reconstructed stop_times mark the itinerary `status: "estimated"`. `fareReference` is the provider's corridor fare estimate — optional context that may be absent on upstream outage. No realtime exists yet.
          */
         get: operations["planJourney"];
         put?: never;
@@ -243,6 +243,18 @@ export interface components {
                 };
             };
         };
+        RouteRef: {
+            /** Format: uuid */
+            id: string;
+            shortName?: string;
+            longName?: string;
+            /** @enum {string} */
+            mode: "rail" | "subway" | "tram" | "bus" | "ferry" | "other";
+            /** @description Hex color without leading '#' */
+            color?: string;
+            agencyCode?: string;
+            agencyName?: string;
+        };
         StationSummary: {
             /**
              * Format: uuid
@@ -259,18 +271,8 @@ export interface components {
             providerCode: string;
             /** @description Provider-declared operator code (e.g. TJ, MRTJ, KCI, LRTJ, LRTJBDB). Empty when the provider does not survey it — clients key official brand marks off this field. */
             operator?: string;
-        };
-        RouteRef: {
-            /** Format: uuid */
-            id: string;
-            shortName?: string;
-            longName?: string;
-            /** @enum {string} */
-            mode: "rail" | "subway" | "tram" | "bus" | "ferry" | "other";
-            /** @description Hex color without leading '#' */
-            color?: string;
-            agencyCode?: string;
-            agencyName?: string;
+            /** @description Catalog routes serving this stop — populated on text search (combobox badges); absent on bbox and reference listings. */
+            lines?: components["schemas"]["RouteRef"][];
         };
         /** @description Lightweight stop reference embedded in other resources. */
         StopRef: {
@@ -326,6 +328,8 @@ export interface components {
             tripNumber: string | null;
             /** @description Terminal station name, matching the leg's headsign */
             boundFor: string;
+            /** @description True when the time comes from a headway template (frequency-based service) or a derived row the source never published — ESTIMATED per docs/09, not a scheduled departure. */
+            estimated?: boolean;
         };
         /** @description One direction (boundFor) on a line. departures holds upcoming boardings inside the requested window, soonest first; previousDeparture is the latest boarding already gone inside the lookback window, absent when none is seen. */
         DepartureDirection: {
@@ -341,7 +345,7 @@ export interface components {
             route?: components["schemas"]["RouteRef"];
             directions: components["schemas"]["DepartureDirection"][];
         };
-        /** @description A station's departure board. status is fixed "scheduled" — the source is the provider's static timetable, never realtime. Lines and directions are ordered by soonest upcoming departure. */
+        /** @description A station's departure board. status is fixed "scheduled" — the source is the in-house schedule snapshot (GTFS + reconstructed timetables), never realtime. Lines and directions are ordered by soonest upcoming departure. */
         StationDepartures: {
             station: components["schemas"]["StopRef"];
             /** @enum {string} */
@@ -350,12 +354,18 @@ export interface components {
             windowMinutes: number;
             lines: components["schemas"]["DepartureLine"][];
             source: {
+                /** @description "schedule" — the in-house schedule snapshot */
                 provider: string;
                 /**
                  * Format: date-time
                  * @description Server time the board was computed — the anchor for "now"
                  */
                 requestedAt: string;
+                /**
+                 * Format: date-time
+                 * @description When the planner schedule snapshot was loaded
+                 */
+                snapshotAt?: string;
             };
         };
         RouteSummary: components["schemas"]["RouteRef"] & {
@@ -461,6 +471,8 @@ export interface components {
             /** @description Corridor long name, e.g. "Pulo Gadung - Monumen Nasional" */
             name?: string;
             operator?: string;
+            /** @description Corridor's published color — hex without '#', same convention as RouteRef.color. Absent when the catalog stores none. */
+            color?: string;
             /** @description Stop-to-stop hops across the served slice */
             stationCount?: number;
             /** @description Interior stops in ride order — leg endpoints excluded */
@@ -468,11 +480,22 @@ export interface components {
             geometry?: components["schemas"]["LegShape"];
         };
         JourneyLeg: {
-            /** @description walk | ride | raw upstream type for unrecognised legs */
+            /** @description walk | ride */
             type: string;
             from: components["schemas"]["JourneyStopRef"];
             to: components["schemas"]["JourneyStopRef"];
+            /** @description Walk distance in metres — walk legs only */
             distanceM?: number;
+            /**
+             * Format: date-time
+             * @description Scheduled departure at the leg's origin (walk legs carry computed times)
+             */
+            depAt?: string;
+            /**
+             * Format: date-time
+             * @description Scheduled arrival at the leg's destination
+             */
+            arrAt?: string;
             /**
              * Format: uuid
              * @description Canonical route UUID for ride legs
@@ -481,15 +504,46 @@ export interface components {
             /** @description Provider line key, e.g. MRTJ:M — diagnostic only */
             line?: string;
             operator?: string;
+            /** @description Catalog mode vocabulary — rail | subway | tram | bus | ferry | other */
+            mode?: string;
+            /** @description Corridor's published color — hex without '#', same convention as RouteRef.color. Absent when the catalog stores none. */
+            color?: string;
             stationCount?: number;
-            /** @description Ordered stops ridden — real sequence from the provider */
+            /** @description Ordered stops ridden — real sequence from the schedule */
             stops?: components["schemas"]["JourneyStopRef"][];
             headsign?: string;
+            /** @description True when the leg's times come from a frequency template or a reconstructed stop_time rather than a published trip time */
+            estimated?: boolean;
             geometry?: components["schemas"]["LegShape"];
-            /** @description Next scheduled boardings at leg.from matching this leg's line and headsign — populated on the first ride leg only (later boardings would need arrival-time propagation the provider doesn't compute). Absent when the timetable source is unavailable. */
+            /** @description Upcoming boardings at leg.from on this route — populated on the first ride leg only, computed from the same schedule snapshot. */
             nextDepartures?: components["schemas"]["Departure"][];
-            /** @description Other catalog routes that also carry this leg's endpoints — corridors the rider can board instead of the provider's pick. */
+            /** @description Other catalog routes that also carry this leg's endpoints — corridors the rider can board instead of the planner's pick. */
             alternatives?: components["schemas"]["JourneyLegAlternative"][];
+        };
+        /** @description One end-to-end plan computed by the in-house schedule planner. Labels name the trade-off this option actually wins against the others — an honest differentiator, not a ranking score. */
+        Itinerary: {
+            /** @enum {string} */
+            label: "fastest" | "fewest_transfers" | "least_walking" | "alternative";
+            /** @description What this option trades off, e.g. "avoids KCI:C" */
+            reason?: string;
+            /** Format: date-time */
+            departAt: string;
+            /** Format: date-time */
+            arriveAt: string;
+            durationSec: number;
+            legs: components["schemas"]["JourneyLeg"][];
+            /** @description Count of walk legs — computed from legs */
+            walkTransfers: number;
+            rideLegs: number;
+            /** @description rideLegs - 1 */
+            transfers: number;
+            /** @description Total walking distance across walk legs */
+            walkM: number;
+            /**
+             * @description "scheduled" = every ride time is published; "estimated" = at least one leg rides a frequency template or reconstructed stop_time. Never live until realtime lands
+             * @enum {string}
+             */
+            status: "scheduled" | "estimated";
         };
         FareSegment: {
             operator: string;
@@ -508,33 +562,37 @@ export interface components {
             total?: number;
             segments: components["schemas"]["FareSegment"][];
         };
-        Itinerary: {
-            legs: components["schemas"]["JourneyLeg"][];
-            /** @description Count of walk legs — computed from legs, not the provider's transferCount */
-            walkTransfers: number;
-            rideLegs: number;
-            fare?: components["schemas"]["Fare"];
-            totalDistanceM: number;
-            /**
-             * @description Static provider data — never live until realtime lands
-             * @enum {string}
-             */
-            status: "scheduled";
-        };
         JourneyPlan: {
             from: components["schemas"]["JourneyStopRef"];
             to: components["schemas"]["JourneyStopRef"];
-            /**
-             * Format: date-time
-             * @description Requested departure context echoed back — absent when the plan was computed for "leave now".
-             */
-            at?: string;
-            /** @description null when the provider computes no plan for the pair */
-            itinerary: components["schemas"]["Itinerary"] | null;
+            /** @description The filters the plan was computed under — echoed back */
+            query: {
+                /**
+                 * Format: date-time
+                 * @description Departure anchor — set even for "leave now"
+                 */
+                departAt?: string;
+                /** Format: date-time */
+                arriveBy?: string;
+                modes?: string[];
+                maxWalkM?: number;
+                maxTransfers?: number;
+                stepFree?: boolean;
+            };
+            /** @description Computed plans, best first — empty when no plan exists for the filters. Exactly one carries label "fastest"; the rest earn trade-off labels or plain "alternative". */
+            itineraries: components["schemas"]["Itinerary"][];
+            /** @description Provider corridor fare estimate for the O-D pair — reference context, absent on upstream outage or when the pair is unknown upstream. */
+            fareReference?: components["schemas"]["Fare"];
             source: {
+                /** @description "schedule" — in-house planner over ingested data */
                 provider: string;
                 /** Format: date-time */
                 requestedAt: string;
+                /**
+                 * Format: date-time
+                 * @description When the planner's schedule snapshot was loaded
+                 */
+                snapshotAt: string;
             };
         };
     };
@@ -892,8 +950,21 @@ export interface operations {
                 from: string;
                 /** @description Destination stop UUID */
                 to: string;
-                /** @description Departure context ("leave at") — forwarded upstream for peak/off-peak fare selection and anchors the departures window. Absent = now. */
+                /** @description Departure anchor ("leave at"). Mutually exclusive with `arriveBy`; absent both = leave now. */
                 at?: string;
+                /** @description Arrival bound ("be there by") — the planner maximizes the departure time instead. */
+                arriveBy?: string;
+                /**
+                 * @description Comma-separated mode filter over the catalog vocabulary: rail, subway, tram, bus, ferry, other. Absent = all modes.
+                 * @example rail,subway
+                 */
+                modes?: string;
+                /** @description Per-transfer walking distance cap in metres. */
+                maxWalkM?: number;
+                /** @description Maximum number of ride transfers (rideLegs - 1). */
+                maxTransfers?: number;
+                /** @description Only stops with a published elevator amenity are usable as transfer or destination points. Accessibility coverage is partial — a filtered plan may be empty because metadata is incomplete, not because no step-free path exists. */
+                stepFree?: boolean;
             };
             header?: never;
             path?: never;
@@ -901,7 +972,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Normalized plan (itinerary may be null) */
+            /** @description Computed itineraries (possibly empty) */
             200: {
                 headers: {
                     [name: string]: unknown;

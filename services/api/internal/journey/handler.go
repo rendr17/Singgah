@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,17 +17,15 @@ import (
 
 	generated "singgah/services/api/db/generated"
 	httpapi "singgah/services/api/internal/http/response"
+	"singgah/services/api/internal/planner"
 	"singgah/services/api/internal/provider/commute"
 )
-
-const providerCode = "commute"
 
 // jakarta is WIB (UTC+7) permanently — no DST since 1964, so a fixed zone is
 // exact and needs no tzdata on the host.
 var jakarta = time.FixedZone("Asia/Jakarta", 7*60*60)
 
-// departuresWindow bounds the upstream timetable fetch in minutes.
-const departuresWindow = 3 * 60
+const providerCode = "commute"
 
 // maxDepartures caps how many boardings the leg carries — enough to answer
 // "kapan berangkat" without turning the plan into a timetable page.
@@ -39,15 +38,23 @@ const maxDepartures = 3
 // no geometry and the client falls back to the stop-to-stop polyline.
 const maxShapeSnapM = 250
 
-type Handler struct {
-	store   Store
-	planner FarePlanner
-	tt      Timetabler
-	now     func() time.Time
+// knownModes are the catalog's mode vocabulary — the modes filter is
+// validated against it so typos fail loudly instead of silently planning
+// with an empty set.
+var knownModes = map[string]bool{
+	"rail": true, "subway": true, "tram": true,
+	"bus": true, "ferry": true, "other": true,
 }
 
-func NewHandler(store Store, planner FarePlanner, tt Timetabler) *Handler {
-	return &Handler{store: store, planner: planner, tt: tt, now: time.Now}
+type Handler struct {
+	store  Store
+	engine *planner.EngineSource
+	fares  FarePlanner
+	now    func() time.Time
+}
+
+func NewHandler(store Store, engine *planner.EngineSource, fares FarePlanner) *Handler {
+	return &Handler{store: store, engine: engine, fares: fares, now: time.Now}
 }
 
 // RegisterRoutes mounts the domain's paths on an existing mux — the router
@@ -56,94 +63,325 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/journeys", h.plan)
 }
 
-// GET /journeys?from=<uuid>&to=<uuid>
+// GET /journeys?from=<uuid>&to=<uuid>[&at=…|&arriveBy=…][&modes=…]
+// [&maxWalkM=…][&maxTransfers=…][&stepFree=1]
+//
+// The in-house planner answers from the ingested schedule snapshot;
+// /fares is only consulted afterwards as a fare reference — an upstream
+// outage degrades the reference, never the plan.
 func (h *Handler) plan(w http.ResponseWriter, r *http.Request) {
-	fromID, ok := parseUUID(w, r, "from")
+	q, echo, ok := h.parseQuery(w, r)
 	if !ok {
 		return
 	}
-	toID, ok := parseUUID(w, r, "to")
-	if !ok {
-		return
-	}
-	at, ok := parseAt(w, r)
-	if !ok {
-		return
-	}
-	from, err := h.store.GetStop(r.Context(), fromID)
+	from, err := h.store.GetStop(r.Context(), q.From)
 	if err != nil {
 		writeErr(w, r, err, "Origin station not found")
 		return
 	}
-	to, err := h.store.GetStop(r.Context(), toID)
+	to, err := h.store.GetStop(r.Context(), q.To)
 	if err != nil {
 		writeErr(w, r, err, "Destination station not found")
 		return
 	}
-	if from.ProviderCode != providerCode || to.ProviderCode != providerCode {
-		httpapi.Error(w, r, http.StatusUnprocessableEntity, "PROVIDER_UNSUPPORTED",
-			"Journey planning is not available for this stop's provider")
-		return
-	}
 
-	plan, err := h.planner.Fares(r.Context(), from.ProviderEntityID, to.ProviderEntityID, at)
-	if errors.Is(err, commute.ErrStationUnknown) {
-		writePlan(w, r, from, to, nil, at)
-		return
-	}
+	eng, err := h.engine.Get(r.Context())
 	if err != nil {
-		httpapi.Error(w, r, http.StatusBadGateway, "PROVIDER_UNAVAILABLE",
-			"Provider rute sedang tidak tersedia")
+		httpapi.Error(w, r, http.StatusServiceUnavailable, "PLANNER_UNAVAILABLE",
+			"Data jadwal sedang tidak tersedia")
 		return
 	}
-	itinerary, err := h.normalize(r.Context(), plan)
+	its, err := eng.Plan(q)
 	if err != nil {
 		httpapi.Error(w, r, http.StatusInternalServerError, "INTERNAL", "Internal server error")
 		return
 	}
-	// at anchors the departures window when given; otherwise "leave now".
-	anchor := h.now()
-	if at != nil {
-		anchor = *at
-	}
-	h.attachDepartures(r.Context(), itinerary, plan, anchor)
-	writePlan(w, r, from, to, itinerary, at)
+	itineraries := h.mapItineraries(r.Context(), eng, its)
+	h.attachDepartures(eng, itineraries)
+	writePlan(w, r, from, to, echo, itineraries, h.fareReference(r.Context(), from, to, q.DepartAt), eng)
 }
 
-func (h *Handler) normalize(ctx context.Context, plan *commute.FarePlan) (*Itinerary, error) {
-	// One reverse lookup for every provider stop id in the plan.
-	ids := make(map[string]struct{})
-	collect := func(s commute.FareStationRef) {
-		if s.ID != "" {
-			ids[s.ID] = struct{}{}
+// parseQuery turns the raw query string into a planner.Query plus its echo.
+// exactly one anchor: `at` (depart) or `arriveBy` — neither means "leave now".
+func (h *Handler) parseQuery(w http.ResponseWriter, r *http.Request) (planner.Query, QueryEcho, bool) {
+	var q planner.Query
+	var echo QueryEcho
+	q.MaxWalkM, q.MaxTransfers = -1, -1
+
+	fromID, ok := parseUUID(w, r, "from")
+	if !ok {
+		return q, echo, false
+	}
+	q.From = fromID
+	toID, ok := parseUUID(w, r, "to")
+	if !ok {
+		return q, echo, false
+	}
+	q.To = toID
+
+	at, arriveBy := r.URL.Query().Get("at"), r.URL.Query().Get("arriveBy")
+	if at != "" && arriveBy != "" {
+		httpapi.Error(w, r, http.StatusBadRequest, "BAD_REQUEST", "Use at or arriveBy, not both")
+		return q, echo, false
+	}
+	anchor, err := parseTimeParam(at)
+	if err != "" {
+		httpapi.Error(w, r, http.StatusBadRequest, "BAD_REQUEST", "Invalid at timestamp")
+		return q, echo, false
+	}
+	if anchor != nil {
+		q.DepartAt = anchor
+	}
+	anchor, err = parseTimeParam(arriveBy)
+	if err != "" {
+		httpapi.Error(w, r, http.StatusBadRequest, "BAD_REQUEST", "Invalid arriveBy timestamp")
+		return q, echo, false
+	}
+	if anchor != nil {
+		q.ArriveBy = anchor
+	}
+	if q.DepartAt == nil && q.ArriveBy == nil {
+		now := h.now()
+		q.DepartAt = &now // leave now
+	}
+	echo.DepartAt, echo.ArriveBy = q.DepartAt, q.ArriveBy
+
+	if raw := r.URL.Query().Get("modes"); raw != "" {
+		q.Modes = map[string]bool{}
+		for m := range strings.SplitSeq(raw, ",") {
+			m = strings.TrimSpace(m)
+			if !knownModes[m] {
+				httpapi.Error(w, r, http.StatusBadRequest, "BAD_REQUEST", "Unknown mode: "+m)
+				return q, echo, false
+			}
+			q.Modes[m] = true
+			echo.Modes = append(echo.Modes, m)
+		}
+		sort.Strings(echo.Modes)
+	}
+	if v, ok := parseIntParam(w, r, "maxWalkM", 0); !ok {
+		return q, echo, false
+	} else if v != nil {
+		q.MaxWalkM, echo.MaxWalkM = *v, v
+	}
+	if v, ok := parseIntParam(w, r, "maxTransfers", 0); !ok {
+		return q, echo, false
+	} else if v != nil {
+		q.MaxTransfers, echo.MaxTransfers = *v, v
+	}
+	if raw := r.URL.Query().Get("stepFree"); raw == "1" || raw == "true" {
+		q.StepFree, echo.StepFree = true, true
+	} else if raw != "" && raw != "0" && raw != "false" {
+		httpapi.Error(w, r, http.StatusBadRequest, "BAD_REQUEST", "Invalid stepFree flag")
+		return q, echo, false
+	}
+	return q, echo, true
+}
+
+// mapItineraries converts planner results to public DTOs and attaches the
+// enrichments that need catalog lookups: geometry cuts, corridor
+// alternatives, and next departures on first boardings.
+func (h *Handler) mapItineraries(ctx context.Context, eng *planner.Engine, its []*planner.Itinerary) []Itinerary {
+	out := make([]Itinerary, 0, len(its))
+	coords := h.stopCoords(ctx, eng, its)
+	colors := h.routeColors(ctx, its)
+	for _, pit := range its {
+		it := Itinerary{
+			Label: pit.Label, Reason: pit.Reason,
+			DepartAt:    time.Unix(pit.Depart, 0).UTC(),
+			ArriveAt:    time.Unix(pit.Arrive, 0).UTC(),
+			DurationSec: pit.Arrive - pit.Depart,
+			RideLegs:    pit.RideLegs,
+			Transfers:   pit.Transfers,
+			WalkM:       pit.WalkM,
+			Status:      "scheduled",
+		}
+		if pit.Estimated {
+			it.Status = "estimated"
+		}
+		for _, pl := range pit.Legs {
+			l := h.mapLeg(ctx, eng, pl, coords, colors)
+			if l.Type == "walk" {
+				it.WalkTransfers++
+			}
+			it.Legs = append(it.Legs, l)
+		}
+		out = append(out, it)
+	}
+	return out
+}
+
+func (h *Handler) mapLeg(ctx context.Context, eng *planner.Engine, pl planner.Leg, coords map[string]generated.ListStopCoordsRow, colors map[string]string) Leg {
+	l := Leg{
+		Type: pl.Kind,
+		From: h.stopRef(eng, pl.From),
+		To:   h.stopRef(eng, pl.To),
+	}
+	dep, arr := time.Unix(pl.Dep, 0).UTC(), time.Unix(pl.Arr, 0).UTC()
+	l.DepAt, l.ArrAt = &dep, &arr
+	if pl.Kind == "walk" {
+		d := float64(pl.DistM)
+		l.DistanceM = &d
+		return l
+	}
+	l.RouteID = pl.RouteID.String()
+	l.Line = pl.RouteKey
+	l.Operator, _ = splitLineKey(pl.RouteKey)
+	l.Mode = pl.Mode
+	l.Color = colors[pl.RouteID.String()]
+	l.Headsign = pl.Headsign
+	l.Estimated = pl.Estimated
+	l.StationCount = len(pl.Stops) - 1
+	for _, s := range pl.Stops {
+		l.Stops = append(l.Stops, h.stopRef(eng, s))
+	}
+	l.Geometry = h.legGeometry(ctx, pl, coords)
+	l.Alternatives = h.legAlternatives(ctx, pl.RouteID, pl.From.String(), pl.To.String())
+	return l
+}
+
+func (h *Handler) stopRef(eng *planner.Engine, id pgtype.UUID) StopRef {
+	s, ok := eng.Stop(id)
+	if !ok {
+		return StopRef{ID: id.String()}
+	}
+	return StopRef{ID: id.String(), Name: s.Name}
+}
+
+// attachDepartures fills nextDepartures on the first ride leg of each
+// itinerary — upcoming boardings on the same route at the same stop,
+// computed from the same snapshot the plan rode.
+func (h *Handler) attachDepartures(eng *planner.Engine, itineraries []Itinerary) {
+	for i := range itineraries {
+		for j := range itineraries[i].Legs {
+			l := &itineraries[i].Legs[j]
+			if l.Type != "ride" || l.DepAt == nil {
+				continue
+			}
+			var rid, sid pgtype.UUID
+			if rid.Scan(l.RouteID) != nil || sid.Scan(l.From.ID) != nil {
+				break
+			}
+			for _, d := range eng.DeparturesAfter(rid, sid, l.DepAt.Unix()-60, maxDepartures) {
+				trip := d.TripKey
+				l.NextDepartures = append(l.NextDepartures, Departure{
+					Time:       time.Unix(d.Unix, 0).In(jakarta).Format("15:04"),
+					TripNumber: &trip,
+					BoundFor:   d.Headsign,
+				})
+			}
+			break // first ride leg only
 		}
 	}
-	collect(plan.From)
-	collect(plan.To)
-	for _, leg := range plan.Legs {
-		collect(leg.From)
-		collect(leg.To)
-		for _, s := range leg.Stops {
-			collect(s)
+}
+
+// legGeometry cuts the ingested route shape along the leg's ridden stops.
+// Missing shapes/coords degrade to no geometry — the client draws the
+// stop-to-stop polyline.
+func (h *Handler) legGeometry(ctx context.Context, pl planner.Leg, coords map[string]generated.ListStopCoordsRow) json.RawMessage {
+	lons := make([]float64, 0, len(pl.Stops))
+	lats := make([]float64, 0, len(pl.Stops))
+	for _, s := range pl.Stops {
+		c, ok := coords[s.String()]
+		if !ok {
+			continue
+		}
+		lons = append(lons, c.Lon)
+		lats = append(lats, c.Lat)
+	}
+	return h.sliceShape(ctx, pl.RouteID, lons, lats)
+}
+
+// routeColors resolves the catalog color of every route the itineraries
+// ride — one batched lookup so legs can wear the corridor's published hue.
+// A lookup failure degrades to no colors, never a failed plan.
+func (h *Handler) routeColors(ctx context.Context, its []*planner.Itinerary) map[string]string {
+	seen := map[pgtype.UUID]bool{}
+	var ids []pgtype.UUID
+	for _, it := range its {
+		for _, l := range it.Legs {
+			if l.Kind == "ride" && !seen[l.RouteID] {
+				seen[l.RouteID] = true
+				ids = append(ids, l.RouteID)
+			}
 		}
 	}
+	out := map[string]string{}
+	if len(ids) == 0 {
+		return out
+	}
+	rows, err := h.store.ListRouteColors(ctx, ids)
+	if err != nil {
+		return out
+	}
+	for _, r := range rows {
+		if r.Color.Valid {
+			out[r.ID.String()] = r.Color.String
+		}
+	}
+	return out
+}
+
+// stopCoords fetches coordinates once for every stop the itineraries touch.
+func (h *Handler) stopCoords(ctx context.Context, eng *planner.Engine, its []*planner.Itinerary) map[string]generated.ListStopCoordsRow {
+	seen := map[pgtype.UUID]bool{}
+	var ids []pgtype.UUID
+	for _, it := range its {
+		for _, l := range it.Legs {
+			for _, s := range l.Stops {
+				if !seen[s] {
+					seen[s] = true
+					ids = append(ids, s)
+				}
+			}
+			for _, id := range []pgtype.UUID{l.From, l.To} {
+				if !seen[id] {
+					seen[id] = true
+					ids = append(ids, id)
+				}
+			}
+		}
+	}
+	out := map[string]generated.ListStopCoordsRow{}
+	if len(ids) == 0 {
+		return out
+	}
+	rows, err := h.store.ListStopCoords(ctx, ids)
+	if err != nil {
+		return out // no geometry is a degrade, never a failed plan
+	}
+	for _, r := range rows {
+		out[r.ID.String()] = r
+	}
+	return out
+}
+
+// fareReference asks the provider for its corridor fare estimate for the
+// O-D pair. The fare prices the provider's own plan which may differ from
+// the itinerary shown — it is reference context, not per-leg truth, and
+// an upstream outage degrades it to nil.
+func (h *Handler) fareReference(ctx context.Context, from, to generated.GetStopRow, at *time.Time) *Fare {
+	plan, err := h.fares.Fares(ctx, from.ProviderEntityID, to.ProviderEntityID, at)
+	if err != nil || plan == nil || (len(plan.Segments) == 0 && plan.TotalFare == nil) {
+		return nil
+	}
+	ids := map[string]struct{}{}
 	for _, seg := range plan.Segments {
-		collect(seg.From)
-		collect(seg.To)
+		if seg.From.ID != "" {
+			ids[seg.From.ID] = struct{}{}
+		}
+		if seg.To.ID != "" {
+			ids[seg.To.ID] = struct{}{}
+		}
 	}
 	idList := make([]string, 0, len(ids))
 	for id := range ids {
 		idList = append(idList, id)
 	}
 	uuids := map[string]string{}
-	if len(idList) > 0 {
-		rows, err := h.store.ListStopIDsByProviderEntityIDs(ctx, generated.ListStopIDsByProviderEntityIDsParams{
-			Code:      providerCode,
-			EntityIds: idList,
-		})
-		if err != nil {
-			return nil, err
-		}
+	if rows, err := h.store.ListStopIDsByProviderEntityIDs(ctx, generated.ListStopIDsByProviderEntityIDsParams{
+		Code: providerCode, EntityIds: idList,
+	}); err == nil {
 		for _, row := range rows {
 			uuids[row.ProviderEntityID] = row.ID.String()
 		}
@@ -151,106 +389,16 @@ func (h *Handler) normalize(ctx context.Context, plan *commute.FarePlan) (*Itine
 	ref := func(s commute.FareStationRef) StopRef {
 		return StopRef{ID: uuids[s.ID], Name: s.Name}
 	}
-
-	// Coordinates of the resolved stops — one fetch, used to slice route
-	// shapes per leg. A coords lookup failure degrades to no geometry; it
-	// must not fail a plan the provider already computed.
-	coords := map[string]generated.ListStopCoordsRow{}
-	if len(uuids) > 0 {
-		ids := make([]pgtype.UUID, 0, len(uuids))
-		for _, u := range uuids {
-			var id pgtype.UUID
-			if id.Scan(u) == nil {
-				ids = append(ids, id)
-			}
-		}
-		if rows, err := h.store.ListStopCoords(ctx, ids); err == nil {
-			for _, r := range rows {
-				coords[r.ID.String()] = r
-			}
-		}
+	fare := &Fare{Currency: "IDR", Total: plan.TotalFare, Segments: make([]FareSegment, 0, len(plan.Segments))}
+	for _, seg := range plan.Segments {
+		fare.Segments = append(fare.Segments, FareSegment{
+			Operator: seg.Operator,
+			From:     ref(seg.From),
+			To:       ref(seg.To),
+			Amount:   seg.Fare,
+		})
 	}
-
-	itin := &Itinerary{
-		Status:         "scheduled",
-		TotalDistanceM: plan.TotalDistance,
-		Legs:           make([]Leg, 0, len(plan.Legs)),
-	}
-	for _, leg := range plan.Legs {
-		l := Leg{From: ref(leg.From), To: ref(leg.To), DistanceM: leg.DistanceM}
-		switch leg.Type {
-		case "TRANSFER":
-			l.Type = "walk"
-			itin.WalkTransfers++
-		case "RIDE":
-			l.Type = "ride"
-			itin.RideLegs++
-			l.Line = leg.Line
-			l.Operator = leg.Operator
-			l.StationCount = leg.StationCount
-			l.Headsign = leg.Headsign
-			for _, s := range leg.Stops {
-				l.Stops = append(l.Stops, ref(s))
-			}
-			if routeID, err := h.store.GetRouteByProviderEntityID(ctx, generated.GetRouteByProviderEntityIDParams{
-				Code:             providerCode,
-				ProviderEntityID: leg.Line,
-			}); err == nil {
-				l.RouteID = routeID.String()
-				l.Geometry = h.sliceGeometry(ctx, routeID, leg, uuids, coords)
-				l.Alternatives = h.legAlternatives(ctx, routeID, uuids[leg.From.ID], uuids[leg.To.ID])
-			} else if !errors.Is(err, pgx.ErrNoRows) {
-				return nil, err
-			}
-		default:
-			l.Type = leg.Type
-		}
-		itin.Legs = append(itin.Legs, l)
-	}
-	if len(plan.Segments) > 0 || plan.TotalFare != nil {
-		fare := &Fare{Currency: "IDR", Total: plan.TotalFare, Segments: make([]FareSegment, 0, len(plan.Segments))}
-		for _, seg := range plan.Segments {
-			fare.Segments = append(fare.Segments, FareSegment{
-				Operator: seg.Operator,
-				From:     ref(seg.From),
-				To:       ref(seg.To),
-				Amount:   seg.Fare,
-			})
-		}
-		itin.Fare = fare
-	}
-	return itin, nil
-}
-
-// sliceGeometry cuts the ingested route shape between a leg's endpoints.
-// The pick is scored against the whole resolved stop sequence — same-termini
-// variants that detour past unlisted streets lose to the shape the leg
-// actually rides. Missing shapes/coords or a slice error all degrade to no
-// geometry — the client then draws the stop-to-stop polyline. Geometry is
-// an enhancement, never a reason to fail a computed plan.
-func (h *Handler) sliceGeometry(ctx context.Context, routeID pgtype.UUID, leg commute.FareLeg, uuids map[string]string, coords map[string]generated.ListStopCoordsRow) json.RawMessage {
-	coord := func(r commute.FareStationRef) (generated.ListStopCoordsRow, bool) {
-		c, ok := coords[uuids[r.ID]]
-		return c, ok
-	}
-	f, okF := coord(leg.From)
-	t, okT := coord(leg.To)
-	if !okF || !okT {
-		return nil
-	}
-	lons := make([]float64, 0, len(leg.Stops)+2)
-	lats := make([]float64, 0, len(leg.Stops)+2)
-	lons = append(lons, f.Lon)
-	lats = append(lats, f.Lat)
-	for _, s := range leg.Stops {
-		if c, ok := coord(s); ok {
-			lons = append(lons, c.Lon)
-			lats = append(lats, c.Lat)
-		}
-	}
-	lons = append(lons, t.Lon)
-	lats = append(lats, t.Lat)
-	return h.sliceShape(ctx, routeID, lons, lats)
+	return fare
 }
 
 // legAlternatives lists other catalog routes that also carry the leg's
@@ -308,6 +456,9 @@ func (h *Handler) legAlternatives(ctx context.Context, routeID pgtype.UUID, from
 			Stops:        stops,
 			Geometry:     h.sliceShape(ctx, row.ID, lons, lats),
 		}
+		if row.Color.Valid {
+			alt.Color = row.Color.String
+		}
 		if row.ShortName.Valid {
 			alt.ShortName = row.ShortName.String
 		}
@@ -341,74 +492,6 @@ func (h *Handler) sliceShape(ctx context.Context, routeID pgtype.UUID, lons, lat
 	return json.RawMessage(g)
 }
 
-// attachDepartures fills nextDepartures on the first ride leg — "kapan
-// berangkat" is answered at the first boarding; later legs would need
-// arrival-time propagation the provider doesn't compute. A timetable outage
-// degrades to no departures, never a failed plan.
-func (h *Handler) attachDepartures(ctx context.Context, itin *Itinerary, plan *commute.FarePlan, anchor time.Time) {
-	for i, fl := range plan.Legs {
-		if fl.Type != "RIDE" || i >= len(itin.Legs) {
-			continue
-		}
-		op, stn := splitStationID(fl.From.ID)
-		_, line := splitLineKey(fl.Line)
-		if op == "" || line == "" {
-			return
-		}
-		anchor = anchor.In(jakarta)
-		entries, err := h.tt.Timetable(ctx, op, stn,
-			anchor.Format("15:04"), anchor.Add(departuresWindow*time.Minute).Format("15:04"))
-		if err != nil {
-			return
-		}
-		anchorMin := anchor.Hour()*60 + anchor.Minute()
-		type cand struct {
-			d Departure
-			m int // minutes from now, wrapped at midnight
-		}
-		var cands []cand
-		for _, e := range entries {
-			if e.LineCode != line || (fl.Headsign != "" && e.BoundFor != fl.Headsign) {
-				continue
-			}
-			depMin, ok := minutesOfDay(e.EstimatedDeparture)
-			if !ok {
-				continue
-			}
-			m := (depMin - anchorMin + 1440) % 1440
-			if m > departuresWindow {
-				continue
-			}
-			cands = append(cands, cand{d: Departure{
-				Time:       e.EstimatedDeparture[:5],
-				TripNumber: e.TripNumber,
-				BoundFor:   e.BoundFor,
-			}, m: m})
-		}
-		sort.Slice(cands, func(a, b int) bool { return cands[a].m < cands[b].m })
-		if len(cands) > maxDepartures {
-			cands = cands[:maxDepartures]
-		}
-		if len(cands) > 0 {
-			deps := make([]Departure, 0, len(cands))
-			for _, c := range cands {
-				deps = append(deps, c.d)
-			}
-			itin.Legs[i].NextDepartures = deps
-		}
-		return
-	}
-}
-
-// splitStationID turns "MRTJ-DKA" into operator "MRTJ" and code "DKA".
-func splitStationID(id string) (op, code string) {
-	i := strings.IndexByte(id, '-')
-	if i <= 0 || i == len(id)-1 {
-		return "", ""
-	}
-	return id[:i], id[i+1:]
-}
-
 // splitLineKey turns "MRTJ:M" into operator "MRTJ" and line code "M".
 func splitLineKey(key string) (op, code string) {
 	i := strings.IndexByte(key, ':')
@@ -418,39 +501,43 @@ func splitLineKey(key string) (op, code string) {
 	return key[:i], key[i+1:]
 }
 
-// minutesOfDay parses provider "HH:MM:SS" wall-clock strings.
-func minutesOfDay(s string) (int, bool) {
-	t, err := time.Parse("15:04:05", s)
-	if err != nil {
-		return 0, false
-	}
-	return t.Hour()*60 + t.Minute(), true
-}
-
-func writePlan(w http.ResponseWriter, r *http.Request, from, to generated.GetStopRow, itin *Itinerary, at *time.Time) {
+func writePlan(w http.ResponseWriter, r *http.Request, from, to generated.GetStopRow, echo QueryEcho, itineraries []Itinerary, fare *Fare, eng *planner.Engine) {
 	httpapi.JSON(w, http.StatusOK, PlanResponse{
-		From:      StopRef{ID: from.ID.String(), Name: from.Name},
-		To:        StopRef{ID: to.ID.String(), Name: to.Name},
-		At:        at,
-		Itinerary: itin,
-		Source:    SourceMeta{Provider: providerCode, RequestedAt: time.Now().UTC()},
+		From:          StopRef{ID: from.ID.String(), Name: from.Name},
+		To:            StopRef{ID: to.ID.String(), Name: to.Name},
+		Query:         echo,
+		Itineraries:   itineraries,
+		FareReference: fare,
+		Source: SourceMeta{
+			Provider:    "schedule",
+			RequestedAt: time.Now().UTC(),
+			SnapshotAt:  eng.BuiltAt().UTC(),
+		},
 	})
 }
 
-// parseAt reads the optional departure context — an RFC 3339 instant the plan
-// is computed for ("leave at"). It goes upstream for fare selection and
-// anchors the departures window; absent means "now".
-func parseAt(w http.ResponseWriter, r *http.Request) (*time.Time, bool) {
-	v := r.URL.Query().Get("at")
+func parseTimeParam(v string) (*time.Time, string) {
 	if v == "" {
-		return nil, true
+		return nil, ""
 	}
 	t, err := time.Parse(time.RFC3339, v)
 	if err != nil {
-		httpapi.Error(w, r, http.StatusBadRequest, "BAD_REQUEST", "Invalid at timestamp")
+		return nil, "bad"
+	}
+	return &t, ""
+}
+
+func parseIntParam(w http.ResponseWriter, r *http.Request, name string, min int) (*int, bool) {
+	v := r.URL.Query().Get(name)
+	if v == "" {
+		return nil, true
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < min {
+		httpapi.Error(w, r, http.StatusBadRequest, "BAD_REQUEST", "Invalid "+name)
 		return nil, false
 	}
-	return &t, true
+	return &n, true
 }
 
 func parseUUID(w http.ResponseWriter, r *http.Request, param string) (pgtype.UUID, bool) {

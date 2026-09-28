@@ -1,23 +1,22 @@
-// Departures board: GET /stations/{id}/departures. The source is the
-// provider's static timetable, so the board is always labelled "scheduled" —
-// never live (docs/09 transit truth rules).
+// Departures board: GET /stations/{id}/departures. The source is the same
+// in-house schedule snapshot the journey planner rides (GTFS + reconstructed
+// timetables), so the board is always labelled "scheduled" — never live —
+// and per-departure `estimated` marks frequency/derived times (docs/09).
 package catalog
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 
 	generated "singgah/services/api/db/generated"
 	"singgah/services/api/internal/http/response"
-	"singgah/services/api/internal/provider/commute"
+	"singgah/services/api/internal/planner"
 )
-
-const providerCode = "commute"
 
 // jakarta is WIB (UTC+7) permanently — no DST since 1964, so a fixed zone is
 // exact and needs no tzdata on the host.
@@ -47,194 +46,188 @@ func (h *Handler) getDepartures(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
-	op, code := splitProviderRef(stop.ProviderEntityID)
-	if stop.ProviderCode != providerCode || op == "" || h.tt == nil {
-		response.Error(w, r, http.StatusUnprocessableEntity, "PROVIDER_UNSUPPORTED",
-			"Jadwal tidak tersedia untuk penyedia data stasiun ini")
+	if h.engine == nil {
+		response.Error(w, r, http.StatusServiceUnavailable, "PLANNER_UNAVAILABLE",
+			"Data jadwal sedang tidak tersedia")
+		return
+	}
+	eng, err := h.engine.Get(r.Context())
+	if err != nil {
+		response.Error(w, r, http.StatusServiceUnavailable, "PLANNER_UNAVAILABLE",
+			"Data jadwal sedang tidak tersedia")
 		return
 	}
 
-	anchor := h.now().In(jakarta)
-	from, to := timetableRange(anchor, window)
-	entries, err := h.tt.Timetable(r.Context(), op, code, from, to)
-	if errors.Is(err, commute.ErrStationUnknown) {
-		// The station exists in our catalog but upstream knows no timetable —
-		// an honest empty board, not a failure.
-		entries = nil
-	} else if err != nil {
-		response.Error(w, r, http.StatusBadGateway, "PROVIDER_UNAVAILABLE",
-			"Jadwal keberangkatan sedang tidak tersedia")
-		return
-	}
-
-	board := h.buildBoard(r.Context(), stop, op, entries, anchor, window)
+	anchor := h.now()
+	from := anchor.Add(-departuresLookback * time.Minute).Unix()
+	to := anchor.Add(time.Duration(window) * time.Minute).Unix()
+	board := h.buildBoard(r.Context(), stop, eng,
+		eng.DeparturesBetween(id, from, to), anchor.Unix(), window)
 	response.JSON(w, http.StatusOK, map[string]any{"departures": board})
 }
 
-// timetableRange picks the upstream HH:MM bounds. Once lookback+window spans
-// a day, ask for the whole service day instead of a wrapped range.
-func timetableRange(anchor time.Time, window int) (from, to string) {
-	if departuresLookback+window >= departuresWindowMax {
-		return "00:00", "23:59"
-	}
-	return anchor.Add(-departuresLookback * time.Minute).Format("15:04"),
-		anchor.Add(time.Duration(window) * time.Minute).Format("15:04")
-}
-
-// buildBoard groups entries by line and direction, filters them against the
-// real minute window (upstream rounds bounds to whole hours), and orders
-// groups by soonest upcoming departure.
+// buildBoard groups snapshot departures by route and headsign, keeps the
+// latest already-gone boarding per direction as previousDeparture, and
+// orders groups by soonest upcoming departure.
 func (h *Handler) buildBoard(
 	ctx context.Context,
 	stop generated.GetStopRow,
-	op string,
-	entries []commute.TimetableEntry,
-	anchor time.Time,
+	eng *planner.Engine,
+	deps []planner.Departure,
+	anchorUnix int64,
 	window int,
 ) StationDepartures {
-	anchorMin := anchor.Hour()*60 + anchor.Minute()
-
 	type cand struct {
 		d Departure
-		m int // minutes from anchor
+		u int64 // unix — HH:MM strings can't order across midnight
 	}
 	type dirAgg struct {
-		next    []cand
-		prev    *Departure
-		prevMin int // minutes since the past boarding
+		next []cand
+		prev *cand
+	}
+	type lineAgg struct {
+		routeID pgtype.UUID
+		dirs    map[string]*dirAgg
 	}
 	lineOrder := []string{}
-	lines := map[string]map[string]*dirAgg{}
-	for _, e := range entries {
-		depMin, ok := minutesOfDay(e.EstimatedDeparture)
-		if !ok || e.LineCode == "" {
+	lines := map[string]*lineAgg{}
+	seen := map[string]bool{}
+	for _, d := range deps {
+		la := lines[d.RouteKey]
+		if la == nil {
+			la = &lineAgg{routeID: d.RouteID, dirs: map[string]*dirAgg{}}
+			lines[d.RouteKey] = la
+			lineOrder = append(lineOrder, d.RouteKey)
+		}
+		dir := la.dirs[d.Headsign]
+		if dir == nil {
+			dir = &dirAgg{}
+			la.dirs[d.Headsign] = dir
+		}
+		key := d.RouteKey + "|" + d.Headsign + "|" + strconv.FormatInt(d.Unix, 10)
+		if seen[key] {
 			continue
 		}
-		d := (depMin - anchorMin + 1440) % 1440
-		dirs := lines[e.LineCode]
-		if dirs == nil {
-			dirs = map[string]*dirAgg{}
-			lines[e.LineCode] = dirs
-			lineOrder = append(lineOrder, e.LineCode)
+		seen[key] = true
+		trip := d.TripKey
+		dep := Departure{
+			Time:       time.Unix(d.Unix, 0).In(jakarta).Format("15:04"),
+			TripNumber: &trip,
+			BoundFor:   d.Headsign,
+			Estimated:  d.Estimated,
 		}
-		dir := dirs[e.BoundFor]
-		if dir == nil {
-			dir = &dirAgg{prevMin: -1}
-			dirs[e.BoundFor] = dir
+		c := cand{d: dep, u: d.Unix}
+		if d.Unix < anchorUnix {
+			if dir.prev == nil || dir.prev.u < c.u {
+				dir.prev = &c
+			}
+			continue
 		}
-		dep := Departure{Time: e.EstimatedDeparture[:5], TripNumber: e.TripNumber, BoundFor: e.BoundFor}
-		if d <= window {
-			dir.next = append(dir.next, cand{d: dep, m: d})
-		} else if past := 1440 - d; past <= departuresLookback && (dir.prevMin < 0 || past < dir.prevMin) {
-			dir.prevMin = past
-			dir.prev = &dep
-		}
+		dir.next = append(dir.next, c)
 	}
 
 	// nextMin is minutes until the group's soonest upcoming departure; groups
-	// with none sort last, alphabetically.
-	nextMin := func(dir *dirAgg) int {
+	// with none sort last, alphabetically by headsign.
+	nextMin := func(dir *dirAgg) int64 {
 		if len(dir.next) == 0 {
-			return 1 << 30
+			return 1 << 40
 		}
-		m := dir.next[0].m
-		for _, c := range dir.next[1:] {
-			if c.m < m {
-				m = c.m
+		var m int64 = 1 << 40
+		for _, c := range dir.next {
+			if c.u < m {
+				m = c.u
 			}
 		}
 		return m
 	}
+	snap := eng.BuiltAt().UTC()
 	board := StationDepartures{
 		Station:       stopRef(stop.ID, stop.Name, stop.Code, stop.Lon, stop.Lat),
 		Status:        "scheduled",
 		WindowMinutes: window,
 		Lines:         make([]DepartureLine, 0, len(lines)),
-		Source:        DepartureSource{Provider: providerCode, RequestedAt: h.now().UTC()},
+		Source:        DepartureSource{Provider: "schedule", RequestedAt: h.now().UTC(), SnapshotAt: &snap},
 	}
-	routeCache := map[string]*RouteRef{}
-	lineMin := map[string]int{}
-	for _, lc := range lineOrder {
-		dirs := lines[lc]
-		names := make([]string, 0, len(dirs))
-		for bf := range dirs {
-			names = append(names, bf)
+	// Soonest-departure-first ordering across lines; lines with no upcoming
+	// boarding sort last, alphabetically.
+	lineMin := map[string]int64{}
+	for _, rk := range lineOrder {
+		m := int64(1 << 40)
+		for _, dir := range lines[rk].dirs {
+			if nm := nextMin(dir); nm < m {
+				m = nm
+			}
+		}
+		lineMin[rk] = m
+	}
+	sort.Slice(lineOrder, func(a, b int) bool {
+		if ma, mb := lineMin[lineOrder[a]], lineMin[lineOrder[b]]; ma != mb {
+			return ma < mb
+		}
+		return lineCode(lineOrder[a]) < lineCode(lineOrder[b])
+	})
+
+	routeCache := map[pgtype.UUID]*RouteRef{}
+	for _, rk := range lineOrder {
+		la := lines[rk]
+		names := make([]string, 0, len(la.dirs))
+		for hs := range la.dirs {
+			names = append(names, hs)
 		}
 		sort.Slice(names, func(a, b int) bool {
-			if ma, mb := nextMin(dirs[names[a]]), nextMin(dirs[names[b]]); ma != mb {
+			if ma, mb := nextMin(la.dirs[names[a]]), nextMin(la.dirs[names[b]]); ma != mb {
 				return ma < mb
 			}
 			return names[a] < names[b]
 		})
 		line := DepartureLine{
-			LineCode:   lc,
-			Route:      h.routeFor(ctx, op, lc, routeCache),
+			LineCode:   lineCode(rk),
+			Route:      h.routeFor(ctx, la.routeID, routeCache),
 			Directions: make([]DepartureDirection, 0, len(names)),
 		}
-		for _, bf := range names {
-			dir := dirs[bf]
-			sort.Slice(dir.next, func(a, b int) bool { return dir.next[a].m < dir.next[b].m })
+		for _, hs := range names {
+			dir := la.dirs[hs]
+			sort.Slice(dir.next, func(a, b int) bool { return dir.next[a].u < dir.next[b].u })
 			out := DepartureDirection{
-				BoundFor:          bf,
-				Departures:        make([]Departure, 0, len(dir.next)),
-				PreviousDeparture: dir.prev,
+				BoundFor:   hs,
+				Departures: make([]Departure, 0, len(dir.next)),
+			}
+			if dir.prev != nil {
+				out.PreviousDeparture = &dir.prev.d
 			}
 			for _, c := range dir.next {
 				out.Departures = append(out.Departures, c.d)
 			}
 			line.Directions = append(line.Directions, out)
 		}
-		lineMin[lc] = nextMin(dirs[names[0]])
 		board.Lines = append(board.Lines, line)
 	}
-	sort.Slice(board.Lines, func(a, b int) bool {
-		la, lb := board.Lines[a], board.Lines[b]
-		if ma, mb := lineMin[la.LineCode], lineMin[lb.LineCode]; ma != mb {
-			return ma < mb
-		}
-		return la.LineCode < lb.LineCode
-	})
 	return board
 }
 
-// routeFor resolves a provider line ("B" under operator "KCI") to the
-// canonical route; a miss stays nil rather than failing the board.
-func (h *Handler) routeFor(ctx context.Context, op, lineCode string, cache map[string]*RouteRef) *RouteRef {
-	if r, seen := cache[lineCode]; seen {
+// routeFor resolves a departure's canonical route id to its RouteRef; a
+// miss stays nil rather than failing the board.
+func (h *Handler) routeFor(ctx context.Context, routeID pgtype.UUID, cache map[pgtype.UUID]*RouteRef) *RouteRef {
+	if r, seen := cache[routeID]; seen {
 		return r
 	}
 	var out *RouteRef
-	id, err := h.store.GetRouteByProviderEntityID(ctx, generated.GetRouteByProviderEntityIDParams{
-		Code:             providerCode,
-		ProviderEntityID: op + ":" + lineCode,
-	})
-	if err == nil {
-		if row, err := h.store.GetRoute(ctx, id); err == nil {
-			r := routeRef(row.ID, row.ShortName, row.LongName, row.Mode, row.Color, row.AgencyCode, row.AgencyName)
-			out = &r
-		}
+	if row, err := h.store.GetRoute(ctx, routeID); err == nil {
+		r := routeRef(row.ID, row.ShortName, row.LongName, row.Mode, row.Color, row.AgencyCode, row.AgencyName)
+		out = &r
 	}
-	cache[lineCode] = out
+	cache[routeID] = out
 	return out
 }
 
-// splitProviderRef turns "KCI-SW" into operator "KCI" and station code "SW" —
-// the provider's composite station id format.
-func splitProviderRef(id string) (op, code string) {
-	i := strings.IndexByte(id, '-')
-	if i <= 0 || i == len(id)-1 {
-		return "", ""
+// lineCode is the display half of "KCI:C" — the provider's line code.
+func lineCode(routeKey string) string {
+	for i := len(routeKey) - 1; i >= 0; i-- {
+		if routeKey[i] == ':' {
+			return routeKey[i+1:]
+		}
 	}
-	return id[:i], id[i+1:]
-}
-
-// minutesOfDay parses provider "HH:MM:SS" wall-clock strings.
-func minutesOfDay(s string) (int, bool) {
-	t, err := time.Parse("15:04:05", s)
-	if err != nil {
-		return 0, false
-	}
-	return t.Hour()*60 + t.Minute(), true
+	return routeKey
 }
 
 func parseWindow(w http.ResponseWriter, r *http.Request) (int, bool) {

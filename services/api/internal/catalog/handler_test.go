@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	generated "singgah/services/api/db/generated"
-	"singgah/services/api/internal/provider/commute"
+	"singgah/services/api/internal/planner"
 )
 
 type fakeStore struct {
@@ -26,12 +26,12 @@ type fakeStore struct {
 	getStop             generated.GetStopRow
 	getStopErr          error
 	linesServingStop    []generated.ListRoutesServingStopRow
+	linesServingStops   []generated.ListRoutesServingStopsRow
 	transfersFromStop   []generated.ListTransfersFromStopRow
 	listRoutes          []generated.ListRoutesRow
 	listRoutesErr       error
 	getRoute            generated.GetRouteRow
 	getRouteErr         error
-	routeByProviderID   map[string]pgtype.UUID
 	stopsOnRoute        []generated.ListStopsOnRouteRow
 	providers           []generated.ListProvidersRow
 	providersErr        error
@@ -62,6 +62,9 @@ func (f *fakeStore) GetStop(_ context.Context, _ pgtype.UUID) (generated.GetStop
 func (f *fakeStore) ListRoutesServingStop(_ context.Context, _ pgtype.UUID) ([]generated.ListRoutesServingStopRow, error) {
 	return f.linesServingStop, nil
 }
+func (f *fakeStore) ListRoutesServingStops(_ context.Context, _ []pgtype.UUID) ([]generated.ListRoutesServingStopsRow, error) {
+	return f.linesServingStops, nil
+}
 func (f *fakeStore) ListTransfersFromStop(_ context.Context, _ pgtype.UUID) ([]generated.ListTransfersFromStopRow, error) {
 	return f.transfersFromStop, nil
 }
@@ -78,47 +81,54 @@ func (f *fakeStore) ListStopsOnRoute(_ context.Context, _ pgtype.UUID) ([]genera
 func (f *fakeStore) ListProviders(_ context.Context) ([]generated.ListProvidersRow, error) {
 	return f.providers, f.providersErr
 }
-func (f *fakeStore) GetRouteByProviderEntityID(_ context.Context, arg generated.GetRouteByProviderEntityIDParams) (pgtype.UUID, error) {
-	id, ok := f.routeByProviderID[arg.ProviderEntityID]
-	if !ok {
-		return pgtype.UUID{}, pgx.ErrNoRows
-	}
-	return id, nil
-}
 func (f *fakeStore) ListRouteLinesInBBox(_ context.Context, arg generated.ListRouteLinesInBBoxParams) ([]generated.ListRouteLinesInBBoxRow, error) {
 	f.gotRouteLinesParams = arg
 	return f.routeLines, f.routeLinesErr
 }
 
-type fakeTimetabler struct {
-	entries  []commute.TimetableEntry
-	err      error
-	gotOp    string
-	gotCode  string
-	gotFrom  string
-	gotTo    string
-	gotCalls int
+// fakeLoader feeds planner.Load a synthetic schedule — the board then reads
+// the real engine, not a mock of it.
+type fakeLoader struct {
+	rows  []generated.ListScheduleRowsRow
+	freqs []generated.Frequency
+	stops []generated.ListPlannerStopsRow
 }
 
-func (f *fakeTimetabler) Timetable(_ context.Context, op, code, from, to string) ([]commute.TimetableEntry, error) {
-	f.gotCalls++
-	f.gotOp, f.gotCode, f.gotFrom, f.gotTo = op, code, from, to
-	return f.entries, f.err
+func (f *fakeLoader) ListScheduleRows(context.Context) ([]generated.ListScheduleRowsRow, error) {
+	return f.rows, nil
+}
+func (f *fakeLoader) ListAllFrequencies(context.Context) ([]generated.Frequency, error) {
+	return f.freqs, nil
+}
+func (f *fakeLoader) ListTransferEdges(context.Context) ([]generated.ListTransferEdgesRow, error) {
+	return nil, nil
+}
+func (f *fakeLoader) ListPlannerStops(context.Context) ([]generated.ListPlannerStopsRow, error) {
+	return f.stops, nil
+}
+
+func engineSource(t *testing.T, rows []generated.ListScheduleRowsRow, freqs []generated.Frequency) *planner.EngineSource {
+	t.Helper()
+	l := &fakeLoader{rows: rows, freqs: freqs}
+	return planner.NewEngineSource(func(ctx context.Context) (*planner.Engine, error) {
+		return planner.Load(ctx, l)
+	}, time.Hour)
+}
+
+func failingEngine(err error) *planner.EngineSource {
+	return planner.NewEngineSource(func(context.Context) (*planner.Engine, error) {
+		return nil, err
+	}, time.Hour)
 }
 
 func serve(t *testing.T, store Store, target string) *httptest.ResponseRecorder {
 	t.Helper()
-	return serveTT(t, store, &fakeTimetabler{}, target)
+	return serveEng(t, store, nil, target, time.Now())
 }
 
-func serveTT(t *testing.T, store Store, tt Timetabler, target string) *httptest.ResponseRecorder {
+func serveEng(t *testing.T, store Store, eng *planner.EngineSource, target string, now time.Time) *httptest.ResponseRecorder {
 	t.Helper()
-	return serveAt(t, store, tt, target, time.Now())
-}
-
-func serveAt(t *testing.T, store Store, tt Timetabler, target string, now time.Time) *httptest.ResponseRecorder {
-	t.Helper()
-	h := NewHandler(store, tt)
+	h := NewHandler(store, eng)
 	h.now = func() time.Time { return now }
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, target, nil)
@@ -224,10 +234,17 @@ func TestListStationsSearch(t *testing.T) {
 	if err := id.Scan("b7f4b2a0-1f3d-4e5a-9c6b-2a1d3e4f5a6b"); err != nil {
 		t.Fatal(err)
 	}
-	store := &fakeStore{searchStops: []generated.SearchStopsRow{{
-		ID: id, Kind: "station", Code: pgtype.Text{String: "SUD", Valid: true},
-		Name: "Sudirman", Lon: 106.823, Lat: -6.202, ProviderCode: "commute", Operator: "KCI",
-	}}}
+	store := &fakeStore{
+		searchStops: []generated.SearchStopsRow{{
+			ID: id, Kind: "station", Code: pgtype.Text{String: "SUD", Valid: true},
+			Name: "Sudirman", Lon: 106.823, Lat: -6.202, ProviderCode: "commute", Operator: "KCI",
+		}},
+		linesServingStops: []generated.ListRoutesServingStopsRow{{
+			StopID: id, ID: mustUUID(t, "11111111-2222-3333-4444-555555555555"),
+			ShortName: pgtype.Text{String: "C", Valid: true}, Mode: "rail",
+			Color: pgtype.Text{String: "25B8EB", Valid: true}, AgencyName: "Commuter Line",
+		}},
+	}
 	rec := serve(t, store, "/stations?query=sudirman&limit=5")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
@@ -242,6 +259,11 @@ func TestListStationsSearch(t *testing.T) {
 	s := stations[0].(map[string]any)
 	if s["id"] != "b7f4b2a0-1f3d-4e5a-9c6b-2a1d3e4f5a6b" || s["code"] != "SUD" || s["providerCode"] != "commute" || s["operator"] != "KCI" {
 		t.Fatalf("station = %v", s)
+	}
+	// Text search carries the serving lines — the picker's corridor badges.
+	lines := s["lines"].([]any)
+	if len(lines) != 1 || lines[0].(map[string]any)["shortName"] != "C" || lines[0].(map[string]any)["color"] != "25B8EB" {
+		t.Fatalf("lines = %v", lines)
 	}
 }
 
@@ -480,16 +502,22 @@ func TestInternalErrorMaps500(t *testing.T) {
 
 // --- Departures board ---
 
+const (
+	depStopUUID = "b7f4b2a0-1f3d-4e5a-9c6b-2a1d3e4f5a6b" // S "Sawah Besar"
+	depTermUUID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" // T terminal
+	depRouteC   = "11111111-2222-3333-4444-555555555555" // KCI:C
+	depRouteM   = "66666666-7777-8888-9999-000000000000" // MRTJ:M
+)
+
 func departureStop(t *testing.T) generated.GetStopRow {
 	return generated.GetStopRow{
-		ID:               mustUUID(t, "b7f4b2a0-1f3d-4e5a-9c6b-2a1d3e4f5a6b"),
-		Kind:             "station",
-		Code:             pgtype.Text{String: "SW", Valid: true},
-		Name:             "Sawah Besar",
-		Lon:              106.83,
-		Lat:              -6.16,
-		ProviderEntityID: "KCI-SW",
-		ProviderCode:     "commute",
+		ID:           mustUUID(t, depStopUUID),
+		Kind:         "station",
+		Code:         pgtype.Text{String: "SW", Valid: true},
+		Name:         "Sawah Besar",
+		Lon:          106.83,
+		Lat:          -6.16,
+		ProviderCode: "commute",
 	}
 }
 
@@ -502,31 +530,65 @@ func mustUUID(t *testing.T, s string) pgtype.UUID {
 	return id
 }
 
-func ttEntry(line, boundFor, dep string) commute.TimetableEntry {
-	return commute.TimetableEntry{LineCode: line, BoundFor: boundFor, EstimatedDeparture: dep + ":00"}
+// depRow is one stop_time — a trip is S(dep) -> T(arr+30m).
+func depRow(tripID, routeID, routeKey, headsign string, seq int32, depMin int) []generated.ListScheduleRowsRow {
+	S, T := mustUUID2(depStopUUID), mustUUID2(depTermUUID)
+	return []generated.ListScheduleRowsRow{
+		{
+			TripID: mustUUID2(tripID), TripKey: tripID[len(tripID)-3:],
+			Headsign:  pgtype.Text{String: headsign, Valid: headsign != ""},
+			DayMask:   127,
+			StartDate: pgtype.Date{Time: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC), Valid: true},
+			EndDate:   pgtype.Date{Time: time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC), Valid: true},
+			RouteID:   mustUUID2(routeID), RouteKey: routeKey, Mode: "rail",
+			Seq: seq, StopID: S,
+			ArrivalSeconds: int32(depMin * 60), DepartureSeconds: int32(depMin * 60),
+		},
+		{
+			TripID: mustUUID2(tripID), TripKey: tripID[len(tripID)-3:],
+			Headsign:  pgtype.Text{String: headsign, Valid: headsign != ""},
+			DayMask:   127,
+			StartDate: pgtype.Date{Time: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC), Valid: true},
+			EndDate:   pgtype.Date{Time: time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC), Valid: true},
+			RouteID:   mustUUID2(routeID), RouteKey: routeKey, Mode: "rail",
+			Seq: seq + 1, StopID: T,
+			ArrivalSeconds: int32(depMin*60 + 1800), DepartureSeconds: int32(depMin*60 + 1800),
+		},
+	}
+}
+
+func mustUUID2(s string) pgtype.UUID {
+	var id pgtype.UUID
+	if err := id.Scan(s); err != nil {
+		panic(err)
+	}
+	return id
+}
+
+// depFixture is the standard board: KCI:C serves Bogor and Jakarta Kota
+// directions; MRTJ:M serves Bundaran HI.
+func depFixture() []generated.ListScheduleRowsRow {
+	var rows []generated.ListScheduleRowsRow
+	rows = append(rows, depRow("11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa", depRouteC, "KCI:C", "Bogor", 1, 605)...)
+	rows = append(rows, depRow("22222222-bbbb-4bbb-8bbb-bbbbbbbbbbbb", depRouteC, "KCI:C", "Jakarta Kota", 1, 595)...) // 5m ago -> prev
+	rows = append(rows, depRow("33333333-cccc-4ccc-8ccc-cccccccccccc", depRouteC, "KCI:C", "Jakarta Kota", 1, 620)...)
+	rows = append(rows, depRow("44444444-dddd-4ddd-8ddd-dddddddddddd", depRouteC, "KCI:C", "Jakarta Kota", 1, 650)...)
+	rows = append(rows, depRow("55555555-eeee-4eee-8eee-eeeeeeeeeeee", depRouteC, "KCI:C", "Bogor", 1, 1080)...) // 18:00 -> windowed out
+	rows = append(rows, depRow("77777777-ffff-4fff-8fff-ffffffffffff", depRouteM, "MRTJ:M", "Bundaran HI", 1, 615)...)
+	return rows
 }
 
 // Anchor 10:00 WIB — window default 240m covers 10:00-14:00, lookback 120m
 // reaches 08:00.
 var departuresNow = time.Date(2026, 9, 24, 3, 0, 0, 0, time.UTC)
 
+const depTarget = "/stations/" + depStopUUID + "/departures"
+
 func TestDeparturesGroupedAndWindowed(t *testing.T) {
 	store := &fakeStore{getStop: departureStop(t)}
-	tt := &fakeTimetabler{entries: []commute.TimetableEntry{
-		ttEntry("B", "Bogor", "10:05"),
-		ttEntry("B", "Jakarta Kota", "09:55"), // 5m ago -> previousDeparture
-		ttEntry("B", "Jakarta Kota", "10:50"),
-		ttEntry("B", "Jakarta Kota", "10:20"),
-		ttEntry("B", "Bogor", "18:00"), // outside window -> dropped
-		ttEntry("M", "Bundaran HI", "10:15"),
-	}}
-	rec := serveAt(t, store, tt, "/stations/b7f4b2a0-1f3d-4e5a-9c6b-2a1d3e4f5a6b/departures", departuresNow)
+	rec := serveEng(t, store, engineSource(t, depFixture(), nil), depTarget, departuresNow)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	// Upstream window: lookback 120m -> 08:00, +240m -> 14:00.
-	if tt.gotOp != "KCI" || tt.gotCode != "SW" || tt.gotFrom != "08:00" || tt.gotTo != "14:00" {
-		t.Fatalf("timetable args = %s %s %s-%s", tt.gotOp, tt.gotCode, tt.gotFrom, tt.gotTo)
 	}
 	board := decode(t, rec)["departures"].(map[string]any)
 	if board["status"] != "scheduled" || board["windowMinutes"] != 240.0 {
@@ -535,9 +597,13 @@ func TestDeparturesGroupedAndWindowed(t *testing.T) {
 	if board["station"].(map[string]any)["name"] != "Sawah Besar" {
 		t.Fatalf("station = %v", board["station"])
 	}
+	src := board["source"].(map[string]any)
+	if src["provider"] != "schedule" || src["snapshotAt"] == nil {
+		t.Fatalf("source = %v", src)
+	}
 	lines := board["lines"].([]any)
-	// Line B's soonest (10:05) precedes M's (10:15).
-	if len(lines) != 2 || lines[0].(map[string]any)["lineCode"] != "B" {
+	// Line C's soonest (10:05) precedes M's (10:15).
+	if len(lines) != 2 || lines[0].(map[string]any)["lineCode"] != "C" {
 		t.Fatalf("lines = %v", lines)
 	}
 	dirs := lines[0].(map[string]any)["directions"].([]any)
@@ -547,6 +613,9 @@ func TestDeparturesGroupedAndWindowed(t *testing.T) {
 	bogor := dirs[0].(map[string]any)["departures"].([]any)
 	if len(bogor) != 1 || bogor[0].(map[string]any)["time"] != "10:05" {
 		t.Fatalf("bogor departures = %v — 18:00 must be windowed out", bogor)
+	}
+	if bogor[0].(map[string]any)["estimated"] != nil {
+		t.Fatal("concrete departure must not be flagged estimated")
 	}
 	kota := dirs[1].(map[string]any)
 	got := kota["departures"].([]any)
@@ -560,10 +629,9 @@ func TestDeparturesGroupedAndWindowed(t *testing.T) {
 }
 
 func TestDeparturesResolvesCanonicalRoute(t *testing.T) {
-	routeID := mustUUID(t, "11111111-2222-3333-4444-555555555555")
+	routeID := mustUUID(t, depRouteC)
 	store := &fakeStore{
-		getStop:           departureStop(t),
-		routeByProviderID: map[string]pgtype.UUID{"KCI:B": routeID},
+		getStop: departureStop(t),
 		getRoute: generated.GetRouteRow{
 			ID:        routeID,
 			ShortName: pgtype.Text{String: "Bogor", Valid: true},
@@ -571,8 +639,8 @@ func TestDeparturesResolvesCanonicalRoute(t *testing.T) {
 			Color:     pgtype.Text{String: "c62f38", Valid: true},
 		},
 	}
-	tt := &fakeTimetabler{entries: []commute.TimetableEntry{ttEntry("B", "Bogor", "10:05")}}
-	rec := serveAt(t, store, tt, "/stations/b7f4b2a0-1f3d-4e5a-9c6b-2a1d3e4f5a6b/departures", departuresNow)
+	rows := depRow("11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa", depRouteC, "KCI:C", "Bogor", 1, 605)
+	rec := serveEng(t, store, engineSource(t, rows, nil), depTarget, departuresNow)
 	line := decode(t, rec)["departures"].(map[string]any)["lines"].([]any)[0].(map[string]any)
 	route := line["route"].(map[string]any)
 	if route["id"] != routeID.String() || route["shortName"] != "Bogor" || route["color"] != "c62f38" {
@@ -582,9 +650,9 @@ func TestDeparturesResolvesCanonicalRoute(t *testing.T) {
 
 func TestDeparturesMidnightWrap(t *testing.T) {
 	store := &fakeStore{getStop: departureStop(t)}
-	tt := &fakeTimetabler{entries: []commute.TimetableEntry{ttEntry("B", "Bogor", "00:40")}}
-	// 23:30 WIB -> 00:40 is +70m, inside the window.
-	rec := serveAt(t, store, tt, "/stations/b7f4b2a0-1f3d-4e5a-9c6b-2a1d3e4f5a6b/departures", time.Date(2026, 9, 24, 16, 30, 0, 0, time.UTC))
+	rows := depRow("11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa", depRouteC, "KCI:C", "Bogor", 1, 40) // 00:40
+	// 23:30 WIB -> 00:40 next service day is +70m, inside the window.
+	rec := serveEng(t, store, engineSource(t, rows, nil), depTarget, time.Date(2026, 9, 24, 16, 30, 0, 0, time.UTC))
 	dirs := decode(t, rec)["departures"].(map[string]any)["lines"].([]any)[0].(map[string]any)["directions"].([]any)
 	deps := dirs[0].(map[string]any)["departures"].([]any)
 	if len(deps) != 1 || deps[0].(map[string]any)["time"] != "00:40" {
@@ -592,22 +660,20 @@ func TestDeparturesMidnightWrap(t *testing.T) {
 	}
 }
 
-func TestDeparturesUpstreamDown(t *testing.T) {
+func TestDeparturesEngineDown(t *testing.T) {
 	store := &fakeStore{getStop: departureStop(t)}
-	tt := &fakeTimetabler{err: errors.New("upstream down")}
-	rec := serveAt(t, store, tt, "/stations/b7f4b2a0-1f3d-4e5a-9c6b-2a1d3e4f5a6b/departures", departuresNow)
-	if rec.Code != http.StatusBadGateway {
+	rec := serveEng(t, store, failingEngine(errors.New("snapshot load failed")), depTarget, departuresNow)
+	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d", rec.Code)
 	}
-	if decode(t, rec)["error"].(map[string]any)["code"] != "PROVIDER_UNAVAILABLE" {
-		t.Fatal("expected PROVIDER_UNAVAILABLE")
+	if decode(t, rec)["error"].(map[string]any)["code"] != "PLANNER_UNAVAILABLE" {
+		t.Fatal("expected PLANNER_UNAVAILABLE")
 	}
 }
 
-func TestDeparturesUnknownUpstreamIsEmptyBoard(t *testing.T) {
+func TestDeparturesNoScheduleIsEmptyBoard(t *testing.T) {
 	store := &fakeStore{getStop: departureStop(t)}
-	tt := &fakeTimetabler{err: commute.ErrStationUnknown}
-	rec := serveAt(t, store, tt, "/stations/b7f4b2a0-1f3d-4e5a-9c6b-2a1d3e4f5a6b/departures", departuresNow)
+	rec := serveEng(t, store, engineSource(t, nil, nil), depTarget, departuresNow)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -616,33 +682,56 @@ func TestDeparturesUnknownUpstreamIsEmptyBoard(t *testing.T) {
 	}
 }
 
-func TestDeparturesUnsupportedProvider(t *testing.T) {
-	stop := departureStop(t)
-	stop.ProviderCode = "other"
-	store := &fakeStore{getStop: stop}
-	tt := &fakeTimetabler{}
-	rec := serveAt(t, store, tt, "/stations/b7f4b2a0-1f3d-4e5a-9c6b-2a1d3e4f5a6b/departures", departuresNow)
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("status = %d", rec.Code)
+// Frequency-template trips (TJ exact_times=0) emit their headway slots —
+// every one honestly flagged estimated.
+func TestDeparturesFrequencyMarkedEstimated(t *testing.T) {
+	store := &fakeStore{getStop: departureStop(t)}
+	tpl := depRow("11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa", depRouteC, "TJ:4B", "Pulo Gadung", 1, 600) // template dep 10:00
+	freqs := []generated.Frequency{{
+		TripID:       mustUUID2("11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+		StartSeconds: 600 * 60, EndSeconds: 12 * 3600, HeadwaySeconds: 1800,
+	}}
+	rec := serveEng(t, store, engineSource(t, tpl, freqs), depTarget, departuresNow)
+	deps := decode(t, rec)["departures"].(map[string]any)["lines"].([]any)[0].(map[string]any)["directions"].([]any)[0].(map[string]any)["departures"].([]any)
+	if len(deps) < 4 { // 10:00,10:30,...,13:30 inside the 4h window
+		t.Fatalf("headway slots = %v", deps)
 	}
-	if tt.gotCalls != 0 {
-		t.Fatal("timetable must not be fetched for an unsupported provider")
+	for _, d := range deps {
+		if d.(map[string]any)["estimated"] != true {
+			t.Fatalf("frequency slot must be estimated: %v", d)
+		}
+	}
+	if deps[0].(map[string]any)["time"] != "10:00" {
+		t.Fatalf("first slot = %v", deps[0])
 	}
 }
 
 func TestDeparturesWindowValidation(t *testing.T) {
 	store := &fakeStore{getStop: departureStop(t)}
-	for _, target := range []string{"/stations/b7f4b2a0-1f3d-4e5a-9c6b-2a1d3e4f5a6b/departures?window=5", "/stations/b7f4b2a0-1f3d-4e5a-9c6b-2a1d3e4f5a6b/departures?window=2000", "/stations/b7f4b2a0-1f3d-4e5a-9c6b-2a1d3e4f5a6b/departures?window=abc"} {
-		rec := serveAt(t, store, &fakeTimetabler{}, target, departuresNow)
+	for _, target := range []string{depTarget + "?window=5", depTarget + "?window=2000", depTarget + "?window=abc"} {
+		rec := serveEng(t, store, engineSource(t, depFixture(), nil), target, departuresNow)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("%s status = %d", target, rec.Code)
 		}
 	}
-	// Full-day window asks upstream for the whole service day.
-	tt := &fakeTimetabler{}
-	rec := serveAt(t, store, tt, "/stations/b7f4b2a0-1f3d-4e5a-9c6b-2a1d3e4f5a6b/departures?window=1440", departuresNow)
-	if rec.Code != http.StatusOK || tt.gotFrom != "00:00" || tt.gotTo != "23:59" {
-		t.Fatalf("window=1440 -> %s-%s (status %d)", tt.gotFrom, tt.gotTo, rec.Code)
+	// Full-day window returns the whole service day — including 18:00.
+	rec := serveEng(t, store, engineSource(t, depFixture(), nil), depTarget+"?window=1440", departuresNow)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("window=1440 status = %d", rec.Code)
+	}
+	lines := decode(t, rec)["departures"].(map[string]any)["lines"].([]any)
+	found := false
+	for _, l := range lines {
+		for _, d := range l.(map[string]any)["directions"].([]any) {
+			for _, dep := range d.(map[string]any)["departures"].([]any) {
+				if dep.(map[string]any)["time"] == "18:00" {
+					found = true
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("window=1440 must include the 18:00 departure")
 	}
 }
 

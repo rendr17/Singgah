@@ -13,27 +13,36 @@ type StopRef struct {
 }
 
 type Leg struct {
-	Type      string   `json:"type"` // walk | ride | <raw upstream type>
-	From      StopRef  `json:"from"`
-	To        StopRef  `json:"to"`
-	DistanceM *float64 `json:"distanceM,omitempty"`
+	Type      string     `json:"type"` // walk | ride
+	From      StopRef    `json:"from"`
+	To        StopRef    `json:"to"`
+	DistanceM *float64   `json:"distanceM,omitempty"`
+	DepAt     *time.Time `json:"depAt,omitempty"`
+	ArrAt     *time.Time `json:"arrAt,omitempty"`
 	// ride legs only:
-	RouteID      string    `json:"routeId,omitempty"`
-	Line         string    `json:"line,omitempty"`
-	Operator     string    `json:"operator,omitempty"`
+	RouteID  string `json:"routeId,omitempty"`
+	Line     string `json:"line,omitempty"`
+	Operator string `json:"operator,omitempty"`
+	Mode     string `json:"mode,omitempty"`
+	// Color is the corridor's published color (hex without '#'), same
+	// convention as RouteRef.color — empty when the catalog stores none.
+	Color        string    `json:"color,omitempty"`
 	StationCount int       `json:"stationCount,omitempty"`
 	Stops        []StopRef `json:"stops,omitempty"`
 	Headsign     string    `json:"headsign,omitempty"`
+	// Estimated marks legs whose times come from a frequency template or a
+	// reconstructed (derived) stop_time rather than a published trip time.
+	Estimated bool `json:"estimated,omitempty"`
 	// Geometry is a GeoJSON LineString sliced from an ingested route shape
 	// (GTFS) between the leg's endpoints — the candidate cut that best hugs
 	// the leg's stops. Absent when no shape serves the listed stops —
 	// clients draw the stop-to-stop polyline instead.
 	Geometry json.RawMessage `json:"geometry,omitempty"`
-	// NextDepartures fills the first ride leg only — later boardings would
-	// need arrival-time propagation the provider doesn't compute.
+	// NextDepartures lists upcoming boardings at leg.from on this route —
+	// computed from the same schedule snapshot the plan rode on.
 	NextDepartures []Departure `json:"nextDepartures,omitempty"`
 	// Alternatives are other routes that also carry this leg's endpoints —
-	// corridors the rider could board instead of the provider's pick.
+	// corridors the rider could board instead of the planner's pick.
 	Alternatives []LegAlternative `json:"alternatives,omitempty"`
 }
 
@@ -46,6 +55,7 @@ type LegAlternative struct {
 	ShortName    string          `json:"shortName,omitempty"`
 	Name         string          `json:"name,omitempty"` // corridor long name
 	Operator     string          `json:"operator,omitempty"`
+	Color        string          `json:"color,omitempty"` // corridor color, hex without '#'
 	StationCount int             `json:"stationCount,omitempty"`
 	Stops        []StopRef       `json:"stops"`
 	Geometry     json.RawMessage `json:"geometry,omitempty"`
@@ -65,32 +75,57 @@ type FareSegment struct {
 	Amount   int64   `json:"amount"` // IDR integer — never a float
 }
 
+// Fare describes the provider's corridor fare estimate. It is reference
+// context, not a per-itinerary truth: the upstream fare service prices its
+// own plan which may differ from the itinerary shown.
 type Fare struct {
 	Currency string        `json:"currency"` // "IDR"
 	Total    *int64        `json:"total,omitempty"`
 	Segments []FareSegment `json:"segments"`
 }
 
-// Itinerary is one provider-computed station-to-station plan. Status is fixed
-// "scheduled" — the source is static fare/route data with no realtime feed.
+// Itinerary is one end-to-end plan computed by the in-house schedule
+// planner. Status is "scheduled" when every ride time is published, or
+// "estimated" when any leg rides a frequency template or reconstructed
+// stop_time — never realtime.
 type Itinerary struct {
-	Legs           []Leg   `json:"legs"`
-	WalkTransfers  int     `json:"walkTransfers"` // count of walk legs — computed, not provider's
-	RideLegs       int     `json:"rideLegs"`
-	Fare           *Fare   `json:"fare,omitempty"`
-	TotalDistanceM float64 `json:"totalDistanceM"`
-	Status         string  `json:"status"` // always "scheduled" today
+	Label         string    `json:"label"` // fastest | fewest_transfers | least_walking | alternative
+	Reason        string    `json:"reason,omitempty"`
+	DepartAt      time.Time `json:"departAt"`
+	ArriveAt      time.Time `json:"arriveAt"`
+	DurationSec   int64     `json:"durationSec"`
+	Legs          []Leg     `json:"legs"`
+	WalkTransfers int       `json:"walkTransfers"` // count of walk legs — computed, not provider's
+	RideLegs      int       `json:"rideLegs"`
+	Transfers     int       `json:"transfers"` // rideLegs - 1
+	WalkM         int       `json:"walkM"`
+	Status        string    `json:"status"` // scheduled | estimated
+}
+
+// QueryEcho returns the filters the plan was computed under — clients
+// never have to guess which defaults applied.
+type QueryEcho struct {
+	DepartAt     *time.Time `json:"departAt,omitempty"`
+	ArriveBy     *time.Time `json:"arriveBy,omitempty"`
+	Modes        []string   `json:"modes,omitempty"`
+	MaxWalkM     *int       `json:"maxWalkM,omitempty"`
+	MaxTransfers *int       `json:"maxTransfers,omitempty"`
+	StepFree     bool       `json:"stepFree"`
 }
 
 type PlanResponse struct {
-	From      StopRef    `json:"from"`
-	To        StopRef    `json:"to"`
-	At        *time.Time `json:"at,omitempty"` // requested departure context — absent means "leave now"
-	Itinerary *Itinerary `json:"itinerary"`    // null = provider found no plan
-	Source    SourceMeta `json:"source"`
+	From        StopRef     `json:"from"`
+	To          StopRef     `json:"to"`
+	Query       QueryEcho   `json:"query"`
+	Itineraries []Itinerary `json:"itineraries"` // empty = the planner found no plan
+	// FareReference is the provider's fare estimate for the O-D pair —
+	// optional context that never gates the plan itself.
+	FareReference *Fare      `json:"fareReference,omitempty"`
+	Source        SourceMeta `json:"source"`
 }
 
 type SourceMeta struct {
-	Provider    string    `json:"provider"`
+	Provider    string    `json:"provider"` // "schedule" — in-house planner over ingested data
 	RequestedAt time.Time `json:"requestedAt"`
+	SnapshotAt  time.Time `json:"snapshotAt"` // when the schedule snapshot was loaded
 }
