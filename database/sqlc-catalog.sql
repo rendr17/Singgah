@@ -239,3 +239,35 @@ CREATE TABLE collection_items (
 	UNIQUE (collection_id, stop_id)
 );
 CREATE INDEX collection_items_stop_idx ON collection_items (stop_id);
+
+-- 000012: City Explorer places (ADR-011 — provenance NOT NULL is intentional).
+CREATE TABLE places (
+	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+	provider_id uuid NOT NULL REFERENCES providers (id),
+	provider_entity_id text NOT NULL,
+	name text NOT NULL,
+	primary_category text NOT NULL CHECK (primary_category IN ('makan', 'ngopi', 'hiburan', 'taman', 'budaya', 'belanja', 'other')),
+	location geography (point, 4326) NOT NULL,
+	price_band smallint,
+	accessibility jsonb NOT NULL DEFAULT '{}',
+	source_payload jsonb NOT NULL DEFAULT '{}',
+	source_updated_at timestamptz,
+	editorial_status text NOT NULL DEFAULT 'unreviewed' CHECK (editorial_status IN ('unreviewed', 'curated', 'hidden')),
+	created_at timestamptz NOT NULL DEFAULT now(),
+	updated_at timestamptz NOT NULL DEFAULT now(),
+	UNIQUE (provider_id, provider_entity_id)
+);
+CREATE INDEX places_location_gix ON places USING gist (location);
+CREATE INDEX places_name_trgm ON places USING gin (name extensions.gin_trgm_ops);
+CREATE INDEX places_category_idx ON places (primary_category);
+
+CREATE TABLE place_transit_access (
+	place_id uuid NOT NULL REFERENCES places (id) ON DELETE CASCADE,
+	stop_id uuid NOT NULL REFERENCES stops (id) ON DELETE CASCADE,
+	walk_distance_m integer NOT NULL CHECK (walk_distance_m >= 0),
+	walk_seconds integer CHECK (walk_seconds IS NULL OR walk_seconds >= 0),
+	geometry geometry (linestring, 4326),
+	computed_at timestamptz NOT NULL,
+	PRIMARY KEY (place_id, stop_id)
+);
+CREATE INDEX place_transit_access_stop_idx ON place_transit_access (stop_id);

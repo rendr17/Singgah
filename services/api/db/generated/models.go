@@ -63,6 +63,31 @@ type JournalEntry struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
+type Place struct {
+	ID               pgtype.UUID        `json:"id"`
+	ProviderID       pgtype.UUID        `json:"provider_id"`
+	ProviderEntityID string             `json:"provider_entity_id"`
+	Name             string             `json:"name"`
+	PrimaryCategory  string             `json:"primary_category"`
+	Location         interface{}        `json:"location"`
+	PriceBand        pgtype.Int2        `json:"price_band"`
+	Accessibility    []byte             `json:"accessibility"`
+	SourcePayload    []byte             `json:"source_payload"`
+	SourceUpdatedAt  pgtype.Timestamptz `json:"source_updated_at"`
+	EditorialStatus  string             `json:"editorial_status"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type PlaceTransitAccess struct {
+	PlaceID       pgtype.UUID        `json:"place_id"`
+	StopID        pgtype.UUID        `json:"stop_id"`
+	WalkDistanceM int32              `json:"walk_distance_m"`
+	WalkSeconds   pgtype.Int4        `json:"walk_seconds"`
+	Geometry      interface{}        `json:"geometry"`
+	ComputedAt    pgtype.Timestamptz `json:"computed_at"`
+}
+
 type Provider struct {
 	ID                 pgtype.UUID        `json:"id"`
 	Code               string             `json:"code"`
