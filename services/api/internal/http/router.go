@@ -16,6 +16,7 @@ import (
 	"singgah/services/api/internal/http/response"
 	"singgah/services/api/internal/journey"
 	"singgah/services/api/internal/passport"
+	"singgah/services/api/internal/places"
 )
 
 // Deps carries the router's runtime dependencies — constructed once in main.
@@ -31,6 +32,7 @@ type Deps struct {
 	Auth        *auth.Handler
 	Passport    *passport.Handler
 	Collections *collections.Handler
+	Places      *places.Handler
 	// CORSOrigin is the Access-Control-Allow-Origin value ("*" for local dev).
 	CORSOrigin string
 }
@@ -62,6 +64,9 @@ func NewRouter(deps Deps) http.Handler {
 		}
 		if deps.Collections != nil {
 			deps.Collections.RegisterRoutes(v1)
+		}
+		if deps.Places != nil {
+			deps.Places.RegisterRoutes(v1)
 		}
 	})
 

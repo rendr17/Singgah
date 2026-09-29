@@ -45,6 +45,8 @@ paths:
     $ref: './paths/journal-detail.yaml'
   /api/v1/collections:
     $ref: './paths/collections.yaml'
+  /api/v1/places:
+    $ref: './paths/places.yaml'
 components:
   securitySchemes:
     bearerAuth:
@@ -67,3 +69,5 @@ tags:
     description: User-owned check-ins, progress, and journal
   - name: collections
     description: Curated editorial stop sets (docs/42 progress targets)
+  - name: places
+    description: City Explorer places near transit (ADR-011, OSM-sourced)

@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -87,8 +86,8 @@ var ProviderRegistration = generated.UpsertProviderParams{
 	SourceUrl:       pgtype.Text{String: "https://www.openstreetmap.org", Valid: true},
 	TermsUrl:        pgtype.Text{String: "https://www.openstreetmap.org/copyright", Valid: true},
 	LicenseName:     pgtype.Text{String: "ODbL-1.0", Valid: true},
-	AttributionText: pgtype.Text{String: "Geometri jalur © kontributor OpenStreetMap (ODbL)", Valid: true},
-	AllowedUse:      pgtype.Text{String: "route path geometry for map display", Valid: true},
+	AttributionText: pgtype.Text{String: "Geometri jalur & tempat © kontributor OpenStreetMap (ODbL)", Valid: true},
+	AllowedUse:      pgtype.Text{String: "route path geometry for map display + named POI catalog for City Explorer", Valid: true},
 	RefreshCadence:  pgtype.Text{String: "manual", Valid: true},
 	Owner:           pgtype.Text{String: "OpenStreetMap contributors", Valid: true},
 	KnownLimitations: pgtype.Text{
@@ -116,6 +115,10 @@ func NewClient(baseURL, apiURL string) *Client {
 	return &Client{baseURL: baseURL, apiURL: apiURL, http: &http.Client{Timeout: 120 * time.Second}}
 }
 
+// SetTimeout widens the HTTP deadline — bulk POI responses legitimately take
+// minutes to generate and transfer.
+func (c *Client) SetTimeout(d time.Duration) { c.http.Timeout = d }
+
 type overpassResponse struct {
 	Elements []struct {
 		Type    string `json:"type"`
@@ -142,23 +145,9 @@ func (c *Client) RelationGeoms(ctx context.Context, ids []int64) ([]RelationGeom
 	}
 	query := fmt.Sprintf("[out:json][timeout:100];rel(%s);out geom;", strings.Join(parts, ","))
 
-	form := url.Values{"data": {query}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL, strings.NewReader(form.Encode()))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("overpass: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("overpass: HTTP %d", resp.StatusCode)
-	}
 	var body overpassResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, fmt.Errorf("overpass: decode: %w", err)
+	if err := c.postOverpass(ctx, query, &body); err != nil {
+		return nil, err
 	}
 
 	out := make([]RelationGeom, 0, len(body.Elements))

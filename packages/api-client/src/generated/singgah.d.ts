@@ -375,6 +375,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/places": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Places near a transit stop
+         * @description City Explorer candidate list anchored on a stop (docs/43, ADR-011). Places come from an offline OSM import — never a live provider call. Ranking is transit usefulness: walking distance first, curated entries boosted, name as stable tiebreak. `walkSeconds` is a straight-line × detour-factor estimate, not a routed path — UI must not present it as turn-by-turn walking time. `category` is the canonical doc/14 set.
+         */
+        get: operations["listPlacesNearStop"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -892,6 +912,40 @@ export interface components {
         };
         CollectionList: {
             collections: components["schemas"]["CollectionSummary"][];
+        };
+        PlaceSummary: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /**
+             * @description Canonical doc/14 category set; 'other' keeps unmapped imports honest.
+             * @enum {string}
+             */
+            category: "makan" | "ngopi" | "hiburan" | "taman" | "budaya" | "belanja" | "other";
+            /** Format: double */
+            lat: number;
+            /** Format: double */
+            lon: number;
+            /**
+             * Format: int32
+             * @description Straight-line distance to the anchor stop in metres.
+             */
+            walkDistanceM: number;
+            /**
+             * Format: int32
+             * @description Estimated walking time (distance × detour factor at 80 m/min) — an estimate until real foot routing exists, never a routed path.
+             */
+            walkSeconds: number | null;
+            /**
+             * Format: int32
+             * @description Coarse price hint when the source provides one.
+             */
+            priceBand?: number;
+            /** @description editorial_status = 'curated' — raw imports stay unreviewed and are never presented as editor-vetted. */
+            curated: boolean;
+        };
+        PlaceList: {
+            places: components["schemas"]["PlaceSummary"][];
         };
     };
     responses: never;
@@ -1627,6 +1681,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CollectionList"];
+                };
+            };
+            /** @description Error envelope — shared by all endpoints */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    listPlacesNearStop: {
+        parameters: {
+            query: {
+                near_stop_id: string;
+                /** @description Page size — clamped server-side to 50. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Places reachable from the stop, ranked by transit usefulness */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaceList"];
+                };
+            };
+            /** @description Missing/invalid near_stop_id */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+            /** @description Stop not found (or tombstoned) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
                 };
             };
             /** @description Error envelope — shared by all endpoints */

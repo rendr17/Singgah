@@ -1,0 +1,53 @@
+get:
+  operationId: listPlacesNearStop
+  summary: Places near a transit stop
+  description: >-
+    City Explorer candidate list anchored on a stop (docs/43, ADR-011).
+    Places come from an offline OSM import — never a live provider call.
+    Ranking is transit usefulness: walking distance first, curated entries
+    boosted, name as stable tiebreak. `walkSeconds` is a straight-line ×
+    detour-factor estimate, not a routed path — UI must not present it as
+    turn-by-turn walking time. `category` is the canonical doc/14 set.
+  tags:
+    - places
+  parameters:
+    - name: near_stop_id
+      in: query
+      required: true
+      schema:
+        type: string
+        format: uuid
+    - name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 20
+      description: Page size — clamped server-side to 50.
+  responses:
+    '200':
+      description: Places reachable from the stop, ranked by transit usefulness
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/places.yaml#/PlaceList'
+    '400':
+      description: Missing/invalid near_stop_id
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
+    '404':
+      description: Stop not found (or tombstoned)
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

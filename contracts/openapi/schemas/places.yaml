@@ -1,0 +1,51 @@
+PlaceSummary:
+  type: object
+  required: [id, name, category, lat, lon, walkDistanceM, walkSeconds, curated]
+  additionalProperties: false
+  properties:
+    id:
+      type: string
+      format: uuid
+    name:
+      type: string
+    category:
+      type: string
+      enum: [makan, ngopi, hiburan, taman, budaya, belanja, other]
+      description: Canonical doc/14 category set; 'other' keeps unmapped imports honest.
+    lat:
+      type: number
+      format: double
+    lon:
+      type: number
+      format: double
+    walkDistanceM:
+      type: integer
+      format: int32
+      minimum: 0
+      description: Straight-line distance to the anchor stop in metres.
+    walkSeconds:
+      type: integer
+      format: int32
+      nullable: true
+      description: >-
+        Estimated walking time (distance × detour factor at 80 m/min) —
+        an estimate until real foot routing exists, never a routed path.
+    priceBand:
+      type: integer
+      format: int32
+      description: Coarse price hint when the source provides one.
+    curated:
+      type: boolean
+      description: >-
+        editorial_status = 'curated' — raw imports stay unreviewed and are
+        never presented as editor-vetted.
+
+PlaceList:
+  type: object
+  required: [places]
+  additionalProperties: false
+  properties:
+    places:
+      type: array
+      items:
+        $ref: '#/PlaceSummary'
