@@ -5,6 +5,7 @@ import type { PageLoad } from './$types';
 
 type StationDetail = components['schemas']['StationDetail'];
 type StationDepartures = components['schemas']['StationDepartures'];
+type PlaceSummary = components['schemas']['PlaceSummary'];
 
 export const load: PageLoad = async ({ params, fetch }) => {
 	let station: StationDetail | null = null;
@@ -41,5 +42,22 @@ export const load: PageLoad = async ({ params, fetch }) => {
 		}
 	}
 
-	return { station, departures, error: stationError };
+	// City Explorer candidates anchored on this stop (ADR-011). Same
+	// degradation rule as departures: a places outage must not sink the page.
+	let places: PlaceSummary[] | null = null;
+	if (station) {
+		try {
+			const data = await unwrap(
+				api.GET('/api/v1/places', {
+					params: { query: { near_stop_id: params.id, limit: 50 } },
+					fetch
+				})
+			);
+			places = data.places;
+		} catch {
+			places = null;
+		}
+	}
+
+	return { station, departures, places, error: stationError };
 };

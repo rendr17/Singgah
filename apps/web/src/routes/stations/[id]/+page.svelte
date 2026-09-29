@@ -6,6 +6,7 @@
 	import CheckinButton from '$lib/components/station/CheckinButton.svelte';
 	import DepartureBoard from '$lib/components/station/DepartureBoard.svelte';
 	import JournalNoteForm from '$lib/components/station/JournalNoteForm.svelte';
+	import NearbyPlaces from '$lib/components/station/NearbyPlaces.svelte';
 	import { basemapStyleUrl } from '$lib/basemap';
 	import { facilityLabel } from '$lib/facilities';
 	import { SectionHeading, StateBlock } from '@singgah/ui';
@@ -16,6 +17,7 @@
 	let { data }: PageProps = $props();
 	const station = $derived(data.station);
 	const departures = $derived(data.departures);
+	const places = $derived(data.places);
 </script>
 
 <svelte:head><title>{station?.name ?? 'Stasiun'} · Singgah</title></svelte:head>
@@ -80,6 +82,11 @@
 				{/each}
 			</ul>
 		{/if}
+	</section>
+
+	<section>
+		<SectionHeading>Tempat di sekitar</SectionHeading>
+		<NearbyPlaces {places} />
 	</section>
 
 	<section>
