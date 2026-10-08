@@ -31,9 +31,10 @@ describe('parseStoredSession', () => {
 		expect(parseStoredSession(JSON.stringify(valid), new Date('2025-01-01'))).toEqual(valid);
 	});
 
-	it('rejects sessions inside the 24h expiry margin', () => {
+	it('keeps a session valid until its actual expiry', () => {
 		const s = { ...valid, expiresAt: '2025-01-02T00:00:00Z' };
-		expect(parseStoredSession(JSON.stringify(s), new Date('2025-01-01T06:00:00Z'))).toBeNull();
+		expect(parseStoredSession(JSON.stringify(s), new Date('2025-01-01T06:00:00Z'))).toEqual(s);
+		expect(parseStoredSession(JSON.stringify(s), new Date('2025-01-02T00:00:00Z'))).toBeNull();
 	});
 
 	it.each([

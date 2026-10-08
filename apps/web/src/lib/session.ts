@@ -5,9 +5,6 @@ import { createSinggahClient } from '@singgah/api-client';
 // never in URLs or logs. Losing it means losing the account; that trade-off is
 // surfaced in the passport UX, not hidden here.
 const STORAGE_KEY = 'singgah.session';
-// Refresh the token ahead of expiry so a session opened days later still works.
-const EXPIRY_MARGIN_MS = 24 * 60 * 60 * 1000;
-
 export type StoredSession = { token: string; expiresAt: string; userId: string };
 
 export type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
@@ -16,10 +13,14 @@ export function parseStoredSession(raw: string | null, now = new Date()): Stored
 	if (!raw) return null;
 	try {
 		const s = JSON.parse(raw) as Partial<StoredSession>;
-		if (typeof s.token !== 'string' || typeof s.expiresAt !== 'string' || typeof s.userId !== 'string')
+		if (
+			typeof s.token !== 'string' ||
+			typeof s.expiresAt !== 'string' ||
+			typeof s.userId !== 'string'
+		)
 			return null;
 		const expiresAt = Date.parse(s.expiresAt);
-		if (Number.isNaN(expiresAt) || now.getTime() + EXPIRY_MARGIN_MS >= expiresAt) return null;
+		if (Number.isNaN(expiresAt) || now.getTime() >= expiresAt) return null;
 		return { token: s.token, expiresAt: s.expiresAt, userId: s.userId };
 	} catch {
 		return null;
