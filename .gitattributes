@@ -1,7 +1,22 @@
 * text=auto
 
-# gofmt rejects CRLF; bash refuses CRLF scripts. Pin LF regardless of
-# the contributor's core.autocrlf.
-*.go  text eol=lf
-*.sh  text eol=lf
-*.sql text eol=lf
+# gofmt rejects CRLF; bash refuses CRLF scripts; prettier endOfLine=lf.
+# Pin LF regardless of the contributor's core.autocrlf.
+*.go          text eol=lf
+*.sh          text eol=lf
+*.sql         text eol=lf
+*.ts          text eol=lf
+*.tsx         text eol=lf
+*.js          text eol=lf
+*.mjs         text eol=lf
+*.cjs         text eol=lf
+*.svelte      text eol=lf
+*.css         text eol=lf
+*.html        text eol=lf
+*.json        text eol=lf
+*.yaml        text eol=lf
+*.yml         text eol=lf
+*.md          text eol=lf
+*.svg         text eol=lf
+*.webmanifest text eol=lf
+*.toml        text eol=lf
