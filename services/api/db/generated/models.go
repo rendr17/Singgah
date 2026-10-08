@@ -88,6 +88,16 @@ type PlaceTransitAccess struct {
 	ComputedAt    pgtype.Timestamptz `json:"computed_at"`
 }
 
+type PlaceVisitEvent struct {
+	ID               pgtype.UUID        `json:"id"`
+	UserID           pgtype.UUID        `json:"user_id"`
+	PlaceID          pgtype.UUID        `json:"place_id"`
+	ClientMutationID pgtype.UUID        `json:"client_mutation_id"`
+	ObservedAt       pgtype.Timestamptz `json:"observed_at"`
+	ValidationMethod string             `json:"validation_method"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
 type Provider struct {
 	ID                 pgtype.UUID        `json:"id"`
 	Code               string             `json:"code"`
@@ -140,6 +150,12 @@ type RouteStop struct {
 	StationNumber pgtype.Text `json:"station_number"`
 }
 
+type SavedPlace struct {
+	UserID    pgtype.UUID        `json:"user_id"`
+	PlaceID   pgtype.UUID        `json:"place_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type Service struct {
 	ID               pgtype.UUID        `json:"id"`
 	ProviderID       pgtype.UUID        `json:"provider_id"`
@@ -172,6 +188,31 @@ type StopTime struct {
 	ArrivalSeconds   int32       `json:"arrival_seconds"`
 	DepartureSeconds int32       `json:"departure_seconds"`
 	Derived          bool        `json:"derived"`
+}
+
+type Trail struct {
+	ID                    pgtype.UUID        `json:"id"`
+	Slug                  string             `json:"slug"`
+	Title                 string             `json:"title"`
+	Description           string             `json:"description"`
+	Theme                 string             `json:"theme"`
+	StartProviderCode     string             `json:"start_provider_code"`
+	StartProviderEntityID string             `json:"start_provider_entity_id"`
+	EndProviderCode       string             `json:"end_provider_code"`
+	EndProviderEntityID   string             `json:"end_provider_entity_id"`
+	BudgetMinIdr          pgtype.Int4        `json:"budget_min_idr"`
+	BudgetMaxIdr          pgtype.Int4        `json:"budget_max_idr"`
+	Status                string             `json:"status"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+}
+
+type TrailStop struct {
+	TrailID           pgtype.UUID `json:"trail_id"`
+	Sequence          int16       `json:"sequence"`
+	IntendedPlaceName string      `json:"intended_place_name"`
+	PlaceID           pgtype.UUID `json:"place_id"`
+	StayMinutes       int16       `json:"stay_minutes"`
+	Notes             string      `json:"notes"`
 }
 
 type Transfer struct {

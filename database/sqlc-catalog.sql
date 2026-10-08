@@ -271,3 +271,48 @@ CREATE TABLE place_transit_access (
 	PRIMARY KEY (place_id, stop_id)
 );
 CREATE INDEX place_transit_access_stop_idx ON place_transit_access (stop_id);
+
+-- 000013: curated City Explorer trails and private place saves/visits.
+CREATE TABLE trails (
+	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+	slug text NOT NULL UNIQUE,
+	title text NOT NULL,
+	description text NOT NULL,
+	theme text NOT NULL,
+	start_provider_code text NOT NULL,
+	start_provider_entity_id text NOT NULL,
+	end_provider_code text NOT NULL,
+	end_provider_entity_id text NOT NULL,
+	budget_min_idr integer,
+	budget_max_idr integer,
+	status text NOT NULL DEFAULT 'published',
+	created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE trail_stops (
+	trail_id uuid NOT NULL REFERENCES trails (id) ON DELETE CASCADE,
+	sequence smallint NOT NULL,
+	intended_place_name text NOT NULL,
+	place_id uuid REFERENCES places (id),
+	stay_minutes smallint NOT NULL DEFAULT 0,
+	notes text NOT NULL DEFAULT '',
+	PRIMARY KEY (trail_id, sequence)
+);
+
+CREATE TABLE saved_places (
+	user_id uuid NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+	place_id uuid NOT NULL REFERENCES places (id),
+	created_at timestamptz NOT NULL DEFAULT now(),
+	PRIMARY KEY (user_id, place_id)
+);
+
+CREATE TABLE place_visit_events (
+	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+	user_id uuid NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+	place_id uuid NOT NULL REFERENCES places (id),
+	client_mutation_id uuid NOT NULL,
+	observed_at timestamptz NOT NULL,
+	validation_method text NOT NULL DEFAULT 'manual',
+	created_at timestamptz NOT NULL DEFAULT now(),
+	UNIQUE (user_id, client_mutation_id)
+);

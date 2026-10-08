@@ -11,6 +11,96 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getPlaceDetail = `-- name: GetPlaceDetail :one
+SELECT p.id, p.name, p.primary_category, p.price_band, p.editorial_status,
+	st_y(p.location::geometry) AS lat, st_x(p.location::geometry) AS lon,
+	p.accessibility, p.source_updated_at,
+	source.code AS source_code, source.name AS source_name,
+	source.source_url, source.terms_url, source.license_name, source.attribution_text
+FROM places p
+JOIN providers source ON source.id = p.provider_id
+WHERE p.id = $1
+	AND p.editorial_status <> 'hidden'
+	AND EXISTS (
+		SELECT 1 FROM place_transit_access pta
+		JOIN stops s ON s.id = pta.stop_id AND s.removed_at IS NULL
+		WHERE pta.place_id = p.id
+	)
+`
+
+type GetPlaceDetailRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	Name            string             `json:"name"`
+	PrimaryCategory string             `json:"primary_category"`
+	PriceBand       pgtype.Int2        `json:"price_band"`
+	EditorialStatus string             `json:"editorial_status"`
+	Lat             float64            `json:"lat"`
+	Lon             float64            `json:"lon"`
+	Accessibility   []byte             `json:"accessibility"`
+	SourceUpdatedAt pgtype.Timestamptz `json:"source_updated_at"`
+	SourceCode      string             `json:"source_code"`
+	SourceName      string             `json:"source_name"`
+	SourceUrl       pgtype.Text        `json:"source_url"`
+	TermsUrl        pgtype.Text        `json:"terms_url"`
+	LicenseName     pgtype.Text        `json:"license_name"`
+	AttributionText pgtype.Text        `json:"attribution_text"`
+}
+
+// Only places with a live nearby transit relation enter the public catalog.
+func (q *Queries) GetPlaceDetail(ctx context.Context, id pgtype.UUID) (GetPlaceDetailRow, error) {
+	row := q.db.QueryRow(ctx, getPlaceDetail, id)
+	var i GetPlaceDetailRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.PrimaryCategory,
+		&i.PriceBand,
+		&i.EditorialStatus,
+		&i.Lat,
+		&i.Lon,
+		&i.Accessibility,
+		&i.SourceUpdatedAt,
+		&i.SourceCode,
+		&i.SourceName,
+		&i.SourceUrl,
+		&i.TermsUrl,
+		&i.LicenseName,
+		&i.AttributionText,
+	)
+	return i, err
+}
+
+const getPlacePersonalState = `-- name: GetPlacePersonalState :one
+SELECT EXISTS (
+	SELECT 1 FROM saved_places AS saved WHERE saved.user_id = user_row.id AND saved.place_id = $2
+) AS saved, latest_visit.observed_at AS visited_at
+FROM users AS user_row
+LEFT JOIN LATERAL (
+	SELECT event.observed_at FROM place_visit_events AS event
+	WHERE event.user_id = user_row.id AND event.place_id = $2
+	ORDER BY event.observed_at DESC, event.id DESC
+	LIMIT 1
+) latest_visit ON true
+WHERE user_row.id = $1
+`
+
+type GetPlacePersonalStateParams struct {
+	ID      pgtype.UUID `json:"id"`
+	PlaceID pgtype.UUID `json:"place_id"`
+}
+
+type GetPlacePersonalStateRow struct {
+	Saved     bool               `json:"saved"`
+	VisitedAt pgtype.Timestamptz `json:"visited_at"`
+}
+
+func (q *Queries) GetPlacePersonalState(ctx context.Context, arg GetPlacePersonalStateParams) (GetPlacePersonalStateRow, error) {
+	row := q.db.QueryRow(ctx, getPlacePersonalState, arg.ID, arg.PlaceID)
+	var i GetPlacePersonalStateRow
+	err := row.Scan(&i.Saved, &i.VisitedAt)
+	return i, err
+}
+
 const insertPlaceTransitAccess = `-- name: InsertPlaceTransitAccess :exec
 INSERT INTO place_transit_access (place_id, stop_id, walk_distance_m, walk_seconds, computed_at)
 VALUES ($1, $2, $3, $4, $5)
@@ -37,6 +127,52 @@ func (q *Queries) InsertPlaceTransitAccess(ctx context.Context, arg InsertPlaceT
 		arg.ComputedAt,
 	)
 	return err
+}
+
+const listPlaceTransitAccesses = `-- name: ListPlaceTransitAccesses :many
+SELECT s.id AS stop_id, s.name AS stop_name, s.kind AS stop_kind,
+	pta.walk_distance_m, pta.walk_seconds, pta.computed_at
+FROM place_transit_access pta
+JOIN stops s ON s.id = pta.stop_id AND s.removed_at IS NULL
+WHERE pta.place_id = $1
+ORDER BY pta.walk_distance_m, s.name
+LIMIT 5
+`
+
+type ListPlaceTransitAccessesRow struct {
+	StopID        pgtype.UUID        `json:"stop_id"`
+	StopName      string             `json:"stop_name"`
+	StopKind      string             `json:"stop_kind"`
+	WalkDistanceM int32              `json:"walk_distance_m"`
+	WalkSeconds   pgtype.Int4        `json:"walk_seconds"`
+	ComputedAt    pgtype.Timestamptz `json:"computed_at"`
+}
+
+func (q *Queries) ListPlaceTransitAccesses(ctx context.Context, placeID pgtype.UUID) ([]ListPlaceTransitAccessesRow, error) {
+	rows, err := q.db.Query(ctx, listPlaceTransitAccesses, placeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPlaceTransitAccessesRow
+	for rows.Next() {
+		var i ListPlaceTransitAccessesRow
+		if err := rows.Scan(
+			&i.StopID,
+			&i.StopName,
+			&i.StopKind,
+			&i.WalkDistanceM,
+			&i.WalkSeconds,
+			&i.ComputedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listPlacesNearStop = `-- name: ListPlacesNearStop :many
@@ -101,6 +237,103 @@ func (q *Queries) ListPlacesNearStop(ctx context.Context, arg ListPlacesNearStop
 	return items, nil
 }
 
+const listSavedPlaces = `-- name: ListSavedPlaces :many
+SELECT p.id, p.name, p.primary_category, p.price_band, p.editorial_status,
+	st_y(p.location::geometry) AS lat, st_x(p.location::geometry) AS lon,
+	saved.created_at AS saved_at,
+	nearby.stop_id, nearby.stop_name, nearby.walk_distance_m, nearby.walk_seconds,
+	source.code AS source_code, source.name AS source_name,
+	source.source_url, source.terms_url, source.license_name, source.attribution_text,
+	latest_visit.observed_at AS visited_at
+FROM saved_places saved
+JOIN places p ON p.id = saved.place_id AND p.editorial_status <> 'hidden'
+JOIN providers source ON source.id = p.provider_id
+JOIN LATERAL (
+	SELECT pta.stop_id, s.name AS stop_name, pta.walk_distance_m, pta.walk_seconds
+	FROM place_transit_access pta
+	JOIN stops s ON s.id = pta.stop_id AND s.removed_at IS NULL
+	WHERE pta.place_id = p.id
+	ORDER BY pta.walk_distance_m, s.name
+	LIMIT 1
+) nearby ON true
+LEFT JOIN LATERAL (
+	SELECT v.observed_at FROM place_visit_events v
+	WHERE v.user_id = saved.user_id AND v.place_id = p.id
+	ORDER BY v.observed_at DESC, v.id DESC
+	LIMIT 1
+) latest_visit ON true
+WHERE saved.user_id = $1
+ORDER BY saved.created_at DESC, p.name
+LIMIT $2
+`
+
+type ListSavedPlacesParams struct {
+	UserID pgtype.UUID `json:"user_id"`
+	Limit  int32       `json:"limit"`
+}
+
+type ListSavedPlacesRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	Name            string             `json:"name"`
+	PrimaryCategory string             `json:"primary_category"`
+	PriceBand       pgtype.Int2        `json:"price_band"`
+	EditorialStatus string             `json:"editorial_status"`
+	Lat             float64            `json:"lat"`
+	Lon             float64            `json:"lon"`
+	SavedAt         pgtype.Timestamptz `json:"saved_at"`
+	StopID          pgtype.UUID        `json:"stop_id"`
+	StopName        string             `json:"stop_name"`
+	WalkDistanceM   int32              `json:"walk_distance_m"`
+	WalkSeconds     pgtype.Int4        `json:"walk_seconds"`
+	SourceCode      string             `json:"source_code"`
+	SourceName      string             `json:"source_name"`
+	SourceUrl       pgtype.Text        `json:"source_url"`
+	TermsUrl        pgtype.Text        `json:"terms_url"`
+	LicenseName     pgtype.Text        `json:"license_name"`
+	AttributionText pgtype.Text        `json:"attribution_text"`
+	VisitedAt       pgtype.Timestamptz `json:"visited_at"`
+}
+
+func (q *Queries) ListSavedPlaces(ctx context.Context, arg ListSavedPlacesParams) ([]ListSavedPlacesRow, error) {
+	rows, err := q.db.Query(ctx, listSavedPlaces, arg.UserID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSavedPlacesRow
+	for rows.Next() {
+		var i ListSavedPlacesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.PrimaryCategory,
+			&i.PriceBand,
+			&i.EditorialStatus,
+			&i.Lat,
+			&i.Lon,
+			&i.SavedAt,
+			&i.StopID,
+			&i.StopName,
+			&i.WalkDistanceM,
+			&i.WalkSeconds,
+			&i.SourceCode,
+			&i.SourceName,
+			&i.SourceUrl,
+			&i.TermsUrl,
+			&i.LicenseName,
+			&i.AttributionText,
+			&i.VisitedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listStopsWithinRadiusOfPoint = `-- name: ListStopsWithinRadiusOfPoint :many
 SELECT s.id, s.name, st_distance(s.location, wgs84_point($1, $2))::int AS distance_m
 FROM stops s
@@ -142,6 +375,62 @@ func (q *Queries) ListStopsWithinRadiusOfPoint(ctx context.Context, arg ListStop
 	return items, nil
 }
 
+const recordPlaceVisit = `-- name: RecordPlaceVisit :one
+WITH ins AS (
+	INSERT INTO place_visit_events (user_id, place_id, client_mutation_id, observed_at)
+	VALUES ($1, $2, $3, $4)
+	ON CONFLICT (user_id, client_mutation_id) DO NOTHING
+	RETURNING id, user_id, place_id, client_mutation_id, observed_at, validation_method, created_at
+)
+SELECT id, user_id, place_id, client_mutation_id, observed_at, validation_method, created_at, true AS was_inserted FROM ins
+UNION ALL
+SELECT event.id, event.user_id, event.place_id, event.client_mutation_id, event.observed_at, event.validation_method, event.created_at, false AS was_inserted FROM place_visit_events AS event
+WHERE event.user_id = $1 AND event.client_mutation_id = $3
+	AND NOT EXISTS (SELECT 1 FROM ins)
+LIMIT 1
+`
+
+type RecordPlaceVisitParams struct {
+	UserID           pgtype.UUID        `json:"user_id"`
+	PlaceID          pgtype.UUID        `json:"place_id"`
+	ClientMutationID pgtype.UUID        `json:"client_mutation_id"`
+	ObservedAt       pgtype.Timestamptz `json:"observed_at"`
+}
+
+type RecordPlaceVisitRow struct {
+	ID               pgtype.UUID        `json:"id"`
+	UserID           pgtype.UUID        `json:"user_id"`
+	PlaceID          pgtype.UUID        `json:"place_id"`
+	ClientMutationID pgtype.UUID        `json:"client_mutation_id"`
+	ObservedAt       pgtype.Timestamptz `json:"observed_at"`
+	ValidationMethod string             `json:"validation_method"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	WasInserted      bool               `json:"was_inserted"`
+}
+
+// Replaying a client mutation returns its original row without creating a
+// second manual attestation. The handler rejects reuse for a different place.
+func (q *Queries) RecordPlaceVisit(ctx context.Context, arg RecordPlaceVisitParams) (RecordPlaceVisitRow, error) {
+	row := q.db.QueryRow(ctx, recordPlaceVisit,
+		arg.UserID,
+		arg.PlaceID,
+		arg.ClientMutationID,
+		arg.ObservedAt,
+	)
+	var i RecordPlaceVisitRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.PlaceID,
+		&i.ClientMutationID,
+		&i.ObservedAt,
+		&i.ValidationMethod,
+		&i.CreatedAt,
+		&i.WasInserted,
+	)
+	return i, err
+}
+
 const replacePlaceTransitAccess = `-- name: ReplacePlaceTransitAccess :exec
 DELETE FROM place_transit_access WHERE place_id = $1
 `
@@ -151,6 +440,42 @@ DELETE FROM place_transit_access WHERE place_id = $1
 func (q *Queries) ReplacePlaceTransitAccess(ctx context.Context, placeID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, replacePlaceTransitAccess, placeID)
 	return err
+}
+
+const savePlace = `-- name: SavePlace :execrows
+INSERT INTO saved_places (user_id, place_id)
+VALUES ($1, $2)
+ON CONFLICT (user_id, place_id) DO NOTHING
+`
+
+type SavePlaceParams struct {
+	UserID  pgtype.UUID `json:"user_id"`
+	PlaceID pgtype.UUID `json:"place_id"`
+}
+
+func (q *Queries) SavePlace(ctx context.Context, arg SavePlaceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, savePlace, arg.UserID, arg.PlaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const unsavePlace = `-- name: UnsavePlace :execrows
+DELETE FROM saved_places WHERE user_id = $1 AND place_id = $2
+`
+
+type UnsavePlaceParams struct {
+	UserID  pgtype.UUID `json:"user_id"`
+	PlaceID pgtype.UUID `json:"place_id"`
+}
+
+func (q *Queries) UnsavePlace(ctx context.Context, arg UnsavePlaceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, unsavePlace, arg.UserID, arg.PlaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const upsertPlace = `-- name: UpsertPlace :one
