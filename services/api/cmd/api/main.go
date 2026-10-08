@@ -24,6 +24,7 @@ import (
 	"singgah/services/api/internal/places"
 	"singgah/services/api/internal/planner"
 	"singgah/services/api/internal/provider/commute"
+	"singgah/services/api/internal/trails"
 )
 
 // version is injected at build time via -ldflags "-X main.version=<ver>".
@@ -70,7 +71,8 @@ func main() {
 		deps.Auth = auth.NewHandler(authSvc)
 		deps.Passport = passport.NewHandler(queries, authSvc)
 		deps.Collections = collections.NewHandler(queries)
-		deps.Places = places.NewHandler(queries)
+		deps.Places = places.NewHandler(queries, authSvc.RequireUser)
+		deps.Trails = trails.NewHandler(queries)
 		if cfg.ScheduleRefreshInterval > 0 {
 			refreshDone = ingest.StartRefresher(ctx, pool, ingest.RefreshConfig{
 				FeedURL:    cfg.GTFSFeedURL,

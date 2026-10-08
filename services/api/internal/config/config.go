@@ -23,7 +23,7 @@ type Config struct {
 	CommuteBaseURL string
 
 	// CORSOrigin is the single allowed cross-origin for browser clients.
-	// Defaults to "*" — acceptable while every endpoint is unauthenticated.
+	// Configure the app origin explicitly in deployments; CORS is not authorization.
 	CORSOrigin string
 
 	// ScheduleRefreshInterval enables the in-process schedule refresh loop

@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -17,6 +18,12 @@ func TestCORSPreflight(t *testing.T) {
 	}
 	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:5173" {
 		t.Fatalf("ACAO = %q", got)
+	}
+	methods := rec.Header().Get("Access-Control-Allow-Methods")
+	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
+		if !strings.Contains(methods, method) {
+			t.Errorf("ACAM = %q, must include %s for a browser mutation request", methods, method)
+		}
 	}
 }
 
