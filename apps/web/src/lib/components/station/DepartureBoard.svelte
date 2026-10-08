@@ -44,10 +44,10 @@
 						{/if}
 						{#if dir.previousDeparture}
 							<span class="prev sg-meta"
-							>lalu {fmtTime(dir.previousDeparture.time)}{dir.previousDeparture.estimated
-								? '≈'
-								: ''}</span
-						>
+								>lalu {fmtTime(dir.previousDeparture.time)}{dir.previousDeparture.estimated
+									? '≈'
+									: ''}</span
+							>
 						{/if}
 					</span>
 					{#if !compact && dir.departures.length > 1}

@@ -33,8 +33,7 @@
 		rows="3"
 		maxlength="2000"
 		placeholder="Catatan tentang stasiun ini…"
-		disabled={phase === 'saving'}
-	></textarea>
+		disabled={phase === 'saving'}></textarea>
 	<div class="journal-actions">
 		<Button
 			variant="secondary"

@@ -58,7 +58,11 @@ describe('groupRoutes', () => {
 });
 
 describe('matchesQuery', () => {
-	const r = route({ shortName: '10C', longName: 'Pelabuhan Tanjung Priok', agencyName: 'TransJakarta' });
+	const r = route({
+		shortName: '10C',
+		longName: 'Pelabuhan Tanjung Priok',
+		agencyName: 'TransJakarta'
+	});
 	it('matches code, corridor, and operator case-insensitively', () => {
 		expect(matchesQuery(r, '10c')).toBe(true);
 		expect(matchesQuery(r, 'priok')).toBe(true);

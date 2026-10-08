@@ -10,7 +10,8 @@ export const load: PageLoad = async ({ fetch }) => {
 		const data = await unwrap(api.GET('/api/v1/collections', { fetch }));
 		return { collections: data.collections, error: '' };
 	} catch (e) {
-		const msg = e instanceof ApiError ? `Koleksi gagal dimuat (${e.status}).` : 'Koleksi gagal dimuat.';
+		const msg =
+			e instanceof ApiError ? `Koleksi gagal dimuat (${e.status}).` : 'Koleksi gagal dimuat.';
 		return { collections: [] as Collection[], error: msg };
 	}
 };

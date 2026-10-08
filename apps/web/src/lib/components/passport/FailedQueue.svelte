@@ -36,8 +36,7 @@
 {#if failed && failed.length > 0}
 	<div class="failed-queue">
 		<p class="fq-note">
-			{failed.length} kunjungan gagal terkirim — server menolak. Kirim ulang
-			atau buang.
+			{failed.length} kunjungan gagal terkirim — server menolak. Kirim ulang atau buang.
 		</p>
 		<ul>
 			{#each failed as m (m.mutationId)}
@@ -46,9 +45,7 @@
 						{new Date(m.body.observedAt).toLocaleString('id-ID')}
 					</span>
 					<span class="fq-stop muted">{m.body.stopId.slice(0, 8)}…</span>
-					<Button variant="secondary" onclick={() => retry(m.mutationId)}
-						>Kirim ulang</Button
-					>
+					<Button variant="secondary" onclick={() => retry(m.mutationId)}>Kirim ulang</Button>
 					<Button variant="ghost" onclick={() => discard(m.mutationId)}>Buang</Button>
 				</li>
 			{/each}

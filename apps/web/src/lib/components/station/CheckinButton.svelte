@@ -89,10 +89,7 @@
 		</p>
 	{:else if phase === 'queued'}
 		<p class="checkin-done" role="status">Tertunda — dikirim saat online.</p>
-		<Button
-			variant="ghost"
-			onclick={() => void replayQueue(idbMutationStore(), sendCheckin)}
-		>
+		<Button variant="ghost" onclick={() => void replayQueue(idbMutationStore(), sendCheckin)}>
 			Kirim sekarang
 		</Button>
 	{:else}
