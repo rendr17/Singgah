@@ -22,9 +22,10 @@
 		align-items: center;
 		gap: var(--sg-space-1);
 		padding: var(--sg-space-1) var(--sg-space-2);
+		border: 1px solid currentColor;
 		border-radius: var(--sg-radius-pill);
 		font-size: var(--sg-text-meta);
-		font-weight: var(--sg-weight-bold);
+		font-weight: var(--sg-weight-semibold);
 		line-height: 1.4;
 	}
 

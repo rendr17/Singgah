@@ -15,6 +15,7 @@
 		variant = 'ghost',
 		type = 'button',
 		class: className,
+		onclick,
 		children,
 		...rest
 	}: Props = $props();
@@ -22,6 +23,7 @@
 
 <button
 	{type}
+	{onclick}
 	aria-label={label}
 	class={['sg-icon-button', `sg-icon-button--${variant}`, className]}
 	{...rest}
@@ -41,6 +43,7 @@
 		cursor: pointer;
 		transition:
 			background-color var(--sg-motion-fast) var(--sg-ease-standard),
+			color var(--sg-motion-fast) var(--sg-ease-standard),
 			scale var(--sg-motion-instant) var(--sg-ease-standard);
 	}
 

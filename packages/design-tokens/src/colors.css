@@ -1,16 +1,38 @@
-/* Core palette — docs/09_DESIGN_SYSTEM.md.
-   App chrome stays neutral; transit colors live in transit.css. */
+/* Quiet editorial chrome. Transit/status colors remain semantic in transit.css. */
 :root {
-	--sg-canvas: #f6f7f7;
+	--sg-canvas: #f5f5f2;
 	--sg-surface: #ffffff;
-	--sg-surface-muted: #eef1f2;
-	--sg-text: #141719;
-	--sg-text-muted: #626a70;
-	--sg-border: #dde1e3;
+	--sg-surface-raised: #ffffff;
+	--sg-surface-muted: #eeefed;
+	--sg-text: #171717;
+	--sg-text-muted: #666b70;
+	--sg-border: #deded9;
+	--sg-border-strong: #a9ada9;
 
-	--sg-brand: #0f6b4f;
-	--sg-brand-strong: #0a543e;
-	--sg-warm: #ff8a3d;
+	/* Reference blue passes text contrast on the off-white canvas. */
+	--sg-brand: #1a6fd1;
+	--sg-brand-strong: #1258aa;
+	--sg-info: #1a6fd1;
+	--sg-warm: #b2e7ff;
+	/* Landing/editorial scene roles. Keep these here so the public story can
+	   use the Cofounder-inspired pixel scene without scattering raw colors in
+	   component CSS. */
+	--sg-hero: #2e88ba;
+	--sg-hero-deep: #0c3a5d;
+	--sg-accent: #ff8a3d;
+	--sg-scene-sky: #e4f1f4;
+	--sg-scene-leaf: #cbdfd2;
+	--sg-scene-route: #1c85be;
+	--sg-scene-sand: #eae4d8;
+	--sg-scene-park: #e7eee1;
+	--sg-scene-museum: #e6edf0;
+	--sg-scene-sun: #f6dfa3;
+	--sg-scene-soft: #f7f9f9;
+
+	--sg-semangat: #d8f2ff;
+	--sg-terpercaya: #218fdd;
+	--sg-nyaman: #f5f5f2;
+	--sg-seimbang: #9a9d9e;
 
 	--sg-success: #287a55;
 	--sg-warning: #a66a16;

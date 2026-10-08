@@ -7,7 +7,7 @@
 	--sg-z-overlay: 40;
 	--sg-z-toast: 50;
 
-	--sg-shadow-card: 0 1px 2px rgb(20 23 25 / 0.06);
-	--sg-shadow-sheet: 0 -4px 16px rgb(20 23 25 / 0.12);
-	--sg-shadow-overlay: 0 8px 24px rgb(20 23 25 / 0.16);
+	--sg-shadow-card: 0 1px 2px rgb(31 29 26 / 0.06);
+	--sg-shadow-sheet: 0 -4px 16px rgb(31 29 26 / 0.12);
+	--sg-shadow-overlay: 0 8px 24px rgb(31 29 26 / 0.14);
 }

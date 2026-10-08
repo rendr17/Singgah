@@ -2,11 +2,14 @@
    Font files are loaded by the consuming app (web uses Fontsource);
    this file only defines the stacks and scale. */
 :root {
-	--sg-font-display: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
-	--sg-font-body: 'Lato', system-ui, -apple-system, 'Segoe UI', sans-serif;
+	/* One self-hosted family keeps editorial headings and app UI coherent. */
+	--sg-font-display: 'Inter Variable', Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+	--sg-font-body: 'Inter Variable', Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
 	--sg-font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Consolas, monospace;
+	/* Short chapter labels follow the reference's editorial mono treatment. */
+	--sg-font-label: var(--sg-font-mono);
 
-	/* type scale: 12/14/16/18/20/24/32 */
+	/* Small UI sizes stay dense; page titles and editorial display stay fluid. */
 	--sg-text-meta: 0.75rem;
 	--sg-text-secondary: 0.875rem;
 	--sg-text-body: 1rem;
@@ -14,11 +17,14 @@
 	--sg-text-section: 1.25rem;
 	--sg-text-screen: 1.5rem;
 	--sg-text-countdown: 2rem;
+	--sg-text-page: clamp(2rem, 3vw, 2.75rem);
+	--sg-text-display: clamp(2.875rem, 4.4vw, 4.25rem);
 
 	--sg-leading-tight: 1.2;
+	--sg-leading-display: 1.08;
 	--sg-leading-normal: 1.45;
 
-	/* Lato is loaded at 400/700 only — use medium/semibold on Inter only. */
+	/* Inter Variable supports the full weight range for both surfaces. */
 	--sg-weight-regular: 400;
 	--sg-weight-medium: 500;
 	--sg-weight-semibold: 600;

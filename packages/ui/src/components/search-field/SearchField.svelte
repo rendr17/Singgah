@@ -36,10 +36,14 @@
 		border-radius: var(--sg-radius-input);
 		background-color: var(--sg-surface);
 		color: var(--sg-text-muted);
+		transition:
+			border-color var(--sg-motion-fast) var(--sg-ease-standard),
+			box-shadow var(--sg-motion-fast) var(--sg-ease-standard);
 	}
 
 	.sg-search:focus-within {
 		border-color: var(--sg-brand);
+		box-shadow: 0 0 0 3px var(--sg-brand-subtle);
 	}
 
 	.sg-search__icon {

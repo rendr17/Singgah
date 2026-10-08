@@ -27,14 +27,16 @@
 		align-items: baseline;
 		justify-content: space-between;
 		gap: var(--sg-space-3);
+		margin-block-end: var(--sg-space-3);
 	}
 
 	.sg-section-heading :global(h1),
 	.sg-section-heading :global(h2),
 	.sg-section-heading :global(h3) {
 		font-family: var(--sg-font-display);
-		font-weight: var(--sg-weight-semibold);
+		font-weight: var(--sg-weight-medium);
 		line-height: var(--sg-leading-tight);
+		letter-spacing: -0.025em;
 		color: var(--sg-text);
 		margin: 0;
 	}

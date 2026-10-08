@@ -1,13 +1,16 @@
-/* Fonts — Fontsource self-hosted. Inter Variable carries the opsz axis, so
-   font-optical-sizing:auto gives Display cuts at large sizes automatically. */
+/* One self-hosted family across the public site and application. */
 @import '@fontsource-variable/inter/index.css';
 @import '@fontsource-variable/inter/opsz.css';
-@import '@fontsource/lato/400.css';
-@import '@fontsource/lato/400-italic.css';
-@import '@fontsource/lato/700.css';
 
 @import '@singgah/design-tokens';
 @import 'tailwindcss';
+
+:root {
+	--sg-radius-button: 7px;
+	--sg-radius-input: 8px;
+	--sg-radius-card: 8px;
+	--sg-radius-sheet: 12px;
+}
 
 /* Base — native semantics stay meaningful on top of Tailwind preflight. */
 body {
@@ -19,6 +22,16 @@ body {
 	font-optical-sizing: auto;
 }
 
+html {
+	scroll-behavior: smooth;
+	scroll-padding-top: var(--sg-space-4);
+}
+
+::selection {
+	background: var(--sg-brand-subtle);
+	color: var(--sg-text);
+}
+
 h1,
 h2,
 h3,
@@ -26,7 +39,7 @@ h4,
 h5,
 h6 {
 	font-family: var(--sg-font-display);
-	font-weight: var(--sg-weight-semibold);
+	font-weight: var(--sg-weight-regular);
 	line-height: var(--sg-leading-tight);
 }
 
@@ -50,13 +63,23 @@ pre {
 /* Shared UI patterns — design-system application layer (docs/08, 09).
    Calm Transit Utility: dividers over cards, explicit states, tokens only. */
 .sg-page-title {
-	font-size: var(--sg-text-screen);
-	margin-block: var(--sg-space-4) var(--sg-space-1);
+	font-size: var(--sg-text-page);
+	font-weight: var(--sg-weight-regular);
+	line-height: 1.1;
+	letter-spacing: -0.045em;
+	margin-block: var(--sg-space-2) var(--sg-space-1);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.sg-page-title {
+		animation: sg-content-enter var(--sg-motion-base) var(--sg-ease-enter) both;
+	}
 }
 
 .sg-meta {
 	color: var(--sg-text-muted);
 	font-size: var(--sg-text-secondary);
+	line-height: 1.55;
 }
 
 .sg-error {
@@ -117,8 +140,78 @@ pre {
 	background-color: var(--sg-surface-muted);
 }
 
-main > section {
-	margin-block-start: var(--sg-space-6);
+main:not(.main--landing):not(.main--map-home) > section {
+	margin-block-start: clamp(2.25rem, 4vw, 3.5rem);
+}
+
+:where(button, input, select, textarea) {
+	font-family: inherit;
+}
+
+:where(input:not([type='checkbox'], [type='radio']), select, textarea) {
+	border-color: var(--sg-border);
+	border-radius: var(--sg-radius-input);
+	background-color: var(--sg-surface);
+	color: var(--sg-text);
+}
+
+:where(input[type='checkbox'], input[type='radio']) {
+	accent-color: var(--sg-brand);
+}
+
+@keyframes sg-content-enter {
+	from {
+		opacity: 0;
+		translate: 0 0.5rem;
+	}
+	to {
+		opacity: 1;
+		translate: 0 0;
+	}
+}
+
+@keyframes sg-content-enter-side {
+	from {
+		opacity: 0;
+		translate: 0.75rem 0;
+	}
+	to {
+		opacity: 1;
+		translate: 0 0;
+	}
+}
+
+@keyframes sg-panel-enter {
+	from {
+		opacity: 0;
+		translate: 0 1.25rem;
+	}
+	to {
+		opacity: 1;
+		translate: 0 0;
+	}
+}
+
+@keyframes sg-panel-enter-side {
+	from {
+		opacity: 0;
+		translate: 1.25rem 0;
+	}
+	to {
+		opacity: 1;
+		translate: 0 0;
+	}
+}
+
+@keyframes sg-row-enter {
+	from {
+		opacity: 0;
+		translate: 0 0.35rem;
+	}
+	to {
+		opacity: 1;
+		translate: 0 0;
+	}
 }
 
 /* Loading placeholder — subtle pulse; the global reduced-motion guard below
@@ -152,6 +245,9 @@ main > section {
 /* Token durations already collapse under reduced-motion (motion.css); this
    guard covers any animation that bypasses the tokens. */
 @media (prefers-reduced-motion: reduce) {
+	html {
+		scroll-behavior: auto;
+	}
 	*,
 	*::before,
 	*::after {

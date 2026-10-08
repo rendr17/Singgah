@@ -5,8 +5,9 @@
 	color-scheme: light;
 
 	--sg-brand-contrast: #ffffff;
-	--sg-brand-subtle: #e4efea;
-	--sg-warm-subtle: #fdeadf;
+	--sg-brand-subtle: #e3f3fc;
+	--sg-warm-subtle: #e3f3fc;
+	--sg-semangat-subtle: #fdf3d7;
 
 	/* visible keyboard focus — docs/13_ACCESSIBILITY.md */
 	--sg-focus-ring: var(--sg-brand);

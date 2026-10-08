@@ -41,7 +41,7 @@
 
 	.sg-field__label {
 		font-size: var(--sg-text-secondary);
-		font-weight: var(--sg-weight-bold);
+		font-weight: var(--sg-weight-semibold);
 		color: var(--sg-text);
 	}
 
@@ -53,6 +53,14 @@
 		background-color: var(--sg-surface);
 		color: var(--sg-text);
 		font: inherit;
+		transition:
+			border-color var(--sg-motion-fast) var(--sg-ease-standard),
+			box-shadow var(--sg-motion-fast) var(--sg-ease-standard);
+	}
+
+	.sg-field__input:focus-visible {
+		border-color: var(--sg-brand);
+		box-shadow: 0 0 0 3px var(--sg-brand-subtle);
 	}
 
 	.sg-field__input::placeholder {

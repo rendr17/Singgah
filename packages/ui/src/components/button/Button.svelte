@@ -32,10 +32,11 @@
 		border-radius: var(--sg-radius-button);
 		font-family: var(--sg-font-body);
 		font-size: var(--sg-text-body);
-		font-weight: var(--sg-weight-bold);
+		font-weight: var(--sg-weight-medium);
 		cursor: pointer;
 		transition:
 			background-color var(--sg-motion-fast) var(--sg-ease-standard),
+			border-color var(--sg-motion-fast) var(--sg-ease-standard),
 			scale var(--sg-motion-instant) var(--sg-ease-standard);
 	}
 
@@ -49,20 +50,23 @@
 	}
 
 	.sg-button--primary {
-		background-color: var(--sg-brand);
+		background-color: var(--sg-text);
 		color: var(--sg-brand-contrast);
+		box-shadow: 0 2px 0 rgb(23 23 23 / 0.16);
 	}
 	.sg-button--primary:hover:not(:disabled) {
-		background-color: var(--sg-brand-strong);
+		background-color: var(--sg-brand);
 	}
 
 	.sg-button--secondary {
 		background-color: var(--sg-surface);
 		border-color: var(--sg-border);
 		color: var(--sg-text);
+		box-shadow: 0 2px 0 rgb(23 23 23 / 0.06);
 	}
 	.sg-button--secondary:hover:not(:disabled) {
 		background-color: var(--sg-surface-muted);
+		border-color: var(--sg-text-muted);
 	}
 
 	.sg-button--ghost {
