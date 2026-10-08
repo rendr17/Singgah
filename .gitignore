@@ -8,6 +8,7 @@ dist/
 .output/
 coverage/
 .turbo/
+/apps/web/test-results/
 
 # Env — never commit real values
 .env
