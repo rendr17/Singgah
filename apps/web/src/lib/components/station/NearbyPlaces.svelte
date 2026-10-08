@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { StateBlock } from '@singgah/ui';
 	import type { components } from '@singgah/api-client';
 
@@ -21,14 +22,10 @@
 	let active = $state<Category | 'all'>('all');
 
 	const present = $derived(
-		places ? [...new Set(places.map((p) => p.category))] as Category[] : []
+		places ? ([...new Set(places.map((p) => p.category))] as Category[]) : []
 	);
 	const shown = $derived(
-		places === null
-			? null
-			: active === 'all'
-				? places
-				: places.filter((p) => p.category === active)
+		places === null ? null : active === 'all' ? places : places.filter((p) => p.category === active)
 	);
 
 	// walkSeconds is a straight-line × detour estimate (ADR-011) — display it
@@ -46,16 +43,20 @@
 	{#if present.length > 1}
 		<div class="chips" role="group" aria-label="Filter kategori">
 			<button
+				type="button"
 				class="chip"
 				class:chip--active={active === 'all'}
+				aria-pressed={active === 'all'}
 				onclick={() => (active = 'all')}
 			>
 				Semua
 			</button>
 			{#each present as cat (cat)}
 				<button
+					type="button"
 					class="chip"
 					class:chip--active={active === cat}
+					aria-pressed={active === cat}
 					onclick={() => (active = active === cat ? 'all' : cat)}
 				>
 					{CATEGORY_LABEL[cat] ?? cat}
@@ -67,9 +68,9 @@
 	{#if shown.length === 0}
 		<StateBlock kind="empty">Tidak ada tempat kategori ini di sekitar sini.</StateBlock>
 	{:else}
-		<ul class="sg-list">
+		<ul class="nearby-place-list">
 			{#each shown as place (place.id)}
-				<li>
+				<li class="place-row">
 					<span class="name">
 						{place.name}
 						{#if place.curated}<span class="curated">Kurasi</span>{/if}
@@ -79,12 +80,20 @@
 						· {place.walkDistanceM} m{#if walkMinutes(place) !== null}
 							· ±{walkMinutes(place)} mnt{/if}
 					</span>
+					<a class="place-detail-link" href={resolve('/places/[id]', { id: place.id })}>Detail →</a>
+					<a
+						class="place-map-link"
+						href={`https://www.google.com/maps/search/?api=1&query=${place.lat},${place.lon}`}
+						target="_blank"
+						rel="noopener noreferrer"
+						aria-label={`Lihat ${place.name} di Google Maps`}>Lihat di peta ↗</a
+					>
 				</li>
 			{/each}
 		</ul>
 		<p class="sg-meta">
-			Jarak garis lurus dari stasiun — estimasi, bukan rute jalan kaki. Data ©
-			kontributor OpenStreetMap.
+			Jarak garis lurus dari stasiun — estimasi, bukan rute jalan kaki. Data © kontributor
+			OpenStreetMap.
 		</p>
 	{/if}
 {/if}
@@ -121,6 +130,39 @@
 		border: 1px solid var(--sg-border);
 		font-size: var(--sg-text-meta);
 		color: var(--sg-text-muted);
+	}
+	.place-row {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: center;
+		gap: var(--sg-space-1) var(--sg-space-3);
+		padding-block: var(--sg-space-3);
+		border-block-start: 1px solid var(--sg-border);
+	}
+	.nearby-place-list {
+		list-style: none;
+		max-width: 40rem;
+		margin: 0;
+		padding: 0;
+	}
+	.nearby-place-list > li:last-child {
+		border-block-end: 1px solid var(--sg-border);
+	}
+	.name,
+	.muted {
+		grid-column: 1;
+	}
+	.place-detail-link {
+		grid-column: 1;
+		color: var(--sg-brand);
+		font-size: var(--sg-text-secondary);
+	}
+	.place-map-link {
+		grid-column: 2;
+		grid-row: 1 / span 2;
+		color: var(--sg-brand);
+		font-size: var(--sg-text-secondary);
+		white-space: nowrap;
 	}
 	.muted {
 		display: block;

@@ -8,18 +8,11 @@
 		badgeTextColor,
 		groupRoutes,
 		matchesQuery,
-		MODE_LABELS,
-		type RouteMode
+		MODE_ICON,
+		MODE_LABELS
 	} from '$lib/route-groups';
 
 	let { data }: PageProps = $props();
-
-	const MODE_ICON: Partial<Record<RouteMode, 'commuter' | 'metro' | 'bus' | 'light-rail'>> = {
-		rail: 'commuter',
-		subway: 'metro',
-		tram: 'light-rail',
-		bus: 'bus'
-	};
 
 	let query = $state('');
 	/** agencyCode of the active chip; '' = semua. */

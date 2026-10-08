@@ -55,7 +55,11 @@
 		entryError = '';
 		// baseUpdatedAt carries the optimistic version check — a 409 means the
 		// row changed elsewhere and overwriting it would silently lose data.
-		const { data, error: e, response } = await authedApi.PATCH('/api/v1/journal/{id}', {
+		const {
+			data,
+			error: e,
+			response
+		} = await authedApi.PATCH('/api/v1/journal/{id}', {
 			params: { path: { id: entry.id } },
 			body: { body: text, baseUpdatedAt: entry.updatedAt }
 		});
@@ -86,18 +90,16 @@
 	}
 </script>
 
-<svelte:head><title>Paspor · Singgah</title></svelte:head>
-
 <h1 class="sg-page-title">Paspor</h1>
 <p class="sg-meta">
-	Catatan stasiun dan rute yang sudah kamu lewati — tersimpan privat, hanya di
-	akses lewat token perangkat ini.
+	Paspor dan catatan bersifat privat, terikat ke sesi anonim perangkat ini. Jika sesi hilang,
+	riwayat tidak dapat dipulihkan.
 </p>
 
 {#if error}
 	<StateBlock kind="error">{error}</StateBlock>
 {:else if progress === null}
-	<div class="sg-skeleton" style:height="6rem"></div>
+	<StateBlock kind="loading">Memuat progres Paspor…</StateBlock>
 {:else}
 	<section>
 		<SectionHeading>Jelajah jaringan</SectionHeading>
@@ -137,7 +139,15 @@
 					<li>
 						<div class="bar-row">
 							<span class="bar-label">{c.title}</span>
-							<span class="bar-count">{c.visitedStops}/{c.totalStops}</span>
+							{#if c.visitedStops === c.totalStops && c.totalStops > 0}
+								<img
+									class="done-stamp"
+									src="/stickers/sticker-koridor-kelar.webp"
+									alt="Koleksi kelar"
+								/>
+							{:else}
+								<span class="bar-count">{c.visitedStops}/{c.totalStops}</span>
+							{/if}
 						</div>
 						<div
 							class="bar"
@@ -148,9 +158,7 @@
 						>
 							<div
 								class="bar-fill"
-								style:width={(c.totalStops
-									? (c.visitedStops / c.totalStops) * 100
-									: 0) + '%'}
+								style:width={(c.totalStops ? (c.visitedStops / c.totalStops) * 100 : 0) + '%'}
 							></div>
 						</div>
 					</li>
@@ -168,10 +176,10 @@
 		{#if entryError}
 			<StateBlock kind="error">{entryError}</StateBlock>
 		{:else if entries === null}
-			<div class="sg-skeleton" style:height="3rem"></div>
+			<StateBlock kind="loading">Memuat catatan…</StateBlock>
 		{:else if entries.length === 0}
-			<StateBlock kind="empty">
-				Belum ada catatan — tulis dari halaman detail stasiun.
+			<StateBlock kind="empty" illustration="/illustrations/empty-transit-world.webp">
+				Belum ada catatan — catat spot, exit, dan cerita receh perjalananmu dari halaman stasiun.
 			</StateBlock>
 		{:else}
 			<ul class="sg-list">
@@ -182,15 +190,10 @@
 								bind:value={editing[entry.id]}
 								rows="3"
 								maxlength="2000"
-								aria-label="Ubah catatan"
-							></textarea>
+								aria-label="Ubah catatan"></textarea>
 							<div class="entry-actions">
-								<Button variant="secondary" onclick={() => saveEntry(entry)}
-									>Simpan</Button
-								>
-								<Button variant="ghost" onclick={() => delete editing[entry.id]}
-									>Batal</Button
-								>
+								<Button variant="secondary" onclick={() => saveEntry(entry)}>Simpan</Button>
+								<Button variant="ghost" onclick={() => delete editing[entry.id]}>Batal</Button>
 							</div>
 						{:else}
 							<p class="entry-body">{entry.body}</p>
@@ -198,9 +201,7 @@
 								{new Date(entry.updatedAt).toLocaleString('id-ID')}
 								{#if entry.stopId}
 									·
-									<a href={resolve('/stations/[id]', { id: entry.stopId })}
-										>lihat stasiun</a
-									>
+									<a href={resolve('/stations/[id]', { id: entry.stopId })}>lihat stasiun</a>
 								{/if}
 								·
 								<button
@@ -225,8 +226,8 @@
 	<section>
 		<SectionHeading>Koridor yang sudah dilewati</SectionHeading>
 		{#if visitedRoutes.length === 0}
-			<StateBlock kind="empty">
-				Belum ada kunjungan tercatat — tandai stasiun dari halaman detailnya.
+			<StateBlock kind="empty" illustration="/illustrations/empty-transit-world.webp">
+				Belum ada kunjungan tercatat — jalan dikit, koleksi nanti nyala.
 			</StateBlock>
 		{:else}
 			<ul class="sg-list">
@@ -237,6 +238,13 @@
 						{/if}
 						<span>{r.name}</span>
 						<span class="muted">{r.visitedStops}/{r.totalStops} stasiun</span>
+						{#if r.visitedStops === r.totalStops && r.totalStops > 0}
+							<img
+								class="done-stamp"
+								src="/stickers/sticker-koridor-kelar.webp"
+								alt="Koridor kelar"
+							/>
+						{/if}
 					</li>
 				{/each}
 			</ul>
@@ -271,11 +279,19 @@
 	.bar-fill {
 		height: 100%;
 		background-color: var(--sg-brand);
+		transition: width var(--sg-motion-base) var(--sg-ease-standard);
 	}
 	.route-row {
 		display: flex;
-		align-items: baseline;
+		align-items: center;
 		gap: var(--sg-space-2);
+	}
+	/* "Koridor kelar" stamp — the brand sticker marks a completed corridor. */
+	.done-stamp {
+		margin-inline-start: auto;
+		height: 2rem;
+		width: auto;
+		rotate: -4deg;
 	}
 	.muted {
 		color: var(--sg-text-muted);

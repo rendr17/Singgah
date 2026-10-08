@@ -1,1600 +1,2365 @@
 <script lang="ts">
-	import { dev } from '$app/environment';
-	import { goto } from '$app/navigation';
-	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
-	import { SvelteMap } from 'svelte/reactivity';
-	import UiPreview from '$lib/dev/UiPreview.svelte';
-	import MapModeSwitcher from '$lib/components/map/MapModeSwitcher.svelte';
-	import MapSearch from '$lib/components/map/MapSearch.svelte';
-	import ModeIcon from '$lib/components/map/ModeIcon.svelte';
-	import StationCombobox from '$lib/components/station/StationCombobox.svelte';
-	import DepartureBoard from '$lib/components/station/DepartureBoard.svelte';
-	import JourneyTimeline from '$lib/components/journey/JourneyTimeline.svelte';
-	import { basemapStyleUrl } from '$lib/basemap';
-	import { facilityLabel } from '$lib/facilities';
-	import {
-		buildIntegrationTiles,
-		loadIntegrationMap,
-		type IntegrationManifest
-	} from '$lib/integration-map';
-	import { loadCachedPlan, saveCachedPlan } from '$lib/plan-cache';
-	import { api } from '$lib/api';
-	import { mapStore } from '$lib/stores/map.svelte';
-	import { unwrap } from '@singgah/api-client';
-	import type { components } from '@singgah/api-client';
-	import type {
-		Feature,
-		FeatureCollection,
-		SchematicLabelPoint,
-		SchematicLine,
-		SchematicPoint
-	} from '@singgah/map';
-	import { Button, IconButton, SearchField, StateBlock, StatusBadge } from '@singgah/ui';
+	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
+	import { Surface } from '@singgah/ui';
+	const appPanel = (panel: 'plan' | 'journey' | 'explore' | 'passport') =>
+		resolve(`/app?panel=${panel}` as `/app?${string}`);
 
-	type Station = components['schemas']['StationSummary'];
-	type StationDetail = components['schemas']['StationDetail'];
-	type Board = components['schemas']['StationDepartures'];
-	type Plan = components['schemas']['JourneyPlan'];
-	type RouteLines = components['schemas']['RouteLineCollection'];
-	type RouteDetail = components['schemas']['RouteDetail'];
-	type RouteSummary = components['schemas']['RouteSummary'];
-	type LegAlternative = components['schemas']['JourneyLegAlternative'];
-
-	const STYLE_URL = basemapStyleUrl();
-
-	let query = $state('');
-	let stations = $state<Station[]>([]);
-	let loading = $state(false);
-	let error = $state('');
-
-	let debounce: ReturnType<typeof setTimeout>;
-	$effect(() => {
-		const q = query.trim();
-		clearTimeout(debounce);
-		if (q === '') {
-			stations = [];
-			error = '';
-			loading = false;
-			return;
+	const explorationThemes = [
+		{
+			name: 'Makan & ngopi',
+			category: 'ISTIRAHAT',
+			description: 'Cari tempat singgah setelah turun dari transit.',
+			art: 'coffee'
+		},
+		{
+			name: 'Taman & ruang kota',
+			category: 'JALAN SANTAI',
+			description: 'Temukan alasan untuk berhenti sejenak dan menikmati kota.',
+			art: 'park'
+		},
+		{
+			name: 'Seni & budaya',
+			category: 'JELAJAH',
+			description: 'Lihat koleksi tempat yang terhubung dengan perjalananmu.',
+			art: 'museum'
 		}
-		loading = true;
-		debounce = setTimeout(async () => {
-			try {
-				const data = await unwrap(api.GET('/api/v1/stations', { params: { query: { query: q } } }));
-				stations = data.stations;
-				error = '';
-			} catch (e) {
-				error = e instanceof Error ? e.message : 'Pencarian gagal.';
-				stations = [];
-			} finally {
-				loading = false;
-			}
-		}, 300);
-		return () => clearTimeout(debounce);
-	});
+	];
 
-	// --- Wide workspace (>=75rem): persistent map per docs/10. The module is
-	// dynamic-imported only when the media query matches, so compact sessions
-	// never download the map stack — Home stays light (docs/08). ---
-	let wide = $state(false);
-	let mapMod = $state<typeof import('@singgah/map') | null>(null);
+	let mobileMenuOpen = $state(false);
+	let headerSolid = $state(false);
+	let heroWorld: HTMLDivElement;
+	let heroVideo: HTMLVideoElement;
+
 	onMount(() => {
-		const mq = matchMedia('(min-width: 75rem)');
-		const sync = () => {
-			wide = mq.matches;
-			if (wide && !mapMod) void import('@singgah/map').then((m) => (mapMod = m));
-			if (wide) loadIntegration();
+		let scrollFrame = 0;
+		let loopTimer: number | undefined;
+		let loopFading = false;
+		const syncHeader = () => {
+			if (scrollFrame) return;
+			scrollFrame = requestAnimationFrame(() => {
+				const next = window.scrollY > 48;
+				if (next !== headerSolid) headerSolid = next;
+				scrollFrame = 0;
+			});
 		};
-		sync();
-		mq.addEventListener('change', sync);
-		return () => mq.removeEventListener('change', sync);
-	});
+		const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
+		const syncMotion = () => {
+			if (motionPreference.matches) heroVideo.pause();
+			else heroVideo.play().catch(() => {});
+		};
+		const markVideoReady = () => {
+			heroWorld.style.setProperty('--hero-video-opacity', '1');
+		};
+		const softenVideoLoop = () => {
+			if (
+				loopFading ||
+				motionPreference.matches ||
+				(!heroVideo.ended &&
+					(!Number.isFinite(heroVideo.duration) ||
+						heroVideo.currentTime < heroVideo.duration - 0.36))
+			)
+				return;
 
-	// Integration-map assets are authored static files — fetched once when
-	// the wide workspace mounts, same as /map. Both panes stay mounted across
-	// mode switches so each map keeps its camera and loaded tiles.
-	let integrationManifest = $state<IntegrationManifest | undefined>();
-	let integrationPoints = $state<SchematicPoint[]>([]);
-	let integrationLines = $state<SchematicLine[]>([]);
-	let integrationLabels = $state<SchematicLabelPoint[]>([]);
-	let integrationFailed = $state(false);
-	let integrationRequested = false;
-	const integrationTiles = $derived(
-		integrationManifest ? buildIntegrationTiles(integrationManifest) : []
-	);
-
-	// Traced corridor keys ("KCI:C") join the routes catalog on
-	// agencyCode:shortName — a tapped stroke resolves to the canonical route
-	// id, and a drawn corridor isolates itself on the artwork (veil).
-	const routesByKey = new SvelteMap<string, RouteSummary>();
-	const keyByRouteId = new SvelteMap<string, string>();
-
-	function loadIntegration() {
-		if (integrationRequested) return;
-		integrationRequested = true;
-		void (async () => {
-			try {
-				const { manifest, points, lines, labels } = await loadIntegrationMap();
-				integrationPoints = points;
-				integrationLines = lines;
-				integrationLabels = labels;
-				integrationManifest = manifest;
-			} catch {
-				integrationFailed = true;
-			}
-		})();
-		// Catalog join degrades independently — taps still open stations.
-		void (async () => {
-			try {
-				const data = await unwrap(api.GET('/api/v1/routes', { params: { query: { limit: 500 } } }));
-				for (const r of data.routes) {
-					if (!r.agencyCode || !r.shortName) continue;
-					const key = `${r.agencyCode}:${r.shortName}`;
-					routesByKey.set(key, r);
-					keyByRouteId.set(r.id, key);
+			loopFading = true;
+			heroWorld.style.setProperty('--hero-video-opacity', '0');
+			loopTimer = window.setTimeout(() => {
+				if (motionPreference.matches) {
+					heroWorld.style.setProperty('--hero-video-opacity', '1');
+					loopFading = false;
+					return;
 				}
-			} catch {
-				/* corridor taps degrade — stations still select */
-			}
-		})();
-	}
-
-	let fromQuery = $state('');
-	let fromStation = $state<Station | null>(null);
-	let toQuery = $state('');
-	let toStation = $state<Station | null>(null);
-
-	let plan = $state<Plan | null>(null);
-	let planning = $state(false);
-	let planError = $state('');
-	let planFromCache = $state(false);
-	let planRoute = $state<FeatureCollection | undefined>(undefined);
-	let corridorRoute = $state<FeatureCollection | undefined>(undefined);
-	// A drawn corridor wins over the journey overlay — the two never stack.
-	const route = $derived(corridorRoute ?? planRoute);
-	const routeActive = $derived((route?.features.length ?? 0) > 0);
-
-	// The workspace draws the itinerary on the map instead of navigating to
-	// /plan — JourneyStopRef carries only id+name, so stop coordinates are
-	// fetched per unique id, once per submitted plan.
-	async function goPlan() {
-		if (!fromStation || !toStation) return;
-		planning = true;
-		planError = '';
-		plan = null;
-		planFromCache = false;
-		planRoute = undefined;
-		closeCorridor();
-		legAlts = {};
-		try {
-			plan = await unwrap(
-				api.GET('/api/v1/journeys', {
-					params: { query: { from: fromStation.id, to: toStation.id } }
-				})
-			);
-			saveCachedPlan(localStorage, `from=${fromStation.id}&to=${toStation.id}`, plan);
-			planRoute = await routeGeoJSON(plan);
-		} catch (e) {
-			const cached = loadCachedPlan(localStorage, `from=${fromStation.id}&to=${toStation.id}`);
-			if (cached) {
-				plan = cached;
-				planFromCache = true;
-				planRoute = await routeGeoJSON(cached);
-			} else {
-				planError = e instanceof Error ? e.message : 'Pencarian rute gagal.';
-			}
-		} finally {
-			planning = false;
-		}
-	}
-
-	// Corridor choice per leg index — a picked alternative swaps that leg's
-	// stops/geometry onto the map with the corridor's own catalog data.
-	let legAlts = $state<Record<number, LegAlternative>>({});
-	async function onLegAlternative(i: number, alt: LegAlternative | null) {
-		if (alt) legAlts[i] = alt;
-		else delete legAlts[i];
-		if (plan) planRoute = await routeGeoJSON(plan);
-	}
-
-	async function routeGeoJSON(p: Plan): Promise<FeatureCollection | undefined> {
-		const itin = p.itineraries[0];
-		if (!itin) return undefined;
-		// Effective legs: a chosen corridor alternative supplies its own line,
-		// stop slice and shape — endpoints and walk legs stay the plan's.
-		const legs = itin.legs.map((l, i) => {
-			const alt = legAlts[i];
-			return alt
-				? {
-						...l,
-						routeId: alt.routeId,
-						line: alt.line,
-						stops: alt.stops,
-						stationCount: alt.stationCount,
-						geometry: alt.geometry
-					}
-				: l;
-		});
-		const ids: string[] = [];
-		for (const leg of legs) {
-			for (const ref of [leg.from, leg.to, ...(leg.stops ?? [])]) {
-				if (ref.id && !ids.includes(ref.id)) ids.push(ref.id);
-			}
-		}
-		const coords: Record<string, [number, number]> = {};
-		const icons: Record<string, string> = {};
-		const { operatorIcon } = await import('@singgah/map');
-		await Promise.all(
-			ids.map(async (id) => {
-				try {
-					const d = await unwrap(api.GET('/api/v1/stations/{id}', { params: { path: { id } } }));
-					coords[id] = [d.station.lon, d.station.lat];
-					icons[id] = operatorIcon(d.station.operator);
-				} catch {
-					// unresolved stops drop out of the drawn line, not the plan
-				}
-			})
-		);
-		// Corridor colors come from the same route-lines catalog the network
-		// layer draws — routeId → hex. Fetch on the plan's own bounds so legs
-		// outside the current viewport still get their color.
-		const colors: Record<string, string> = {};
-		for (const f of netLines?.features ?? []) colors[f.properties.routeId] = f.properties.color;
-		const cvals = Object.values(coords);
-		if (cvals.length > 0) {
-			const lons = cvals.map((c) => c[0]);
-			const lats = cvals.map((c) => c[1]);
-			const bbox = [
-				Math.min(...lons) - 0.01,
-				Math.min(...lats) - 0.01,
-				Math.max(...lons) + 0.01,
-				Math.max(...lats) + 0.01
-			]
-				.map((n) => n.toFixed(5))
-				.join(',');
-			try {
-				const ld = await unwrap(api.GET('/api/v1/map/lines', { params: { query: { bbox } } }));
-				for (const f of ld.lines.features) colors[f.properties.routeId] = f.properties.color;
-			} catch {
-				// missing colors fall back to the brand line — cosmetic only
-			}
-		}
-		const legColor = (leg: (typeof legs)[number]) =>
-			leg.type === 'walk' || !leg.routeId ? '' : (colors[leg.routeId] ?? '');
-		const features: Feature[] = [];
-		for (const leg of legs) {
-			// leg.geometry is a real route shape sliced server-side (GTFS);
-			// the stop-to-stop polyline is the fallback for unshaped routes.
-			const apiLine =
-				leg.geometry?.type === 'LineString'
-					? (leg.geometry.coordinates as [number, number][])
-					: undefined;
-			const seq = [leg.from, ...(leg.stops ?? []), leg.to].filter(
-				(s, i, arr) => i === 0 || s.id !== arr[i - 1].id
-			);
-			const line = apiLine ?? seq.flatMap((s) => (s.id && coords[s.id] ? [coords[s.id]] : []));
-			if (line.length > 1) {
-				features.push({
-					type: 'Feature',
-					geometry: { type: 'LineString', coordinates: line },
-					properties: { dashed: leg.type === 'walk', color: legColor(leg) }
+				heroVideo.currentTime = 0;
+				void heroVideo.play().catch(() => {});
+				window.requestAnimationFrame(() => {
+					heroWorld.style.setProperty('--hero-video-opacity', '1');
+					loopFading = false;
 				});
-			}
-		}
-		// Board/alight points (ends + transfers) get solid dots; stops ridden
-		// through get the hollow marker — `endpoint` splits the two layers.
-		const marked: string[] = [];
-		const pushPoint = (ref: Plan['from'], endpoint: boolean, color = '') => {
-			if (!ref.id || marked.includes(ref.id) || !coords[ref.id]) return;
-			marked.push(ref.id);
-			features.push({
-				type: 'Feature',
-				geometry: { type: 'Point', coordinates: coords[ref.id] },
-				properties: { endpoint, icon: icons[ref.id] ?? '', color }
-			});
+			}, 360);
 		};
-		for (const ref of [p.from, p.to]) pushPoint(ref, true);
-		for (const leg of legs) {
-			const c = legColor(leg);
-			pushPoint(leg.from, true, c);
-			pushPoint(leg.to, true, c);
-		}
-		for (const leg of legs) {
-			const c = legColor(leg);
-			for (const s of leg.stops ?? []) pushPoint(s, false, c);
-		}
-		return { type: 'FeatureCollection', features };
-	}
-
-	// Viewport-scoped markers + route lines, same contract as /map.
-	let mapStations = $state<Station[]>([]);
-	let netLines = $state<RouteLines | undefined>();
-	let stationsError = $state('');
-	// First fetch only — later pans keep the last markers and don't flash a
-	// loading note over a usable map.
-	let stationsFirstLoad = $state(true);
-	// A dead map (style load failure) never emits a viewport, so the stations
-	// state would spin "Memuat…" forever — the note is gated on this instead.
-	let mapFailed = $state(false);
-	// Manual "Garis rute" switch — a drawn journey/corridor still wins, so
-	// effective visibility is `linesVisible && !routeActive` on the map.
-	let linesVisible = $state(false);
-	let mapTimer: ReturnType<typeof setTimeout>;
-	function onViewportChange(bbox: [number, number, number, number]) {
-		clearTimeout(mapTimer);
-		mapTimer = setTimeout(() => {
-			const bboxStr = bbox.map((n) => n.toFixed(5)).join(',');
-			void (async () => {
-				try {
-					const data = await unwrap(
-						api.GET('/api/v1/stations', {
-							params: { query: { bbox: bboxStr, limit: 500 } }
-						})
-					);
-					mapStations = data.stations;
-					stationsError = '';
-				} catch (e) {
-					// Keep the last good marker set — the map note reports the outage
-					// instead of leaving an unexplained empty map.
-					stationsError = e instanceof Error ? e.message : 'Data stasiun gagal dimuat.';
-				} finally {
-					stationsFirstLoad = false;
-				}
-			})();
-			// Route lines degrade independently — decorative layer, same as /map.
-			void (async () => {
-				try {
-					const data = await unwrap(
-						api.GET('/api/v1/map/lines', { params: { query: { bbox: bboxStr } } })
-					);
-					netLines = data.lines;
-				} catch {
-					/* decorative layer — degrade silently */
-				}
-			})();
-		}, 250);
-	}
-
-	// Context inspector — the full station detail surface (same contract as the
-	// /map sheet): catalog detail and the departure board fetch in parallel and
-	// degrade independently, so a timetable outage still shows the station. The
-	// same path serves marker clicks and search picks; coordinates double as
-	// the camera target, so off-screen picks ease into view.
-	let inspector = $state<StationDetail | null>(null);
-	let inspectorState = $state<'idle' | 'loading' | 'error'>('idle');
-	// Selection marker for the integration map — set on click so the halo
-	// doesn't wait for (or flicker on) the detail fetch.
-	let inspectingId = $state<string | undefined>();
-	let board = $state<Board | null>(null);
-	let boardError = $state('');
-	let boardLoading = $state(false);
-	let focusPoint = $state<[number, number] | undefined>();
-	let inspectSeq = 0;
-
-	function inspect(id: string) {
-		const seq = ++inspectSeq;
-		closeCorridor();
-		inspectingId = id;
-		inspector = null;
-		inspectorState = 'loading';
-		board = null;
-		boardError = '';
-		boardLoading = true;
-		void (async () => {
-			try {
-				const data = await unwrap(api.GET('/api/v1/stations/{id}', { params: { path: { id } } }));
-				if (seq !== inspectSeq) return;
-				inspector = data.station;
-				inspectorState = 'idle';
-				focusPoint = [data.station.lon, data.station.lat];
-			} catch {
-				if (seq === inspectSeq) inspectorState = 'error';
-			}
-		})();
-		void (async () => {
-			try {
-				const data = await unwrap(
-					api.GET('/api/v1/stations/{id}/departures', { params: { path: { id } } })
-				);
-				if (seq === inspectSeq) board = data.departures;
-			} catch (e) {
-				if (seq === inspectSeq)
-					boardError = e instanceof Error ? e.message : 'Jadwal sedang tidak tersedia.';
-			} finally {
-				if (seq === inspectSeq) boardLoading = false;
-			}
-		})();
-	}
-
-	// Swap writes name+selected together on both fields — each combobox sees a
-	// programmatic pair and stays closed instead of reopening its dropdown.
-	function swapStations() {
-		[fromStation, toStation] = [toStation, fromStation];
-		[fromQuery, toQuery] = [toQuery, fromQuery];
-	}
-
-	function closeInspector() {
-		inspectSeq++; // stale in-flight fetches must not repopulate the panel
-		closeCorridor();
-		inspectingId = undefined;
-		inspector = null;
-		inspectorState = 'idle';
-		board = null;
-		boardError = '';
-		boardLoading = false;
-	}
-
-	// Corridor drill-down — a line picked from the inspector swaps the station
-	// view for that corridor's ordered stop list and draws its path plus every
-	// halt on the map (the corridor FC replaces the journey overlay while open).
-	let corridor = $state<RouteDetail | null>(null);
-	let corridorState = $state<'idle' | 'loading' | 'error'>('idle');
-	let corridorSeq = 0;
-
-	function closeCorridor() {
-		corridorSeq++;
-		corridor = null;
-		corridorState = 'idle';
-		corridorRoute = undefined;
-	}
-
-	async function openCorridor(lineId: string) {
-		const seq = ++corridorSeq;
-		corridor = null;
-		corridorState = 'loading';
-		corridorRoute = undefined;
-		try {
-			const d = await unwrap(api.GET('/api/v1/routes/{id}', { params: { path: { id: lineId } } }));
-			if (seq !== corridorSeq) return;
-			corridor = d.route;
-			corridorState = 'idle';
-			const fc = await corridorGeoJSON(d.route);
-			if (seq === corridorSeq) corridorRoute = fc;
-		} catch {
-			if (seq === corridorSeq) corridorState = 'error';
-		}
-	}
-
-	// An open corridor isolates itself on the schematic (dim veil) — the key
-	// join is only populated for corridors actually traced on the artwork.
-	const corridorLineKey = $derived(corridor ? keyByRouteId.get(corridor.id) : undefined);
-
-	// Line taps: a corridor stroke on the schematic resolves "OP:CODE" via the
-	// catalog join; the geo map's route lines already carry canonical ids. An
-	// open inspector drills into its corridor view — otherwise the route page
-	// carries the detail (same destination as picking a line in search).
-	function onLineTap(routeId: string) {
-		if (inspector) void openCorridor(routeId);
-		else void goto(resolve('/routes/[id]', { id: routeId }));
-	}
-	function onSchematicLine(key: string) {
-		const r = routesByKey.get(key);
-		if (r) onLineTap(r.id);
-	}
-
-	// Drawable corridor: the catalog's MultiLineString for this route wins
-	// (real ingested shape); a polyline through the ordered stops is the
-	// documented fallback. Every halt becomes a map dot — termini solid,
-	// interior stops hollow — so the drawn route shows each halte it passes.
-	async function corridorGeoJSON(r: RouteDetail): Promise<FeatureCollection> {
-		const stops = r.stops;
-		let geom = netLines?.features.find((f) => f.properties.routeId === r.id)?.geometry
-			.coordinates as [number, number][][] | undefined;
-		if (!geom && stops.length > 1) {
-			const lons = stops.map((s) => s.lon);
-			const lats = stops.map((s) => s.lat);
-			const bbox = [
-				Math.min(...lons) - 0.01,
-				Math.min(...lats) - 0.01,
-				Math.max(...lons) + 0.01,
-				Math.max(...lats) + 0.01
-			]
-				.map((n) => n.toFixed(5))
-				.join(',');
-			try {
-				const ld = await unwrap(api.GET('/api/v1/map/lines', { params: { query: { bbox } } }));
-				geom = ld.lines.features.find((f) => f.properties.routeId === r.id)?.geometry
-					.coordinates as [number, number][][] | undefined;
-			} catch {
-				// falls back to the stop polyline below
-			}
-		}
-		if (!geom && stops.length > 1) geom = [stops.map((s) => [s.lon, s.lat])];
-		const features: Feature[] = [];
-		for (const seg of geom ?? []) {
-			features.push({
-				type: 'Feature',
-				geometry: { type: 'LineString', coordinates: seg },
-				properties: { color: r.color ?? '' }
-			});
-		}
-		stops.forEach((s, i) => {
-			features.push({
-				type: 'Feature',
-				geometry: { type: 'Point', coordinates: [s.lon, s.lat] },
-				properties: {
-					endpoint: i === 0 || i === stops.length - 1,
-					icon: '',
-					color: r.color ?? ''
-				}
-			});
-		});
-		return { type: 'FeatureCollection', features };
-	}
-
-	const agencies = $derived.by(() => {
-		if (!inspector) return [];
-		const out: { name: string; color?: string }[] = [];
-		for (const l of inspector.lines) {
-			const name = l.agencyName ?? l.mode;
-			if (!out.some((a) => a.name === name)) out.push({ name, color: l.color });
-		}
-		return out;
+		syncHeader();
+		syncMotion();
+		heroVideo.addEventListener('canplay', markVideoReady);
+		heroVideo.addEventListener('loadeddata', markVideoReady);
+		heroVideo.addEventListener('timeupdate', softenVideoLoop);
+		heroVideo.addEventListener('ended', softenVideoLoop);
+		if (heroVideo.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) markVideoReady();
+		window.addEventListener('scroll', syncHeader, { passive: true });
+		motionPreference.addEventListener('change', syncMotion);
+		return () => {
+			if (scrollFrame) cancelAnimationFrame(scrollFrame);
+			if (loopTimer) window.clearTimeout(loopTimer);
+			heroVideo.removeEventListener('canplay', markVideoReady);
+			heroVideo.removeEventListener('loadeddata', markVideoReady);
+			heroVideo.removeEventListener('timeupdate', softenVideoLoop);
+			heroVideo.removeEventListener('ended', softenVideoLoop);
+			window.removeEventListener('scroll', syncHeader);
+			motionPreference.removeEventListener('change', syncMotion);
+		};
 	});
 
-	// Entry points that already exist — no placeholders for unbuilt features.
-	const STARTS = [
+	function reveal(node: HTMLElement) {
+		if (!('IntersectionObserver' in window)) return;
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (entries[0]?.isIntersecting) {
+					node.dataset.inView = 'true';
+					observer.disconnect();
+				}
+			},
+			{ threshold: 0.12 }
+		);
+		observer.observe(node);
+		return { destroy: () => observer.disconnect() };
+	}
+	const featureCards = [
 		{
-			href: '/routes',
-			label: 'Semua rute',
-			meta: 'Layanan transit yang tercatat',
-			tint: 'color-mix(in srgb, var(--sg-brand) 12%, var(--sg-surface))',
-			tone: 'var(--sg-brand)',
-			icon: ['M8 6h13', 'M8 12h13', 'M8 18h13', 'M3 6h.01', 'M3 12h.01', 'M3 18h.01']
+			title: 'Rute anti-nyasar',
+			description: 'Rute multimoda yang realistis, dengan waktu jalan dan transit yang jelas.',
+			link: appPanel('plan'),
+			linkLabel: 'Cari rute'
 		},
 		{
-			href: '/providers',
-			label: 'Penyedia data',
-			meta: 'Sumber, lisensi, kesegaran',
-			tint: 'color-mix(in srgb, var(--sg-warning) 14%, var(--sg-surface))',
-			tone: 'var(--sg-warning)',
-			icon: [
-				'M12 8c4.97 0 9-1.34 9-3s-4.03-3-9-3-9 1.34-9 3 4.03 3 9 3z',
-				'M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5',
-				'M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3'
-			]
+			title: 'Jadwal yang jelas sumbernya',
+			description: 'Lihat jadwal keberangkatan dan ketahui kapan datanya diperbarui.',
+			link: appPanel('journey'),
+			linkLabel: 'Lihat perjalanan'
 		},
 		{
-			href: '/explore',
-			label: 'Jelajah',
-			meta: 'Tempat di sekitar transit',
-			tint: 'color-mix(in srgb, var(--sg-warm) 18%, var(--sg-surface))',
-			tone: 'var(--sg-warm)',
-			icon: [
-				'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z',
-				'M16.24 7.76l-2.12 6.36-6.36 2.12 2.12-6.36z'
-			]
+			title: 'City Explorer',
+			description: 'Temukan tempat dekat stasiun: makan, ngopi, taman, museum, sampai hidden gem.',
+			link: appPanel('explore'),
+			linkLabel: 'Jelajah kota'
 		},
 		{
-			href: '/passport',
-			label: 'Paspor',
-			meta: 'Catatan perjalananmu',
-			tint: 'color-mix(in srgb, var(--sg-line-mrt) 12%, var(--sg-surface))',
-			tone: 'var(--sg-line-mrt)',
-			icon: [
-				'M4 19.5A2.5 2.5 0 0 1 6.5 17H20',
-				'M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z'
-			]
+			title: 'Transit Passport',
+			description: 'Tandai stasiun yang kamu datangi, ikuti rute, lalu simpan ceritanya.',
+			link: appPanel('passport'),
+			linkLabel: 'Buka Passport'
 		}
-	] as const;
+	];
 </script>
 
-<svelte:head><title>Beranda · Singgah</title></svelte:head>
+<svelte:head>
+	<title>Singgah — Pergi boleh spontan. Rute jangan.</title>
+	<meta
+		name="description"
+		content="Jelajahi Jakarta dengan rute transit yang masuk akal, tempat menarik dekat stasiun, dan cerita yang tersimpan."
+	/>
+	<meta name="theme-color" content="#1a6fd1" />
+	<meta property="og:type" content="website" />
+	<meta property="og:locale" content="id_ID" />
+	<meta property="og:title" content="Singgah — Pergi boleh spontan. Rute jangan." />
+	<meta
+		property="og:description"
+		content="Rencanakan perjalanan transit, jelajahi tempat dekat stasiun, dan simpan cerita perjalananmu di Jakarta."
+	/>
+	<meta property="og:url" content={page.url.origin + page.url.pathname} />
+	<meta property="og:image" content={`${page.url.origin}/brand/singgah-social-preview.png`} />
+	<meta property="og:image:width" content="1200" />
+	<meta property="og:image:height" content="630" />
+	<meta
+		property="og:image:alt"
+		content="Singgah dan ilustrasi pixel art perjalanan transit di Jakarta"
+	/>
+	<meta name="twitter:card" content="summary_large_image" />
+</svelte:head>
 
-<svelte:window
-	onkeydown={(e) => {
-		if (e.key === 'Escape' && (inspector || inspectorState !== 'idle')) closeInspector();
-	}}
-/>
+<div class="landing">
+	<header class="site-header" class:site-header--solid={headerSolid}>
+		<div class="site-header__inner">
+			<a class="brand" href="#top" aria-label="Singgah, kembali ke beranda">
+				<span>Singgah</span>
+			</a>
 
-<div class="home-compact">
-	<h1 class="sg-page-title">Singgah</h1>
-	<p class="sg-meta">Pergi boleh spontan. Rute jangan.</p>
-	<p>
-		<a href={resolve('/plan')}>Rencana perjalanan →</a> ·
-		<a href={resolve('/map')}>Peta jaringan →</a> ·
-		<a href={resolve('/routes')}>Semua rute →</a> ·
-		<a href={resolve('/providers')}>Penyedia data →</a>
-	</p>
+			<nav class="desktop-nav" aria-label="Navigasi halaman">
+				<a href="#top">Beranda</a>
+				<a href="#features">Fitur</a>
+				<a href="#city-explorer">Jelajah Kota</a>
+				<a href="#passport">Transit Passport</a>
+				<a href="#about">Tentang</a>
+			</nav>
 
-	<div class="search">
-		<SearchField
-			label="Cari stasiun atau halte"
-			placeholder="Cari stasiun atau halte…"
-			bind:value={query}
-		/>
-	</div>
-
-	{#if loading}
-		<span class="sg-sr-only" role="status">Mencari…</span>
-		<ul class="sg-list" aria-hidden="true">
-			{#each [0, 1, 2] as i (i)}
-				<li><span class="sg-skeleton" style:inline-size="{55 - i * 12}%"></span></li>
-			{/each}
-		</ul>
-	{:else if error}
-		<StateBlock kind="error">{error}</StateBlock>
-	{:else if query.trim() !== '' && stations.length === 0}
-		<StateBlock kind="empty">Tidak ada stasiun yang cocok dengan “{query.trim()}”.</StateBlock>
-	{:else if stations.length > 0}
-		<ul class="sg-list">
-			{#each stations as station (station.id)}
-				<li>
-					<a href={resolve('/stations/[id]', { id: station.id })}>
-						<span class="name">{station.name}</span>
-						{#if station.code}<span class="code">{station.code}</span>{/if}
-						<span class="kind">{station.kind}</span>
-					</a>
-				</li>
-			{/each}
-		</ul>
-	{/if}
-
-	{#if dev}
-		<UiPreview />
-	{/if}
-</div>
-
-<div class="workspace">
-	<div class="float">
-		<div class="search-float">
-			<MapSearch
-				onStation={(s) => inspect(s.id)}
-				onLine={(l) => goto(resolve('/routes/[id]', { id: l.id }))}
-			/>
-		</div>
-		<aside class="panel" aria-label="Rencanakan perjalanan">
-			<h2 class="panel-title">Rencanakan Perjalanan</h2>
-
-			<form
-				onsubmit={(e) => {
-					e.preventDefault();
-					goPlan();
-				}}
+			<a class="header-cta" href={resolve('/app')}
+				>Buka Aplikasi <span aria-hidden="true">↗</span></a
 			>
-				<div class="fieldgroup">
-					<div class="fg-row">
-						<i class="fg-dot fg-dot--from" aria-hidden="true"></i>
-						<div class="fg-field">
-							<label for="w-from">Dari</label>
-							<StationCombobox
-								id="w-from"
-								label="Stasiun asal"
-								placeholder="Nama stasiun…"
-								bind:value={fromQuery}
-								bind:selected={fromStation}
-							/>
-						</div>
-					</div>
-					<hr class="fg-sep" />
-					<div class="fg-row">
-						<i class="fg-dot fg-dot--to" aria-hidden="true"></i>
-						<div class="fg-field">
-							<label for="w-to">Ke</label>
-							<StationCombobox
-								id="w-to"
-								label="Stasiun tujuan"
-								placeholder="Nama stasiun…"
-								bind:value={toQuery}
-								bind:selected={toStation}
-							/>
-						</div>
-					</div>
-					<button
-						type="button"
-						class="fg-swap"
-						aria-label="Tukar asal dan tujuan"
-						onclick={swapStations}
+
+			<details class="mobile-menu" bind:open={mobileMenuOpen}>
+				<summary aria-label="Buka menu navigasi">
+					<span>Menu</span>
+					<svg viewBox="0 0 24 24" aria-hidden="true">
+						<path d="M4 7h16M4 12h16M4 17h16" />
+					</svg>
+				</summary>
+				<nav aria-label="Navigasi halaman">
+					<a href="#top" onclick={() => (mobileMenuOpen = false)}>Beranda</a>
+					<a href="#features" onclick={() => (mobileMenuOpen = false)}>Fitur</a>
+					<a href="#city-explorer" onclick={() => (mobileMenuOpen = false)}>Jelajah Kota</a>
+					<a href="#passport" onclick={() => (mobileMenuOpen = false)}>Transit Passport</a>
+					<a href="#about" onclick={() => (mobileMenuOpen = false)}>Tentang</a>
+					<a class="mobile-menu__cta" href={resolve('/app')}>Buka Aplikasi</a>
+				</nav>
+			</details>
+		</div>
+	</header>
+
+	<section class="hero" id="top" aria-labelledby="hero-title">
+		<div class="hero__world" bind:this={heroWorld} aria-hidden="true">
+			<img
+				src="/illustrations/singgah-pixel-world-loop-poster.webp"
+				alt=""
+				width="1280"
+				height="720"
+				fetchpriority="high"
+				decoding="async"
+			/>
+			<video
+				bind:this={heroVideo}
+				autoplay
+				muted
+				playsinline
+				preload="metadata"
+				poster="/illustrations/singgah-pixel-world-loop-poster.webp"
+				tabindex="-1"
+			>
+				<source src="/illustrations/singgah-pixel-world-loop.webm" type="video/webm" />
+				<source src="/illustrations/singgah-pixel-world-loop.mp4" type="video/mp4" />
+			</video>
+		</div>
+		<div class="hero__content container">
+			<div class="hero__copy">
+				<p class="eyebrow"><span class="eyebrow__dot"></span> JELAJAH TRANSIT · JAKARTA</p>
+				<h1 id="hero-title">
+					<span>Pergi boleh spontan.</span>
+					<span>Rute jangan.</span>
+				</h1>
+				<p class="hero__description">
+					Rencanakan perjalanan, temukan tempat dekat transit, dan nikmati kotanya dengan lebih
+					tenang.
+				</p>
+				<div class="hero__actions">
+					<a class="action action--primary" href={appPanel('plan')}>
+						Cari Jalan <span aria-hidden="true">↗</span>
+					</a>
+					<a class="action action--secondary" href="#features"
+						>Jelajahi Singgah <span aria-hidden="true">↓</span></a
 					>
-						<svg
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							width="16"
-							height="16"
+				</div>
+			</div>
+			<div class="hero__chips" aria-hidden="true">
+				<div class="hero-chip hero-chip--one">
+					<span>01</span><strong>Pilih tujuan</strong><small>Mulai dari mana saja</small>
+				</div>
+				<div class="hero-chip hero-chip--two">
+					<span>02</span><strong>Temukan rute</strong><small>Transit + jalan kaki</small>
+				</div>
+				<div class="hero-chip hero-chip--three">
+					<span>03</span><strong>Singgah sebentar</strong><small>Kota punya banyak cerita</small>
+				</div>
+			</div>
+			<a class="hero__scroll" href="#features"
+				>Gulir untuk melihat <span aria-hidden="true">↓</span></a
+			>
+		</div>
+	</section>
+
+	<section
+		class="section section--features"
+		id="features"
+		aria-labelledby="features-title"
+		use:reveal
+	>
+		<div class="container">
+			<div class="section-heading section-heading--center">
+				<div>
+					<p class="eyebrow">BERGERAK · SINGGAH · JELAJAH</p>
+					<h2 id="features-title">Kota terasa lebih dekat<br />saat jalannya jelas.</h2>
+				</div>
+				<p>
+					Satu tempat untuk merencanakan perjalanan, mengikuti informasi transit, dan menemukan
+					alasan untuk singgah.
+				</p>
+			</div>
+
+			<div class="product-window" aria-label="Pintu masuk ke perencana perjalanan Singgah">
+				<div class="product-window__bar">
+					<span class="product-window__brand">Singgah</span><span>Mulai perjalanan</span><span
+						aria-hidden="true">↗</span
+					>
+				</div>
+				<div class="product-window__body">
+					<div class="product-window__panel">
+						<p class="product-window__label">RENCANAKAN PERJALANAN</p>
+						<h3>Ke mana hari ini?</h3>
+						<a class="product-window__field" href={appPanel('plan')}>
+							<span aria-hidden="true">○</span> Titik berangkat
+						</a>
+						<a class="product-window__field" href={appPanel('plan')}>
+							<span aria-hidden="true">◇</span> Tujuan perjalanan
+						</a>
+						<a class="product-window__button" href={appPanel('plan')}
+							>Temukan rute <span aria-hidden="true">↗</span></a
+						>
+						<p>Bandingkan pilihan transit dan langkah kaki dalam satu tampilan.</p>
+					</div>
+					<div class="product-window__scene" aria-hidden="true">
+						<div class="product-window__route"></div>
+						<span class="product-window__stop product-window__stop--one"></span>
+						<span class="product-window__stop product-window__stop--two"></span>
+						<span class="product-window__stop product-window__stop--three"></span>
+						<div class="product-window__note">
+							<strong>Jelajahi dari transit</strong><span>Makan · taman · budaya</span>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<div class="feature-list">
+				{#each featureCards as feature, index (feature.title)}
+					<a href={feature.link} class="feature-row">
+						<span class="feature-row__number">0{index + 1}</span>
+						<span class="feature-row__copy"
+							><strong>{feature.title}</strong><span>{feature.description}</span></span
+						>
+						<span class="feature-row__link"
+							>{feature.linkLabel} <span aria-hidden="true">↗</span></span
+						>
+					</a>
+				{/each}
+			</div>
+		</div>
+	</section>
+
+	<section class="section how-section" aria-labelledby="how-title" use:reveal>
+		<div class="container">
+			<div class="section-heading section-heading--center">
+				<div>
+					<p class="eyebrow">DARI BERANGKAT SAMPAI SINGGAH</p>
+					<h2 id="how-title">Cara Kerja</h2>
+				</div>
+				<p>Cuma 4 langkah, jalan-jalan jadi lebih terarah.</p>
+			</div>
+			<ol class="steps">
+				<li>
+					<span class="step-number">01</span>
+					<h3>Cari tujuan</h3>
+					<p>Masukkan lokasi yang ingin kamu tuju.</p>
+				</li>
+				<li>
+					<span class="step-number">02</span>
+					<h3>Pilih rute</h3>
+					<p>Bandingkan waktu, jalan kaki, dan jumlah transit.</p>
+				</li>
+				<li>
+					<span class="step-number">03</span>
+					<h3>Ikuti perjalanan</h3>
+					<p>Lihat informasi yang kamu butuhkan selama di jalan.</p>
+				</li>
+				<li>
+					<span class="step-number">04</span>
+					<h3>Sampai &amp; jelajah</h3>
+					<p>Turun, cari tempat menarik di sekitar transit.</p>
+				</li>
+			</ol>
+		</div>
+	</section>
+
+	<section
+		class="section explorer-section"
+		id="city-explorer"
+		aria-labelledby="explorer-title"
+		use:reveal
+	>
+		<div class="container">
+			<div class="section-heading">
+				<div>
+					<p class="eyebrow">BOLEH SINGGAH SEBENTAR</p>
+					<h2 id="explorer-title">Jelajah Kota dari Transit</h2>
+				</div>
+				<p>Tempat seru di sekitar stasiun, biar perjalananmu nggak cuma soal sampai.</p>
+			</div>
+
+			<div class="place-grid">
+				{#each explorationThemes as place (place.name)}
+					<a class="place-card" href={appPanel('explore')}>
+						<div
+							class="place-art"
+							class:place-art--coffee={place.art === 'coffee'}
+							class:place-art--park={place.art === 'park'}
+							class:place-art--museum={place.art === 'museum'}
 							aria-hidden="true"
 						>
-							<path d="M8 4v14" />
-							<path d="m8 4-3 3" />
-							<path d="m8 4 3 3" />
-							<path d="M16 20V6" />
-							<path d="m16 20 3-3" />
-							<path d="m16 20-3-3" />
-						</svg>
-					</button>
-				</div>
-				<Button class="cta" type="submit" disabled={!fromStation || !toStation || planning}>
-					{planning ? 'Mencari…' : 'Cari Rute'}
-				</Button>
-			</form>
-
-			{#if planning}
-				<StateBlock kind="loading">Mencari rute…</StateBlock>
-			{:else if planError}
-				<StateBlock kind="error">{planError}</StateBlock>
-			{:else if plan}
-				{#if planFromCache}
-					<StateBlock kind="offline">
-						Rute tersimpan — data per {new Date(plan.source.requestedAt).toLocaleString('id-ID')}
-					</StateBlock>
-				{/if}
-				{#if plan.itineraries.length === 0}
-					<StateBlock kind="empty">
-						Tidak ada rute terjadwal antara {plan.from.name} dan {plan.to.name}.
-					</StateBlock>
-				{:else}
-					{@const itin = plan.itineraries[0]}
-					<div class="plan-summary">
-						<StatusBadge status={itin.status} />
-						<span class="sg-meta">
-							{#if plan.fareReference?.total != null}Rp{plan.fareReference.total.toLocaleString(
-									'id-ID'
-								)} ·
-							{/if}
-							{Math.floor(itin.durationSec / 60)} mnt · {itin.rideLegs} naik
-							{#if itin.transfers > 0}· {itin.transfers} transit{/if}
-						</span>
-					</div>
-					<details class="plan-detail">
-						<summary>Rincian perjalanan</summary>
-						<JourneyTimeline
-							from={plan.from}
-							legs={itin.legs}
-							onSelectAlternative={onLegAlternative}
-						/>
-					</details>
-				{/if}
-			{/if}
-
-			<h3 class="starts-title">Mulai dari sini</h3>
-			<ul class="starts">
-				{#each STARTS as s (s.href)}
-					<li>
-						<a href={resolve(s.href)}>
-							<span class="tile" style:background-color={s.tint} style:color={s.tone}>
-								<svg
-									viewBox="0 0 24 24"
-									fill="none"
-									stroke="currentColor"
-									stroke-width="2"
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									aria-hidden="true"
-								>
-									{#each s.icon as d (d)}
-										<path {d} />
-									{/each}
-								</svg>
-							</span>
-							<span>
-								<strong>{s.label}</strong>
-								<span class="sg-meta">{s.meta}</span>
-							</span>
-						</a>
-					</li>
-				{/each}
-			</ul>
-		</aside>
-	</div>
-
-	<div class="map-canvas">
-		{#if wide && mapMod}
-			{@const TransitMap = mapMod.TransitMap}
-			{@const IntegrationMap = mapMod.IntegrationMap}
-			<!-- Both panes stay mounted across mode switches — hiding, not
-			     recreating, keeps each map's camera and loaded tiles. -->
-			<div class="map-pane" hidden={mapStore.mode !== 'geographic'}>
-				<TransitMap
-					styleUrl={STYLE_URL}
-					data={mapMod.stationsToGeoJSON(mapStations)}
-					zoom={13}
-					lines={netLines}
-					linesVisible={linesVisible && !routeActive}
-					{onViewportChange}
-					onSelect={inspect}
-					onSelectLine={onLineTap}
-					focus={focusPoint}
-					onFailed={() => (mapFailed = true)}
-					{route}
-				/>
-				<label class="lines-toggle">
-					<input type="checkbox" bind:checked={linesVisible} />
-					Garis rute
-				</label>
-			</div>
-			<div class="map-pane" hidden={mapStore.mode !== 'integration'}>
-				{#if integrationFailed}
-					<div class="im-fallback">
-						<StateBlock kind="error">Peta integrasi tidak dapat dimuat.</StateBlock>
-					</div>
-				{:else if integrationManifest}
-					<IntegrationMap
-						tiles={integrationTiles}
-						previewUrl={integrationManifest.preview
-							? `${integrationManifest.assetDir}${integrationManifest.preview.url}${integrationManifest.build ? `?v=${integrationManifest.build}` : ''}`
-							: undefined}
-						worldWidth={integrationManifest.viewBox[2]}
-						worldHeight={integrationManifest.viewBox[3]}
-						points={integrationPoints}
-						lines={integrationLines}
-						labels={integrationLabels}
-						lineKey={corridorLineKey}
-						markers={integrationManifest.markers ?? 'overlay'}
-						attribution={integrationManifest.attribution}
-						selectedId={inspectingId}
-						visible={mapStore.mode === 'integration'}
-						onSelect={inspect}
-						onLineSelect={onSchematicLine}
-						bind:camera={mapStore.integrationCamera}
-					/>
-				{:else}
-					<div class="im-fallback">
-						<StateBlock kind="loading">Memuat peta integrasi…</StateBlock>
-					</div>
-				{/if}
-			</div>
-			{#if !mapFailed && stationsFirstLoad}
-				<div class="map-note">
-					<StateBlock kind="loading">Memuat stasiun…</StateBlock>
-				</div>
-			{:else if !mapFailed && stationsError}
-				<div class="map-note">
-					<StateBlock kind="error">{stationsError}</StateBlock>
-				</div>
-			{/if}
-			<MapModeSwitcher />
-		{:else}
-			<StateBlock kind="loading">Memuat peta…</StateBlock>
-		{/if}
-		<ul class="legend" aria-label="Legenda operator">
-			<li><i style:color="var(--sg-line-krl)"><ModeIcon mode="commuter" /></i>KRL</li>
-			<li><i style:color="var(--sg-line-mrt)"><ModeIcon mode="metro" /></i>MRT</li>
-			<li><i style:color="var(--sg-line-tj)"><ModeIcon mode="bus" /></i>TransJakarta</li>
-			<li><i style:color="var(--sg-line-lrt)"><ModeIcon mode="light-rail" /></i>LRT</li>
-		</ul>
-
-		{#if inspectorState !== 'idle' || inspector}
-			<aside class="inspector" aria-label="Detail stasiun">
-				<IconButton class="close" label="Tutup detail" onclick={closeInspector}>
-					<svg
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						width="18"
-						height="18"
-						aria-hidden="true"
-					>
-						<path d="M18 6 6 18" />
-						<path d="m6 6 12 12" />
-					</svg>
-				</IconButton>
-				{#if inspectorState === 'loading'}
-					<StateBlock kind="loading">Memuat stasiun…</StateBlock>
-				{:else if inspectorState === 'error'}
-					<StateBlock kind="error">Detail stasiun gagal dimuat.</StateBlock>
-				{:else if inspector}
-					{@const st = inspector}
-					{#if corridorState !== 'idle' || corridor}
-						<button type="button" class="insp-back" onclick={closeCorridor}>
-							<svg
-								viewBox="0 0 24 24"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="2"
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								width="14"
-								height="14"
-								aria-hidden="true"><path d="M19 12H5" /><path d="m12 19-7-7 7-7" /></svg
-							>
-							{st.name}
-						</button>
-						{#if corridorState === 'loading'}
-							<StateBlock kind="loading">Memuat koridor…</StateBlock>
-						{:else if corridorState === 'error'}
-							<StateBlock kind="error">Detail koridor gagal dimuat.</StateBlock>
-						{:else if corridor}
-							<div class="corridor-head">
-								<i
-									class="cbadge"
-									style:background-color={corridor.color
-										? `#${corridor.color}`
-										: 'var(--sg-line-default)'}>{corridor.shortName ?? '—'}</i
-								>
-								<h2 class="inspector-name">{corridor.longName ?? corridor.agencyName}</h2>
-							</div>
-							<p class="sg-meta">{corridor.agencyName} · {corridor.stops.length} perhentian</p>
-							{#if corridor.stops.length === 0}
-								<StateBlock kind="empty">Urutan halte koridor ini belum tersedia.</StateBlock>
-							{:else}
-								<ol class="insp-list corridor-stops">
-									{#each corridor.stops as stop (stop.id + stop.seq)}
-										<li>
-											<button
-												type="button"
-												class="insp-link corridor-stop"
-												onclick={() => inspect(stop.id)}
-											>
-												<span class="corridor-seq">{stop.stationNumber ?? stop.seq}</span>
-												{stop.name}
-											</button>
-										</li>
-									{/each}
-								</ol>
-							{/if}
-							<p class="sg-meta insp-note">
-								Data {corridor.source.provider} — urutan mengikuti data provider.
-							</p>
-						{/if}
-					{:else}
-						<h2 class="inspector-name">{inspector.name}</h2>
-						<p class="sg-meta">
-							{inspector.kind}{#if inspector.code}
-								· {inspector.code}{/if}
-						</p>
-						{#if agencies.length > 0}
-							<ul class="chips">
-								{#each agencies as a (a.name)}
-									<li>
-										<i
-											class="badge"
-											style:background-color={a.color ? `#${a.color}` : 'var(--sg-line-default)'}
-										>
-											<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-												<path
-													d="M12 2c-3.4 0-5.8.6-5.8 4v8a3.4 3.4 0 0 0 3.3 3.4L8 20v1h1.6l1.4-2h2l1.4 2H16v-1l-1.5-2.6A3.4 3.4 0 0 0 17.8 14V6c0-3.4-2.4-4-5.8-4zM8 7h8v4H8V7zm1.4 7.5a1.3 1.3 0 1 1 0 2.6 1.3 1.3 0 0 1 0-2.6zm5.2 0a1.3 1.3 0 1 1 0 2.6 1.3 1.3 0 0 1 0-2.6z"
-												/>
-											</svg>
-										</i>{a.name}
-									</li>
-								{/each}
-							</ul>
-						{/if}
-						<p class="sg-meta">
-							{inspector.lines.length} rute melayani · {inspector.transfers.length} transfer tercatat
-						</p>
-						<div class="actions">
-							<a class="btn-ghost" href={resolve('/stations/[id]', { id: inspector.id })}
-								>Halaman stasiun</a
-							>
-							<button
-								class="btn-primary"
-								type="button"
-								onclick={() => {
-									fromStation = st;
-									fromQuery = st.name;
-									closeInspector();
-								}}>Rute dari sini</button
+							<div class="place-art__block place-art__block--one"></div>
+							<div class="place-art__block place-art__block--two"></div>
+							<div class="place-art__sun"></div>
+							<svg viewBox="0 0 64 64" fill="none">
+								{#if place.art === 'coffee'}
+									<path
+										d="M16 23h27v20a9 9 0 0 1-9 9h-9a9 9 0 0 1-9-9V23Zm27 5h5a6 6 0 0 1 0 12h-5M22 16c-2-3 2-4 0-7m10 7c-2-3 2-4 0-7m10 7c-2-3 2-4 0-7"
+									/>
+								{:else if place.art === 'park'}
+									<path d="M32 8 15 31h10L13 45h16v9h6v-9h16L39 31h10L32 8Z" />
+								{:else}
+									<path
+										d="M10 52h44M15 52V23h34v29M10 23 32 11l22 12M22 31h5v7h-5zm15 0h5v7h-5zM29 52V40h7v12"
+									/>
+								{/if}
+							</svg>
+							<span class="place-art__pin"><span></span></span>
+						</div>
+						<div class="place-card__body">
+							<p class="place-category">{place.category}</p>
+							<h3>{place.name}</h3>
+							<p class="place-description">{place.description}</p>
+							<span class="place-card__action"
+								>Jelajahi koleksi <span aria-hidden="true">↗</span></span
 							>
 						</div>
+					</a>
+				{/each}
+			</div>
 
-						<section class="insp-section" aria-label="Keberangkatan">
-							<h3 class="insp-heading">Keberangkatan</h3>
-							{#if boardError}
-								<StateBlock kind="error">{boardError}</StateBlock>
-							{:else if boardLoading}
-								<StateBlock kind="loading">Memuat jadwal…</StateBlock>
-							{:else if board}
-								{#if board.lines.length === 0}
-									<StateBlock kind="empty"
-										>Tidak ada keberangkatan terjadwal dalam {Math.round(board.windowMinutes / 60)} jam
-										ke depan.</StateBlock
-									>
-								{:else}
-									<DepartureBoard lines={board.lines} compact />
-								{/if}
-								<p class="sg-meta insp-note">
-									Jadwal statis {board.source.provider} — bukan posisi live.
-								</p>
-							{/if}
-						</section>
+			<a class="text-link explorer-link" href={appPanel('explore')}>
+				Lihat City Explorer <span aria-hidden="true">↗</span>
+			</a>
+		</div>
+	</section>
 
-						{#if st.lines.length > 0}
-							<section class="insp-section" aria-label="Koridor">
-								<h3 class="insp-heading">Koridor</h3>
-								<ul class="insp-list">
-									{#each st.lines as l (l.id)}
-										<li>
-											<button
-												type="button"
-												class="insp-link corridor-link"
-												onclick={() => openCorridor(l.id)}
-											>
-												<i
-													class="cbadge"
-													style:background-color={l.color
-														? `#${l.color}`
-														: 'var(--sg-line-default)'}>{l.shortName ?? '—'}</i
-												>
-												<span>{l.longName ?? l.agencyName ?? 'Lin'}</span>
-											</button>
-										</li>
-									{/each}
-								</ul>
-							</section>
-						{/if}
+	<section
+		class="section passport-section"
+		id="passport"
+		aria-labelledby="passport-title"
+		use:reveal
+	>
+		<div class="container">
+			<div class="section-heading">
+				<div>
+					<p class="eyebrow">CERITA YANG IKUT PULANG</p>
+					<h2 id="passport-title">Transit Passport &amp; Journal</h2>
+				</div>
+				<p>Setiap perjalanan punya cerita. Kumpulkan, jelajahi, dan simpan semuanya.</p>
+			</div>
 
-						{#if st.transfers.length > 0}
-							<section class="insp-section" aria-label="Transit">
-								<h3 class="insp-heading">Transit</h3>
-								<ul class="insp-list">
-									{#each st.transfers as t (t.toStop.id)}
-										{@const tid = t.toStop.id}
-										<li>
-											{#if tid}
-												<button type="button" class="insp-link" onclick={() => inspect(tid)}>
-													<span>{t.toStop.name}</span>
-													{#if t.walkDistanceM}<span class="sg-meta"
-															>· jalan {t.walkDistanceM} m</span
-														>{/if}
-													{#if t.notes}<span class="sg-meta">· {t.notes}</span>{/if}
-												</button>
-											{:else}
-												{t.toStop.name}
-											{/if}
-										</li>
-									{/each}
-								</ul>
-							</section>
-						{/if}
+			<div class="passport-grid">
+				<Surface class="passport-preview">
+					<div class="preview-caption">
+						<span>TRANSIT PASSPORT</span><span>KENANGAN PERJALANAN</span>
+					</div>
+					<div class="passport-preview__head">
+						<div>
+							<p class="eyebrow">TRANSIT PASSPORT</p>
+							<h3>Stasiun yang pernah kamu singgahi.</h3>
+							<p>Tandai kunjungan dan simpan catatanmu.</p>
+						</div>
+						<img
+							src="/stickers/sticker-checkpoint-masuk.webp"
+							alt=""
+							width="180"
+							height="180"
+							loading="lazy"
+						/>
+					</div>
+					<div class="passport-progress">
+						<div><strong>Catat dengan caramu</strong><span>di Paspor</span></div>
+						<div class="passport-stamps" aria-label="Langkah di Paspor">
+							<span>Pilih stasiun</span><span>Tandai kunjungan</span><span>Tulis cerita</span>
+						</div>
+					</div>
+				</Surface>
 
-						{#if st.facilities.length > 0}
-							<section class="insp-section" aria-label="Fasilitas">
-								<h3 class="insp-heading">Fasilitas</h3>
-								<ul class="insp-list">
-									{#each st.facilities as f (f.type + f.text)}
-										<li>
-											{facilityLabel(f.type)}{#if f.text}<span class="sg-meta">
-													· {f.text}</span
-												>{/if}
-										</li>
-									{/each}
-								</ul>
-							</section>
-						{/if}
-					{/if}
-				{/if}
-			</aside>
-		{/if}
-	</div>
+				<Surface class="journal-preview">
+					<div class="journal-preview__top">
+						<span class="journal-mark" aria-hidden="true"></span>
+						<span>JURNAL PRIBADI</span>
+					</div>
+					<p class="eyebrow">SETELAH PERJALANAN</p>
+					<h3>Yang ingin kamu ingat.</h3>
+					<p class="journal-quote">Cerita kecil dari setiap stasiun bisa kamu simpan di sini.</p>
+					<div class="journal-preview__footer">
+						<span>Catatan pribadi</span>
+						<a href={appPanel('passport')}>Lihat Passport <span aria-hidden="true">↗</span></a>
+					</div>
+				</Surface>
+			</div>
+		</div>
+	</section>
+
+	<section class="section trail-section" aria-labelledby="trail-title" use:reveal>
+		<div class="trail-layout container">
+			<div class="trail-copy">
+				<p class="eyebrow">DUA CARA MELIHAT KOTA</p>
+				<h2 id="trail-title">Pilih peta yang cocok dengan langkahmu.</h2>
+				<p>
+					Lihat posisi stasiun di peta geografis, lalu pindah ke peta integrasi untuk memahami
+					hubungan antarjalur.
+				</p>
+				<a class="text-link" href={resolve('/app')}>
+					Buka peta <span aria-hidden="true">↗</span>
+				</a>
+			</div>
+			<div class="trail-map">
+				<div class="trail-map__heading">
+					<div>
+						<span class="trail-map__kicker">PETA SINGGAH</span>
+						<h3>Dari lokasi ke koneksi.</h3>
+					</div>
+					<img
+						src="/stickers/sticker-side-quest.webp"
+						alt=""
+						width="150"
+						height="150"
+						loading="lazy"
+					/>
+				</div>
+				<ol class="trail-stops">
+					<li>
+						<span class="trail-stop__node"></span><strong>Peta geografis</strong><small
+							>Letak di kota</small
+						>
+					</li>
+					<li>
+						<span class="trail-stop__node"></span><strong>Peta integrasi</strong><small
+							>Hubungan jalur</small
+						>
+					</li>
+					<li>
+						<span class="trail-stop__node"></span><strong>Detail stasiun</strong><small
+							>Jadwal &amp; sekitar</small
+						>
+					</li>
+				</ol>
+			</div>
+		</div>
+	</section>
+
+	<section class="section final-section" aria-labelledby="final-title" use:reveal>
+		<div class="final-cta">
+			<div class="final-cta__copy">
+				<p class="eyebrow">SATU KOTA. BANYAK CERITA.</p>
+				<h2 id="final-title">Untuk yang suka spontan,<br />tapi tetap pengen sampai.</h2>
+				<p>Jelajahi Jakarta dengan perjalanan yang lebih masuk akal.</p>
+				<div class="hero__actions">
+					<a class="action action--light" href={appPanel('plan')}
+						>Cari Jalan <span aria-hidden="true">↗</span></a
+					>
+					<a class="action action--outline-light" href={resolve('/app')}>Buka Aplikasi</a>
+				</div>
+			</div>
+			<div class="final-cta__art" aria-hidden="true">
+				<img
+					src="/illustrations/singgah-pixel-street-v2.webp"
+					alt=""
+					width="1672"
+					height="941"
+					loading="lazy"
+				/>
+				<div class="final-cta__app">
+					<strong>Ke mana hari ini?</strong><span>Mulai perjalananmu dari sini.</span><span
+						class="final-cta__app-line">○ &nbsp; Titik berangkat</span
+					><span class="final-cta__app-line">◇ &nbsp; Tujuan perjalanan</span><span
+						class="final-cta__app-line">Temukan rute &nbsp; ↗</span
+					>
+				</div>
+			</div>
+		</div>
+	</section>
+
+	<footer class="site-footer" id="about">
+		<div class="footer-grid container">
+			<div class="footer-brand">
+				<a class="brand" href="#top">
+					<img src="/brand/app-icon-blue.svg" alt="" width="36" height="36" loading="lazy" />
+					<span>Singgah</span>
+				</a>
+				<p>Jelajah transit Jakarta</p>
+				<p class="footer-note">Kota lebih dekat dengan cerita baik.</p>
+			</div>
+			<div>
+				<h2>Produk</h2>
+				<a href="#features">Fitur</a>
+				<a href="#passport">Transit Passport</a>
+				<a href="#city-explorer">Jelajah Kota</a>
+			</div>
+			<div>
+				<h2>Proyek</h2>
+				<a href="#about">Tentang</a>
+				<a href="https://github.com/rendr17/Singgah" target="_blank" rel="noreferrer">GitHub</a>
+				<a href="https://github.com/rendr17/Singgah" target="_blank" rel="noreferrer">Open Source</a
+				>
+			</div>
+			<div>
+				<h2>Sumber</h2>
+				<a href={resolve('/providers')}>Penyedia data &amp; atribusi</a>
+			</div>
+		</div>
+		<div class="footer-bottom container">
+			<span>Singgah · Jakarta</span><a href="#top">Kembali ke atas ↑</a>
+		</div>
+	</footer>
 </div>
 
 <style>
-	.search {
-		max-width: 32rem;
-		margin-block: var(--sg-space-4);
-	}
-	.name {
-		font-weight: var(--sg-weight-semibold);
-	}
-	.code,
-	.kind {
-		color: var(--sg-text-muted);
-		font-size: var(--sg-text-secondary);
+	:global(html) {
+		scroll-padding-top: 5rem;
 	}
 
-	/* Workspace — docs/10 wide layout: full-bleed persistent map with the
-	   planner floating over it (same overlay idiom as /map's .sheet) plus a
-	   context inspector. Compact keeps the lightweight search home (no map
-	   boot). */
-	.workspace {
+	.landing {
+		--landing-heading: var(--sg-font-display);
+		--landing-label: var(--sg-font-label);
+		color: var(--sg-text);
+		background: var(--sg-canvas);
+		font-family: var(--sg-font-body);
+		overflow: clip;
+	}
+
+	.container {
+		width: min(calc(100% - 2.5rem), 82rem);
+		margin-inline: auto;
+	}
+
+	h1,
+	h2,
+	h3 {
+		font-family: var(--landing-heading);
+		letter-spacing: -0.035em;
+	}
+
+	.site-header {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		z-index: 20;
+		color: white;
+		background: transparent;
+		border-bottom: 1px solid transparent;
+		transition:
+			background-color 280ms ease,
+			color 280ms ease,
+			border-color 280ms ease;
+	}
+
+	.site-header--solid {
+		color: var(--sg-text);
+		background: var(--sg-canvas);
+		border-bottom-color: var(--sg-border);
+	}
+
+	.site-header__inner {
+		width: min(calc(100% - 2.5rem), 82rem);
+		min-height: 5.65rem;
+		margin-inline: auto;
+		display: grid;
+		grid-template-columns: auto 1fr auto;
+		align-items: center;
+		gap: clamp(1rem, 3vw, 3rem);
+	}
+
+	.brand {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.55rem;
+		color: inherit;
+		font-family: var(--landing-heading);
+		font-size: 1.25rem;
+		font-weight: 600;
+		text-decoration: none;
+	}
+
+	.brand img {
+		width: 2.25rem;
+		height: 2.25rem;
+		border-radius: 0.55rem;
+	}
+
+	.desktop-nav {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: clamp(0.75rem, 2vw, 1.8rem);
+	}
+
+	.desktop-nav a,
+	.mobile-menu nav a {
+		min-height: 2.75rem;
+		display: inline-flex;
+		align-items: center;
+		color: inherit;
+		font-size: 0.925rem;
+		font-weight: 500;
+		text-decoration: none;
+		transition: color var(--sg-motion-fast) var(--sg-ease-standard);
+	}
+
+	.desktop-nav a:hover,
+	.mobile-menu nav a:hover {
+		opacity: 0.68;
+	}
+
+	.header-cta,
+	.mobile-menu__cta {
+		min-height: 2.75rem;
+		padding: 0 1rem;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.6rem;
+		border: 1px solid currentColor;
+		border-radius: var(--sg-radius-button);
+		color: inherit;
+		font-weight: 500;
+		text-decoration: none;
+		transition:
+			background-color var(--sg-motion-fast) var(--sg-ease-standard),
+			color var(--sg-motion-fast) var(--sg-ease-standard);
+	}
+
+	.header-cta:hover,
+	.mobile-menu__cta:hover {
+		background: white;
+		color: var(--sg-text) !important;
+	}
+
+	.site-header--solid .header-cta {
+		border-color: var(--sg-text);
+		color: var(--sg-text);
+	}
+
+	.site-header--solid .header-cta:hover {
+		background: var(--sg-text);
+		color: white !important;
+	}
+
+	.mobile-menu {
+		display: none;
+		position: relative;
+	}
+
+	.mobile-menu summary {
+		min-height: 2.75rem;
+		padding: 0 0.75rem;
+		list-style: none;
+		display: inline-flex;
+		align-items: center;
+		gap: 0.55rem;
+		border: 1px solid currentColor;
+		border-radius: var(--sg-radius-button);
+		font-weight: 500;
+		cursor: pointer;
+	}
+
+	.mobile-menu summary::-webkit-details-marker {
 		display: none;
 	}
 
-	@media (min-width: 75rem) {
-		.home-compact {
+	.mobile-menu summary svg {
+		width: 1.2rem;
+		height: 1.2rem;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.8;
+		stroke-linecap: round;
+	}
+
+	.mobile-menu nav {
+		position: absolute;
+		top: calc(100% + 0.5rem);
+		right: 0;
+		width: min(18rem, calc(100vw - 2rem));
+		padding: 0.75rem;
+		display: grid;
+		gap: 0.15rem;
+		border: 1px solid var(--sg-border);
+		border-radius: var(--sg-radius-card);
+		background: var(--sg-surface);
+		box-shadow: var(--sg-shadow-overlay);
+	}
+
+	.mobile-menu nav a {
+		color: var(--sg-text);
+		padding-inline: 0.75rem;
+		border-radius: var(--sg-radius-button);
+	}
+
+	.mobile-menu__cta {
+		margin-top: 0.35rem;
+		color: var(--sg-text) !important;
+	}
+
+	.hero {
+		min-height: max(100svh, 43rem);
+		position: relative;
+		isolation: isolate;
+		overflow: hidden;
+		background: var(--sg-hero);
+		color: white;
+	}
+
+	.hero__world,
+	.hero__world::after {
+		position: absolute;
+		inset: 0;
+	}
+
+	.hero__world {
+		z-index: -1;
+		contain: paint;
+		transform: translateZ(0);
+	}
+
+	.hero__world img,
+	.hero__world video {
+		width: 100%;
+		height: 100%;
+		display: block;
+		object-fit: cover;
+		object-position: center 53%;
+		backface-visibility: hidden;
+	}
+
+	.hero__world video {
+		position: absolute;
+		inset: 0;
+		opacity: var(--hero-video-opacity, 0);
+		transition: opacity 360ms var(--sg-ease-standard);
+		will-change: opacity;
+	}
+
+	.hero__world::after {
+		background:
+			linear-gradient(
+				90deg,
+				color-mix(in srgb, var(--sg-hero-deep) 52%, transparent) 0%,
+				color-mix(in srgb, var(--sg-hero-deep) 31%, transparent) 37%,
+				transparent 70%
+			),
+			linear-gradient(
+				0deg,
+				color-mix(in srgb, var(--sg-hero-deep) 32%, transparent),
+				transparent 28%
+			);
+		content: '';
+	}
+
+	.hero__content {
+		min-height: inherit;
+		position: relative;
+		padding-block: clamp(8.25rem, 17vh, 11rem) 4rem;
+	}
+
+	.hero__copy {
+		max-width: 36rem;
+	}
+
+	.eyebrow {
+		margin: 0 0 0.7rem;
+		color: var(--sg-brand);
+		font-family: var(--landing-label);
+		font-size: 0.68rem;
+		font-weight: 700;
+		letter-spacing: 0.1em;
+		line-height: 1.4;
+		text-transform: uppercase;
+	}
+
+	/* Cofounder-inspired chapter labels are compact and monospaced; the
+	   headline and body remain human-readable sans-serif. */
+	.product-window__label,
+	.place-category,
+	.preview-caption,
+	.journal-preview__top,
+	.trail-map__kicker {
+		font-family: var(--landing-label);
+	}
+
+	.eyebrow__dot {
+		width: 0.5rem;
+		height: 0.5rem;
+		margin-right: 0.4rem;
+		display: inline-block;
+		border-radius: 50%;
+		background: var(--sg-warm);
+	}
+
+	.hero h1 {
+		max-width: 13ch;
+		margin: 0;
+		font-size: clamp(3rem, 4vw, 3.65rem);
+		font-weight: 400;
+		line-height: 1.08;
+		letter-spacing: -0.045em;
+	}
+
+	.hero h1 span {
+		display: block;
+	}
+
+	.hero .eyebrow {
+		margin-bottom: 1.15rem;
+		color: white;
+		font-weight: 500;
+	}
+
+	.hero .eyebrow__dot {
+		background: var(--sg-warm);
+	}
+
+	.hero__description {
+		max-width: 30rem;
+		margin: 1.2rem 0 0;
+		color: color-mix(in srgb, var(--sg-brand-contrast) 94%, transparent);
+		font-size: clamp(1rem, 1.3vw, 1.1rem);
+		line-height: 1.5;
+	}
+
+	.hero__actions {
+		margin-top: 1.5rem;
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+	}
+
+	.action {
+		min-height: 2.9rem;
+		padding: 0 1.25rem;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.75rem;
+		border: 1px solid transparent;
+		border-radius: var(--sg-radius-button);
+		font-weight: 500;
+		text-decoration: none;
+		transition:
+			background-color var(--sg-motion-fast) var(--sg-ease-standard),
+			color var(--sg-motion-fast) var(--sg-ease-standard),
+			transform var(--sg-motion-fast) var(--sg-ease-standard);
+	}
+
+	.action:hover {
+		transform: translateY(-1px);
+	}
+
+	.action--primary {
+		background: var(--sg-warm);
+		color: var(--sg-text);
+	}
+
+	.action--primary:hover {
+		background: white;
+	}
+
+	.action--secondary {
+		border-color: color-mix(in srgb, var(--sg-brand-contrast) 75%, transparent);
+		background: color-mix(in srgb, var(--sg-brand-contrast) 12%, transparent);
+		color: white;
+	}
+
+	.action--secondary:hover {
+		background: color-mix(in srgb, var(--sg-brand-contrast) 22%, transparent);
+	}
+
+	.hero__chips {
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
+	}
+
+	.hero-chip {
+		width: 14rem;
+		padding: 0.9rem 1rem;
+		position: absolute;
+		display: grid;
+		grid-template-columns: auto 1fr;
+		column-gap: 0.7rem;
+		align-items: center;
+		border: 1px solid color-mix(in srgb, var(--sg-brand-contrast) 55%, transparent);
+		border-radius: 0.7rem;
+		background: color-mix(in srgb, var(--sg-brand-contrast) 70%, transparent);
+		box-shadow: 0 0.7rem 2.5rem color-mix(in srgb, var(--sg-hero-deep) 12%, transparent);
+		backdrop-filter: blur(12px);
+		color: var(--sg-text);
+	}
+
+	.hero-chip > span {
+		width: 1.9rem;
+		height: 1.9rem;
+		grid-row: span 2;
+		display: grid;
+		place-items: center;
+		border-radius: 0.4rem;
+		background: var(--sg-warm);
+		font-size: 0.7rem;
+	}
+
+	.hero-chip strong {
+		font-size: 0.84rem;
+		font-weight: 600;
+	}
+
+	.hero-chip small {
+		color: var(--sg-text-muted);
+		font-size: 0.68rem;
+	}
+
+	.hero-chip--one {
+		top: 32%;
+		left: 58%;
+	}
+	.hero-chip--two {
+		top: 52%;
+		left: 69%;
+	}
+	.hero-chip--three {
+		top: 69%;
+		left: 50%;
+	}
+
+	.hero__scroll {
+		position: absolute;
+		bottom: 2rem;
+		left: 0;
+		display: inline-flex;
+		gap: 0.75rem;
+		color: white;
+		font-size: 0.78rem;
+		text-decoration: none;
+	}
+
+	.hero__scroll span {
+		font-size: 1rem;
+	}
+
+	.hero::after {
+		position: absolute;
+		bottom: -1px;
+		left: 0;
+		right: 0;
+		height: 4rem;
+		background: linear-gradient(transparent, var(--sg-canvas));
+		pointer-events: none;
+		content: '';
+	}
+
+	.section {
+		padding-block: clamp(5rem, 8vw, 7.5rem);
+	}
+
+	.section--features {
+		background: var(--sg-canvas);
+	}
+
+	.section-heading {
+		margin-bottom: 3.5rem;
+		display: flex;
+		align-items: end;
+		justify-content: space-between;
+		gap: 2rem;
+	}
+
+	.section-heading h2,
+	.trail-copy h2 {
+		max-width: 18ch;
+		margin: 0;
+		font-size: clamp(2rem, 3.4vw, 3.25rem);
+		font-weight: 400;
+		line-height: 1.13;
+	}
+
+	.section-heading > p,
+	.trail-copy > p:not(.eyebrow) {
+		max-width: 35rem;
+		margin: 0;
+		color: var(--sg-text-muted);
+		font-size: 1.05rem;
+		line-height: 1.6;
+	}
+
+	.product-window {
+		margin: 0 auto clamp(5rem, 8vw, 8rem);
+		overflow: hidden;
+		border: 1px solid var(--sg-border);
+		border-radius: 0.55rem;
+		background: white;
+		box-shadow: 0 2rem 5rem color-mix(in srgb, var(--sg-text) 8%, transparent);
+	}
+
+	.product-window__bar {
+		min-height: 3.5rem;
+		padding-inline: 1.5rem;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		border-bottom: 1px solid var(--sg-border);
+		color: var(--sg-text-muted);
+		font-size: 0.75rem;
+	}
+
+	.product-window__brand {
+		color: var(--sg-text);
+		font-size: 1rem;
+		font-weight: 600;
+	}
+
+	.product-window__body {
+		min-height: 34rem;
+		display: grid;
+		grid-template-columns: minmax(18rem, 0.39fr) minmax(0, 0.61fr);
+	}
+
+	.product-window__panel {
+		padding: clamp(1.5rem, 4vw, 3.5rem);
+		border-right: 1px solid var(--sg-border);
+	}
+
+	.product-window__label {
+		margin: 0;
+		color: var(--sg-brand);
+		font-size: 0.68rem;
+		font-weight: 600;
+		letter-spacing: 0.1em;
+	}
+
+	.product-window__panel h3 {
+		margin: 1.2rem 0 2.5rem;
+		font-size: clamp(2rem, 3vw, 2.8rem);
+		font-weight: 400;
+	}
+
+	.product-window__field {
+		min-height: 3.5rem;
+		margin-bottom: 0.65rem;
+		padding: 0 1rem;
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		border: 1px solid var(--sg-border);
+		border-radius: 0.4rem;
+		color: var(--sg-text-muted);
+		font-size: 0.92rem;
+		text-decoration: none;
+	}
+
+	.product-window__field span {
+		color: var(--sg-brand);
+		font-size: 1.3rem;
+	}
+
+	.product-window__field:hover {
+		border-color: var(--sg-brand);
+		color: var(--sg-text);
+	}
+
+	.product-window__button {
+		min-height: 3.3rem;
+		margin-top: 1.1rem;
+		padding-inline: 1rem;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		border-radius: 0.4rem;
+		background: var(--sg-text);
+		color: white;
+		font-size: 0.9rem;
+		text-decoration: none;
+	}
+
+	.product-window__button:hover {
+		background: var(--sg-brand);
+	}
+
+	.product-window__panel > p:last-child {
+		max-width: 19rem;
+		margin: 1.5rem 0 0;
+		color: var(--sg-text-muted);
+		font-size: 0.88rem;
+		line-height: 1.55;
+	}
+
+	.product-window__scene {
+		position: relative;
+		overflow: hidden;
+		background-color: var(--sg-scene-sky);
+		background-image:
+			linear-gradient(
+				90deg,
+				transparent 48%,
+				color-mix(in srgb, var(--sg-brand-contrast) 85%, transparent) 48%,
+				color-mix(in srgb, var(--sg-brand-contrast) 85%, transparent) 51%,
+				transparent 51%
+			),
+			linear-gradient(
+				transparent 48%,
+				color-mix(in srgb, var(--sg-brand-contrast) 85%, transparent) 48%,
+				color-mix(in srgb, var(--sg-brand-contrast) 85%, transparent) 51%,
+				transparent 51%
+			);
+		background-size: 5.5rem 5.5rem;
+	}
+
+	.product-window__scene::before {
+		width: 32rem;
+		height: 23rem;
+		position: absolute;
+		top: -8rem;
+		right: -10rem;
+		border-radius: 43%;
+		background: var(--sg-scene-leaf);
+		transform: rotate(-20deg);
+		content: '';
+	}
+
+	.product-window__route {
+		width: 55%;
+		height: 54%;
+		position: absolute;
+		top: 24%;
+		left: 18%;
+		border: 0.65rem solid var(--sg-scene-route);
+		border-left: 0;
+		border-radius: 0 6rem 6rem 0;
+		transform: rotate(-13deg);
+	}
+
+	.product-window__stop {
+		width: 1.5rem;
+		height: 1.5rem;
+		position: absolute;
+		z-index: 1;
+		border: 0.4rem solid var(--sg-scene-route);
+		border-radius: 50%;
+		background: white;
+		box-shadow: 0 0 0 0.4rem color-mix(in srgb, var(--sg-brand-contrast) 65%, transparent);
+	}
+
+	.product-window__stop--one {
+		top: 60%;
+		left: 17%;
+	}
+	.product-window__stop--two {
+		top: 24%;
+		left: 54%;
+	}
+	.product-window__stop--three {
+		top: 70%;
+		left: 68%;
+	}
+
+	.product-window__note {
+		min-width: 12rem;
+		padding: 0.9rem 1rem;
+		position: absolute;
+		right: 8%;
+		bottom: 11%;
+		display: grid;
+		gap: 0.2rem;
+		border: 1px solid var(--sg-border);
+		border-radius: 0.4rem;
+		background: white;
+		box-shadow: 0 0.8rem 2rem color-mix(in srgb, var(--sg-text) 10%, transparent);
+		font-size: 0.78rem;
+	}
+
+	.product-window__note span {
+		color: var(--sg-text-muted);
+	}
+
+	.feature-list {
+		border-bottom: 1px solid var(--sg-border);
+	}
+
+	.feature-row {
+		min-height: 8rem;
+		padding: 1.6rem 0.5rem;
+		display: grid;
+		grid-template-columns: 3rem minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 1.5rem;
+		border-top: 1px solid var(--sg-border);
+		color: var(--sg-text);
+		text-decoration: none;
+		transition:
+			background-color 240ms ease,
+			box-shadow 240ms ease;
+	}
+
+	.feature-row:hover {
+		background: var(--sg-surface);
+		box-shadow: inset 3px 0 var(--sg-brand);
+	}
+	.feature-row__number {
+		align-self: start;
+		color: var(--sg-text-muted);
+		font-size: 0.85rem;
+	}
+	.feature-row__copy {
+		display: grid;
+		gap: 0.45rem;
+	}
+	.feature-row__copy strong {
+		font-size: clamp(1.45rem, 2vw, 2rem);
+		font-weight: 400;
+		letter-spacing: -0.03em;
+	}
+	.feature-row__copy > span {
+		max-width: 43rem;
+		color: var(--sg-text-muted);
+		line-height: 1.5;
+	}
+	.feature-row__link {
+		color: var(--sg-brand);
+		white-space: nowrap;
+		font-size: 0.85rem;
+	}
+
+	.text-link {
+		min-height: 2.75rem;
+		margin-top: auto;
+		display: inline-flex;
+		align-items: center;
+		gap: 0.55rem;
+		color: var(--sg-brand);
+		font-weight: 700;
+		text-decoration: none;
+	}
+
+	.text-link span {
+		color: var(--sg-warm);
+		transition: transform var(--sg-motion-fast) var(--sg-ease-standard);
+	}
+
+	.text-link:hover span {
+		transform: translate(2px, -2px);
+	}
+
+	.how-section {
+		background: var(--sg-canvas);
+	}
+
+	.section-heading--center {
+		align-items: center;
+		flex-direction: column;
+		gap: 1rem;
+		text-align: center;
+	}
+
+	.steps {
+		position: relative;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		list-style: none;
+	}
+
+	.steps::before {
+		position: absolute;
+		top: 1.3rem;
+		left: 11%;
+		right: 11%;
+		border-top: 1px dashed var(--sg-border);
+		content: '';
+	}
+
+	.steps li {
+		position: relative;
+		padding: 0 1.5rem 0 0;
+	}
+
+	.step-number {
+		width: 2.65rem;
+		height: 2.65rem;
+		margin-bottom: 1rem;
+		position: relative;
+		z-index: 1;
+		display: grid;
+		place-items: center;
+		border: 1px solid var(--sg-brand);
+		border-radius: 50%;
+		background: var(--sg-canvas);
+		color: var(--sg-brand);
+		font-size: 0.82rem;
+		font-weight: 700;
+	}
+
+	.steps li h3 {
+		margin: 0;
+		font-size: 1.2rem;
+	}
+
+	.steps li p {
+		max-width: 16rem;
+		margin: 0.5rem 0 0;
+		color: var(--sg-text-muted);
+		line-height: 1.5;
+	}
+
+	.explorer-section {
+		background: var(--sg-canvas);
+	}
+
+	.place-grid {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 1rem;
+	}
+
+	.place-card {
+		display: block;
+		padding: 0;
+		overflow: hidden;
+		border: 1px solid var(--sg-border);
+		border-radius: var(--sg-radius-card);
+		color: var(--sg-text);
+		text-decoration: none;
+		transition: border-color var(--sg-motion-fast) var(--sg-ease-standard);
+	}
+
+	.place-card:hover {
+		border-color: var(--sg-brand);
+	}
+
+	.place-art {
+		min-height: 12rem;
+		aspect-ratio: 1.7;
+		position: relative;
+		display: grid;
+		place-items: center;
+		overflow: hidden;
+		background: var(--sg-scene-sand);
+	}
+
+	.place-art--park {
+		background: var(--sg-scene-park);
+	}
+
+	.place-art--museum {
+		background: var(--sg-scene-museum);
+	}
+
+	.place-art__block {
+		position: absolute;
+		bottom: 0;
+		width: 17%;
+		background: color-mix(in srgb, var(--sg-brand) 14%, transparent);
+	}
+
+	.place-art__block--one {
+		left: 10%;
+		height: 33%;
+	}
+
+	.place-art__block--two {
+		right: 12%;
+		height: 48%;
+		background: color-mix(in srgb, var(--sg-accent) 16%, transparent);
+	}
+
+	.place-art__sun {
+		width: 3.5rem;
+		height: 3.5rem;
+		position: absolute;
+		top: 18%;
+		right: 18%;
+		border-radius: 50%;
+		background: var(--sg-scene-sun);
+	}
+
+	.place-art svg {
+		width: 4rem;
+		height: 4rem;
+		position: relative;
+		z-index: 1;
+		stroke: var(--sg-brand);
+		stroke-width: 2.5;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+
+	.place-art__pin {
+		width: 1.25rem;
+		height: 1.55rem;
+		position: absolute;
+		left: 24%;
+		top: 24%;
+		border-radius: 60% 60% 60% 0;
+		background: var(--sg-warm);
+		transform: rotate(-45deg);
+	}
+
+	.place-art__pin span {
+		width: 0.4rem;
+		height: 0.4rem;
+		position: absolute;
+		top: 0.35rem;
+		left: 0.4rem;
+		border-radius: 50%;
+		background: var(--sg-surface);
+	}
+
+	.place-card__body {
+		padding: 1.1rem 1.2rem 1.25rem;
+	}
+
+	.place-category {
+		margin: 0 0 0.45rem;
+		color: var(--sg-brand);
+		font-size: 0.78rem;
+		font-weight: 700;
+	}
+
+	.place-card h3 {
+		margin: 0;
+		font-size: 1.25rem;
+	}
+
+	.place-description {
+		margin: 0.75rem 0 1.25rem;
+		color: var(--sg-text-muted);
+		font-size: 0.95rem;
+		line-height: 1.5;
+	}
+
+	.place-card__action {
+		color: var(--sg-brand);
+		font-size: 0.9rem;
+		font-weight: 600;
+	}
+
+	.explorer-link {
+		margin-top: 1rem;
+	}
+
+	.passport-section {
+		background: var(--sg-canvas);
+	}
+
+	.passport-grid {
+		display: grid;
+		grid-template-columns: 1.1fr 0.9fr;
+		align-items: stretch;
+		gap: 1rem;
+	}
+
+	:global(.passport-preview),
+	:global(.journal-preview) {
+		min-width: 0;
+		padding: clamp(1.25rem, 3vw, 2rem);
+		border-radius: var(--sg-radius-card);
+	}
+
+	.preview-caption,
+	.journal-preview__top {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		color: var(--sg-text-muted);
+		font-size: 0.7rem;
+		font-weight: 700;
+		letter-spacing: 0.09em;
+	}
+
+	.passport-preview__head {
+		min-height: 9.5rem;
+		margin-top: 1.25rem;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+
+	.passport-preview__head h3,
+	:global(.journal-preview h3) {
+		margin: 0;
+		font-size: clamp(1.5rem, 2.7vw, 2.25rem);
+		line-height: 1.15;
+	}
+
+	.passport-preview__head > div > p:last-child {
+		margin: 0.6rem 0 0;
+		color: var(--sg-text-muted);
+	}
+
+	.passport-preview__head img {
+		width: clamp(6rem, 12vw, 9rem);
+		height: clamp(6rem, 12vw, 9rem);
+		flex: none;
+		object-fit: contain;
+	}
+
+	.passport-progress {
+		padding-top: 1rem;
+		border-top: 1px solid var(--sg-border);
+	}
+
+	.passport-progress > div:first-child {
+		display: flex;
+		align-items: baseline;
+		gap: 0.45rem;
+	}
+
+	.passport-progress > div:first-child strong {
+		color: var(--sg-brand);
+		font-family: var(--landing-heading);
+		font-size: 1.35rem;
+	}
+
+	.passport-progress > div:first-child span {
+		color: var(--sg-text-muted);
+		font-size: 0.85rem;
+	}
+
+	.passport-stamps {
+		margin-top: 0.75rem;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.45rem;
+	}
+
+	.passport-stamps span {
+		padding: 0.3rem 0.55rem;
+		border: 1px solid var(--sg-border);
+		border-radius: 0.45rem;
+		color: var(--sg-text-muted);
+		font-size: 0.75rem;
+	}
+
+	:global(.journal-preview) {
+		display: flex;
+		flex-direction: column;
+		background: var(--sg-nyaman);
+	}
+
+	.journal-preview__top {
+		margin-bottom: auto;
+	}
+
+	.journal-mark {
+		width: 0.9rem;
+		height: 0.9rem;
+		border-radius: 0 50% 50% 50%;
+		background: var(--sg-warm);
+		transform: rotate(45deg);
+	}
+
+	:global(.journal-preview > .eyebrow) {
+		margin-top: 1.8rem;
+		font-size: 0.7rem;
+		letter-spacing: 0.08em;
+	}
+
+	:global(.journal-preview h3) {
+		max-width: 14ch;
+	}
+
+	.journal-quote {
+		max-width: 25rem;
+		margin: 1.1rem 0 2rem;
+		color: var(--sg-text-muted);
+		font-size: 1.05rem;
+		font-style: italic;
+		line-height: 1.6;
+	}
+
+	.journal-preview__footer {
+		margin-top: auto;
+		padding-top: 0.9rem;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		border-top: 1px solid var(--sg-border);
+		font-size: 0.8rem;
+	}
+
+	.journal-preview__footer > span {
+		color: var(--sg-text-muted);
+	}
+
+	.journal-preview__footer a {
+		color: var(--sg-brand);
+		font-weight: 700;
+		text-decoration: none;
+	}
+
+	.trail-section {
+		background: var(--sg-canvas);
+	}
+
+	.trail-layout {
+		display: grid;
+		grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+		align-items: center;
+		gap: clamp(2rem, 6vw, 6rem);
+	}
+
+	.trail-copy h2 {
+		max-width: 13ch;
+	}
+
+	.trail-copy > p:not(.eyebrow) {
+		margin-top: 1rem;
+	}
+
+	.trail-copy > .text-link {
+		margin-top: 1rem;
+	}
+
+	.trail-map {
+		padding: clamp(1rem, 2.5vw, 1.75rem);
+		border: 1px solid var(--sg-border);
+		border-radius: var(--sg-radius-card);
+		background: var(--sg-surface);
+	}
+
+	.trail-map__heading {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+
+	.trail-map__kicker {
+		color: var(--sg-brand);
+		font-size: 0.7rem;
+		font-weight: 700;
+		letter-spacing: 0.1em;
+	}
+
+	.trail-map__heading h3 {
+		margin: 0.3rem 0 0;
+		font-size: 1.45rem;
+	}
+
+	.trail-map__heading img {
+		width: 5.5rem;
+		height: 5.5rem;
+		flex: none;
+		object-fit: contain;
+	}
+
+	.trail-stops {
+		margin: 0.5rem 0 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.trail-stops li {
+		min-height: 3.4rem;
+		position: relative;
+		padding-left: 1.9rem;
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+	}
+
+	.trail-stops li:not(:last-child)::before {
+		position: absolute;
+		top: 1.75rem;
+		bottom: -0.05rem;
+		left: 0.55rem;
+		border-left: 2px solid var(--sg-brand);
+		content: '';
+	}
+
+	.trail-stop__node {
+		width: 0.75rem;
+		height: 0.75rem;
+		position: absolute;
+		left: 0.2rem;
+		border: 2px solid var(--sg-brand);
+		border-radius: 50%;
+		background: var(--sg-surface);
+	}
+
+	.trail-stops li:first-child .trail-stop__node {
+		background: var(--sg-brand);
+	}
+
+	.trail-stops li strong {
+		font-size: 0.95rem;
+	}
+
+	.trail-stops li small {
+		margin-left: auto;
+		color: var(--sg-text-muted);
+		font-size: 0.78rem;
+	}
+
+	.final-section {
+		padding-block: 0;
+		background: var(--sg-hero);
+	}
+
+	.final-cta {
+		min-height: 42rem;
+		position: relative;
+		overflow: hidden;
+		color: white;
+	}
+
+	.final-cta__copy {
+		max-width: 40rem;
+		margin-left: max(1.25rem, calc((100vw - 82rem) / 2));
+		padding-block: clamp(7rem, 13vw, 10rem);
+		position: relative;
+		z-index: 2;
+	}
+
+	.final-cta .eyebrow {
+		color: white;
+	}
+
+	.final-cta h2 {
+		margin: 0;
+		font-size: clamp(2.1rem, 4.5vw, 4rem);
+		font-weight: 400;
+		line-height: 1.05;
+		letter-spacing: -0.055em;
+	}
+
+	.final-cta__copy > p:not(.eyebrow) {
+		margin: 1rem 0 0;
+		color: color-mix(in srgb, var(--sg-brand-contrast) 92%, transparent);
+		font-size: 1.05rem;
+	}
+
+	.action--light {
+		background: var(--sg-warm);
+		color: var(--sg-text);
+	}
+
+	.action--light:hover {
+		background: white;
+	}
+
+	.action--outline-light {
+		border-color: color-mix(in srgb, var(--sg-brand-contrast) 55%, transparent);
+		color: white;
+	}
+
+	.action--outline-light:hover {
+		background: color-mix(in srgb, var(--sg-brand-contrast) 10%, transparent);
+	}
+
+	.final-cta__art {
+		position: absolute;
+		inset: 0;
+		z-index: 0;
+	}
+
+	.final-cta__art img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		object-position: center 28%;
+		filter: saturate(0.95);
+	}
+
+	.final-cta__art::after {
+		position: absolute;
+		inset: 0;
+		background: linear-gradient(
+			90deg,
+			color-mix(in srgb, var(--sg-hero-deep) 70%, transparent),
+			color-mix(in srgb, var(--sg-hero-deep) 32%, transparent) 55%,
+			transparent
+		);
+		content: '';
+	}
+
+	.final-cta__app {
+		width: clamp(16rem, 27vw, 26rem);
+		min-height: 19rem;
+		padding: 1.5rem;
+		position: absolute;
+		z-index: 1;
+		right: 7%;
+		bottom: 12%;
+		display: grid;
+		align-content: start;
+		gap: 1rem;
+		border: 1px solid color-mix(in srgb, var(--sg-brand-contrast) 55%, transparent);
+		border-radius: 0.55rem;
+		background: color-mix(in srgb, var(--sg-brand-contrast) 91%, transparent);
+		box-shadow: 0 1.5rem 4rem color-mix(in srgb, var(--sg-hero-deep) 16%, transparent);
+		color: var(--sg-text);
+	}
+
+	.final-cta__app strong {
+		font-size: 1.35rem;
+		font-weight: 600;
+	}
+	.final-cta__app > span:not(.final-cta__app-line) {
+		margin-bottom: 0.8rem;
+		color: var(--sg-text-muted);
+		font-size: 0.85rem;
+	}
+	.final-cta__app-line {
+		min-height: 2.4rem;
+		padding-inline: 0.7rem;
+		display: flex;
+		align-items: center;
+		border: 1px solid var(--sg-border);
+		border-radius: 0.4rem;
+		background: var(--sg-scene-soft);
+		color: var(--sg-text-muted);
+		font-size: 0.75rem;
+	}
+	.final-cta__app-line:last-child {
+		justify-content: center;
+		background: var(--sg-warm);
+		border-color: var(--sg-warm);
+		color: var(--sg-text);
+		font-weight: 600;
+	}
+
+	.site-footer {
+		padding-block: 3rem 1rem;
+		background: var(--sg-surface);
+		border-top: 1px solid var(--sg-border);
+	}
+
+	.footer-grid {
+		padding-bottom: 2.5rem;
+		display: grid;
+		grid-template-columns: 1.4fr repeat(3, 1fr);
+		gap: clamp(1.5rem, 4vw, 4rem);
+	}
+
+	.footer-brand .brand {
+		margin-bottom: 0.6rem;
+	}
+
+	.footer-brand p {
+		margin: 0.3rem 0;
+		color: var(--sg-text-muted);
+	}
+
+	.footer-brand .footer-note {
+		max-width: 15rem;
+		margin-top: 1rem;
+		color: var(--sg-brand);
+		font-family: var(--sg-font-display);
+		font-size: 0.9rem;
+		font-style: italic;
+	}
+
+	.footer-grid h2 {
+		margin: 0 0 0.65rem;
+		font-family: var(--sg-font-body);
+		font-size: 0.85rem;
+		font-weight: 700;
+		letter-spacing: 0;
+	}
+
+	.footer-grid > div:not(:first-child) > a {
+		min-height: 2.25rem;
+		display: flex;
+		align-items: center;
+		color: var(--sg-text-muted);
+		font-size: 0.9rem;
+		text-decoration: none;
+	}
+
+	.footer-grid > div:not(:first-child) > a:hover,
+	.footer-bottom a:hover {
+		color: var(--sg-brand);
+	}
+
+	.footer-grid > div:last-child p {
+		max-width: 14rem;
+		margin: 0;
+		color: var(--sg-text-muted);
+		font-size: 0.9rem;
+		line-height: 1.5;
+	}
+
+	.footer-bottom {
+		min-height: 3.5rem;
+		padding-top: 0.5rem;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		border-top: 1px solid var(--sg-border);
+		color: var(--sg-text-muted);
+		font-size: 0.8rem;
+	}
+
+	.footer-bottom a {
+		min-height: 2.5rem;
+		display: inline-flex;
+		align-items: center;
+		color: var(--sg-text-muted);
+		text-decoration: none;
+	}
+
+	@media (max-width: 900px) {
+		.site-header__inner {
+			grid-template-columns: auto 1fr auto;
+		}
+
+		.desktop-nav {
 			display: none;
 		}
 
-		/* Full-bleed canvas — the workspace drops main's padding AND its 96rem
-		   cap so the map touches the viewport edges right of the nav rail
-		   (web-concept). :has keeps other pages' measure intact. */
-		:global(main:has(> .workspace)) {
-			max-width: none;
-			padding: 0;
-		}
-
-		.workspace {
+		.mobile-menu {
 			display: block;
-			position: relative;
-			height: 100dvh;
 		}
 
-		/* Floating column over the map: global search on top, the planner card
-		   below it. The card scrolls when results grow; the search stays put. */
-		.float {
-			position: absolute;
-			top: var(--sg-space-3);
-			inset-inline-start: var(--sg-space-3);
-			width: 20rem;
-			max-height: calc(100% - var(--sg-space-6));
-			display: flex;
+		.hero__copy {
+			max-width: 32rem;
+		}
+
+		.hero-chip--one {
+			left: auto;
+			right: 4%;
+		}
+
+		.hero-chip--two {
+			left: auto;
+			right: 10%;
+		}
+
+		.hero-chip--three {
+			display: none;
+		}
+
+		.section-heading {
+			align-items: flex-start;
 			flex-direction: column;
-			gap: var(--sg-space-2);
-			z-index: var(--sg-z-sticky);
+			gap: 0.75rem;
 		}
 
-		.search-float {
-			flex: none;
-			border-radius: var(--sg-radius-input);
-			box-shadow: var(--sg-shadow-overlay);
+		.steps li {
+			padding-right: 0.9rem;
+		}
+	}
+
+	@media (max-width: 700px) {
+		.container,
+		.site-header__inner {
+			width: min(calc(100% - 2rem), 82rem);
 		}
 
-		.panel {
-			min-height: 0;
-			overflow-y: auto;
-			padding: var(--sg-space-4);
-			background-color: var(--sg-surface);
-			border: 1px solid var(--sg-border);
-			border-radius: var(--sg-radius-card);
-			box-shadow: var(--sg-shadow-overlay);
+		.site-header__inner {
+			min-height: 4.4rem;
+			grid-template-columns: 1fr auto auto;
+			gap: 0.5rem;
 		}
 
-		.panel-title {
-			font-size: var(--sg-text-section);
-			margin-block: var(--sg-space-1) var(--sg-space-3);
+		.desktop-nav {
+			display: none;
+		}
+		.header-cta {
+			min-height: 2.65rem;
+			padding-inline: 0.6rem;
+			display: inline-flex;
+			font-size: 0.75rem;
 		}
 
-		/* Dari/Ke as one grouped card (web-concept reference): dot markers stand
-		   in for the search glyph, a divider splits the rows, and the swap
-		   button rides the right edge. */
-		.fieldgroup {
-			position: relative;
-			margin-bottom: var(--sg-space-3);
-			border: 1px solid var(--sg-border);
-			border-radius: var(--sg-radius-input);
-			background-color: var(--sg-surface);
-		}
-
-		.fieldgroup:focus-within {
-			border-color: var(--sg-brand);
-		}
-
-		.fg-row {
-			display: flex;
-			align-items: center;
-			gap: var(--sg-space-3);
-			padding: var(--sg-space-1) var(--sg-space-12) var(--sg-space-1) var(--sg-space-3);
-		}
-
-		.fg-dot {
-			inline-size: 0.625rem;
-			block-size: 0.625rem;
-			border-radius: 50%;
-			flex: none;
-		}
-
-		.fg-dot--from {
-			background-color: var(--sg-brand);
-		}
-
-		.fg-dot--to {
-			background-color: var(--sg-danger);
-		}
-
-		.fg-field {
-			flex: 1;
-			min-inline-size: 0;
-		}
-
-		.fg-field label {
+		.mobile-menu {
 			display: block;
-			font-size: var(--sg-text-meta);
-			color: var(--sg-text-muted);
 		}
-
-		.fieldgroup :global(.sg-search) {
-			border: 0;
-			padding-inline: 0;
-			min-height: 2rem;
+		.mobile-menu summary {
+			padding-inline: 0.65rem;
 		}
-
-		.fieldgroup :global(.sg-search:focus-within) {
-			border-color: transparent;
-		}
-
-		.fieldgroup :global(.sg-search__icon) {
+		.mobile-menu summary span {
 			display: none;
 		}
 
-		.fg-sep {
-			border: 0;
-			border-top: 1px solid var(--sg-border);
-			margin: 0 var(--sg-space-3);
+		.hero {
+			min-height: max(100svh, 45rem);
+		}
+		.hero__world img,
+		.hero__world video {
+			object-position: 37% center;
+		}
+		.hero__world::after {
+			background: linear-gradient(
+				180deg,
+				color-mix(in srgb, var(--sg-hero-deep) 34%, transparent),
+				color-mix(in srgb, var(--sg-hero-deep) 24%, transparent) 50%,
+				color-mix(in srgb, var(--sg-hero-deep) 18%, transparent)
+			);
+		}
+		.hero__content {
+			padding-block: clamp(10rem, 20vh, 12rem) 3rem;
+		}
+		.hero__copy {
+			max-width: 25rem;
 		}
 
-		.fg-swap {
-			position: absolute;
-			top: 50%;
-			inset-inline-end: var(--sg-space-2);
-			transform: translateY(-50%);
-			display: grid;
-			place-items: center;
-			inline-size: 2rem;
-			block-size: 2rem;
-			padding: 0;
-			border: 1px solid var(--sg-border);
-			border-radius: 50%;
-			background-color: var(--sg-surface);
-			color: var(--sg-text-muted);
-			cursor: pointer;
+		.hero h1 {
+			max-width: 13ch;
+			font-size: clamp(2.15rem, 8.8vw, 2.8rem);
 		}
 
-		.fg-swap:hover {
-			color: var(--sg-text);
-			border-color: var(--sg-text-muted);
+		.hero__description {
+			max-width: 19rem;
+			margin-top: 1.1rem;
+			font-size: 1rem;
 		}
 
-		.workspace :global(.cta) {
-			width: 100%;
-			justify-content: center;
+		.hero__actions {
+			gap: 0.45rem;
 		}
 
-		.plan-summary {
-			display: flex;
-			align-items: center;
-			flex-wrap: wrap;
-			gap: var(--sg-space-2) var(--sg-space-3);
-			margin-block-start: var(--sg-space-3);
+		.hero__actions .action {
+			min-height: 2.8rem;
+			padding-inline: 0.85rem;
+			font-size: 0.8rem;
 		}
 
-		.plan-detail {
-			margin-block-start: var(--sg-space-2);
-		}
-
-		.plan-detail summary {
-			cursor: pointer;
-			font-size: var(--sg-text-secondary);
-			font-weight: var(--sg-weight-semibold);
-			color: var(--sg-text-muted);
-		}
-
-		.starts-title {
-			font-size: var(--sg-text-secondary);
-			font-weight: var(--sg-weight-bold);
-			color: var(--sg-text);
-			margin: var(--sg-space-6) 0 var(--sg-space-1);
-		}
-
-		.starts {
-			list-style: none;
-			margin: 0;
-			padding: 0;
-		}
-
-		.starts a {
-			display: flex;
-			align-items: center;
-			gap: var(--sg-space-3);
-			min-height: var(--sg-target-min);
-			padding: var(--sg-space-2);
-			border-radius: var(--sg-radius-button);
-			color: var(--sg-text);
-			text-decoration: none;
-		}
-
-		.starts a:hover {
-			background-color: var(--sg-surface-muted);
-		}
-
-		.starts .tile {
-			display: grid;
-			place-items: center;
-			inline-size: 2.25rem;
-			block-size: 2.25rem;
-			border-radius: var(--sg-radius-button);
-			flex: none;
-		}
-
-		.starts .tile svg {
-			inline-size: 1.125rem;
-			block-size: 1.125rem;
-		}
-
-		.starts .sg-meta {
-			display: block;
-		}
-
-		.map-canvas {
-			position: absolute;
-			inset: 0;
-			display: grid;
-			place-items: center;
-			overflow: hidden;
-			background-color: var(--sg-surface-muted);
-		}
-
-		.map-canvas :global(.sg-map) {
-			height: 100%;
-		}
-
-		/* Dual-mode panes + overlay controls — same idioms as /map: panes fill
-		   the canvas and swap via `hidden`; the switcher owns bottom-center so
-		   the legend rides above it. */
-		.map-pane {
-			position: absolute;
-			inset: 0;
-		}
-
-		.map-pane[hidden] {
+		.hero-chip--one,
+		.hero-chip--three {
 			display: none;
 		}
-
-		.im-fallback {
-			display: grid;
-			place-items: center;
-			width: 100%;
-			height: 100%;
-			background-color: var(--sg-surface-muted);
+		.hero-chip--two {
+			top: auto;
+			bottom: 18%;
+			left: auto;
+			right: 0;
+		}
+		.hero__scroll {
+			bottom: 1.5rem;
 		}
 
-		.lines-toggle {
+		.section {
+			padding-block: 3.5rem;
+		}
+
+		.section-heading {
+			margin-bottom: 1.5rem;
+		}
+
+		.section-heading h2,
+		.trail-copy h2 {
+			font-size: clamp(1.9rem, 8vw, 2.65rem);
+		}
+
+		.product-window {
+			margin-bottom: 3rem;
+		}
+		.product-window__bar {
+			padding-inline: 1rem;
+		}
+		.product-window__body {
+			grid-template-columns: 1fr;
+		}
+		.product-window__panel {
+			padding: 1.5rem;
+			border-right: 0;
+			border-bottom: 1px solid var(--sg-border);
+		}
+		.product-window__panel h3 {
+			margin-block: 0.8rem 1.5rem;
+		}
+		.product-window__scene {
+			min-height: 17rem;
+		}
+		.feature-row {
+			grid-template-columns: 2rem minmax(0, 1fr);
+			align-items: start;
+			gap: 0.7rem;
+		}
+		.feature-row__link {
+			grid-column: 2;
+		}
+
+		.section-heading--center {
+			align-items: flex-start;
+		}
+
+		.steps {
+			grid-template-columns: 1fr;
+			gap: 1.4rem;
+		}
+
+		.steps::before {
+			top: 1.4rem;
+			bottom: 1.4rem;
+			left: 1.25rem;
+			right: auto;
+			border-top: 0;
+			border-left: 1px dashed var(--sg-border);
+		}
+
+		.steps li {
+			min-height: 4.5rem;
+			padding: 0 0 0 3.75rem;
+		}
+
+		.step-number {
 			position: absolute;
-			top: var(--sg-space-3);
-			inset-inline-end: var(--sg-space-3);
-			display: inline-flex;
-			align-items: center;
-			gap: var(--sg-space-2);
-			min-height: var(--sg-target-min);
-			padding: 0 var(--sg-space-3);
-			background-color: var(--sg-surface);
-			border: 1px solid var(--sg-border);
-			border-radius: var(--sg-radius-button);
-			box-shadow: var(--sg-shadow-overlay);
-			font-size: var(--sg-text-secondary);
-			z-index: 1;
-		}
-
-		/* Station-layer status — same .map-note idiom as /map: a centered chip
-		   under the top edge, inert so it never eats map gestures. */
-		.map-note {
-			position: absolute;
-			top: var(--sg-space-3);
-			inset-inline: var(--sg-space-3);
-			display: flex;
-			justify-content: center;
-			pointer-events: none;
-			z-index: 1;
-		}
-
-		.legend {
-			position: absolute;
-			bottom: calc(var(--sg-space-3) + var(--sg-target-min) + var(--sg-space-3));
-			left: 50%;
-			transform: translateX(-50%);
-			display: flex;
-			gap: var(--sg-space-3);
-			list-style: none;
-			margin: 0;
-			padding: var(--sg-space-1) var(--sg-space-3);
-			background-color: var(--sg-surface);
-			border: 1px solid var(--sg-border);
-			border-radius: var(--sg-radius-pill);
-			box-shadow: var(--sg-shadow-card);
-			font-size: var(--sg-text-meta);
-			color: var(--sg-text-muted);
-		}
-
-		.legend li {
-			display: flex;
-			align-items: center;
-			gap: var(--sg-space-1);
-		}
-
-		.legend i {
-			display: inline-flex;
-		}
-
-		.inspector {
-			position: absolute;
-			top: var(--sg-space-3);
-			inset-inline-end: var(--sg-space-3);
-			width: 19rem;
-			max-height: calc(100% - var(--sg-space-6));
-			overflow-y: auto;
-			padding: var(--sg-space-4);
-			background-color: var(--sg-surface);
-			border: 1px solid var(--sg-border);
-			border-radius: var(--sg-radius-card);
-			box-shadow: var(--sg-shadow-overlay);
-			z-index: var(--sg-z-sticky);
-		}
-
-		.inspector :global(.close) {
-			position: absolute;
-			top: var(--sg-space-2);
-			inset-inline-end: var(--sg-space-2);
-		}
-
-		.inspector-name {
-			font-size: var(--sg-text-section);
-			margin: 0 var(--sg-space-6) 0 0;
-		}
-
-		.chips {
-			display: flex;
-			flex-wrap: wrap;
-			gap: var(--sg-space-2);
-			list-style: none;
-			margin: var(--sg-space-2) 0;
-			padding: 0;
-		}
-
-		.chips li {
-			display: inline-flex;
-			align-items: center;
-			gap: var(--sg-space-2);
-			padding: var(--sg-space-1) var(--sg-space-2) var(--sg-space-1) var(--sg-space-1);
-			border: 1px solid var(--sg-border);
-			border-radius: var(--sg-radius-button);
-			font-size: var(--sg-text-meta);
-			font-weight: var(--sg-weight-semibold);
-			min-height: 1.75rem;
-		}
-
-		.chips .badge {
-			display: grid;
-			place-items: center;
-			inline-size: 1.375rem;
-			block-size: 1.375rem;
-			border-radius: calc(var(--sg-radius-input) - 2px);
-			color: #fff;
-		}
-
-		.chips .badge svg {
-			inline-size: 0.875rem;
-			block-size: 0.875rem;
-		}
-
-		.insp-section {
-			margin-block-start: var(--sg-space-3);
-			padding-block-start: var(--sg-space-3);
-			border-top: 1px solid var(--sg-border);
-		}
-
-		.insp-heading {
-			margin: 0;
-			font-size: var(--sg-text-secondary);
-			font-weight: var(--sg-weight-bold);
-			color: var(--sg-text-muted);
-		}
-
-		.insp-list {
-			list-style: none;
-			margin: var(--sg-space-1) 0 0;
-			padding: 0;
-			font-size: var(--sg-text-secondary);
-		}
-
-		.insp-list li {
-			padding-block: var(--sg-space-1);
-		}
-
-		.insp-link {
-			display: flex;
-			align-items: center;
-			flex-wrap: wrap;
-			gap: var(--sg-space-1);
-			width: 100%;
-			min-height: var(--sg-target-min);
-			padding: 0;
-			background: none;
-			border: 0;
-			font: inherit;
-			color: var(--sg-brand);
-			text-align: left;
-			cursor: pointer;
-		}
-
-		.insp-link:hover {
-			text-decoration: underline;
-		}
-
-		.insp-note {
-			margin-block: var(--sg-space-2) 0;
-		}
-
-		.insp-back {
-			display: inline-flex;
-			align-items: center;
-			gap: var(--sg-space-1);
-			min-height: var(--sg-target-min);
-			margin-inline-start: calc(-1 * var(--sg-space-2));
-			margin-block-end: var(--sg-space-1);
-			padding: 0 var(--sg-space-2);
-			background: none;
-			border: 0;
-			border-radius: var(--sg-radius-button);
-			font: inherit;
-			font-size: var(--sg-text-secondary);
-			font-weight: var(--sg-weight-semibold);
-			color: var(--sg-brand);
-			cursor: pointer;
-		}
-
-		.insp-back:hover {
-			text-decoration: underline;
-		}
-
-		.corridor-head {
-			display: flex;
-			align-items: center;
-			gap: var(--sg-space-2);
-			margin-block-end: var(--sg-space-1);
-		}
-
-		.corridor-head .inspector-name {
+			left: 0;
+			top: 0;
 			margin: 0;
 		}
 
-		.cbadge {
-			display: inline-grid;
-			place-items: center;
-			min-inline-size: 1.75rem;
-			block-size: 1.75rem;
-			padding-inline: var(--sg-space-1);
-			border-radius: calc(var(--sg-radius-input) - 2px);
-			color: #fff;
-			font-size: var(--sg-text-meta);
-			font-weight: var(--sg-weight-bold);
-			font-style: normal;
-			flex: none;
+		.steps li p {
+			max-width: 100%;
 		}
 
-		.corridor-link {
-			color: var(--sg-text);
+		.place-grid {
+			grid-auto-columns: minmax(16rem, 82vw);
+			grid-auto-flow: column;
+			grid-template-columns: none;
+			overflow-x: auto;
+			padding-bottom: 0.5rem;
+			scroll-snap-type: x mandatory;
+			overscroll-behavior-inline: contain;
 		}
 
-		.corridor-stops {
-			max-height: 16rem;
-			overflow-y: auto;
+		.place-grid > * {
+			scroll-snap-align: start;
 		}
 
-		.corridor-seq {
-			display: inline-block;
-			min-inline-size: 1.75rem;
-			color: var(--sg-text-muted);
-			font-size: var(--sg-text-meta);
-			font-variant-numeric: tabular-nums;
+		.passport-grid,
+		.trail-layout {
+			grid-template-columns: 1fr;
 		}
 
-		.actions {
-			display: flex;
-			gap: var(--sg-space-2);
-			margin-block-start: var(--sg-space-3);
+		.passport-grid {
+			gap: 0.75rem;
 		}
 
-		.actions a,
-		.actions button {
-			display: inline-flex;
-			align-items: center;
-			justify-content: center;
-			flex: 1;
-			min-height: var(--sg-target-min);
-			padding: var(--sg-space-2) var(--sg-space-3);
-			border-radius: var(--sg-radius-button);
-			font-size: var(--sg-text-secondary);
-			font-weight: var(--sg-weight-semibold);
-			font-family: inherit;
-			text-decoration: none;
-			cursor: pointer;
+		.trail-layout {
+			gap: 1.75rem;
 		}
 
-		.btn-primary {
-			border: 0;
-			background-color: var(--sg-brand);
-			color: var(--sg-brand-contrast);
+		.final-cta {
+			min-height: 44rem;
+		}
+		.final-cta__copy {
+			max-width: 28rem;
+			margin-inline: 1rem;
+			padding-block: 5rem;
+		}
+		.final-cta__art img {
+			object-position: 37% center;
+		}
+		.final-cta__art::after {
+			background: linear-gradient(
+				180deg,
+				color-mix(in srgb, var(--sg-hero-deep) 72%, transparent),
+				color-mix(in srgb, var(--sg-hero-deep) 22%, transparent)
+			);
 		}
 
-		.btn-ghost {
-			border: 1px solid var(--sg-border);
-			color: var(--sg-text);
+		.final-cta h2 {
+			font-size: clamp(2rem, 9vw, 3rem);
+		}
+
+		.final-cta__app {
+			width: min(17rem, calc(100% - 2rem));
+			min-height: 11rem;
+			right: 1rem;
+			bottom: 1rem;
+		}
+
+		.footer-grid {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: 1.5rem;
+		}
+
+		.footer-brand {
+			grid-column: 1 / -1;
+		}
+	}
+
+	@keyframes hero-enter {
+		from {
+			opacity: 0;
+			transform: translateY(1rem);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+
+	@keyframes route-reveal {
+		from {
+			clip-path: inset(0 100% 0 0);
+		}
+		to {
+			clip-path: inset(0);
+		}
+	}
+
+	@media (prefers-reduced-motion: no-preference) {
+		.hero__copy > * {
+			animation: hero-enter 600ms cubic-bezier(0.23, 1, 0.32, 1) both;
+		}
+		.hero__copy > .eyebrow {
+			animation-delay: 100ms;
+		}
+		.hero__copy > h1 {
+			animation-delay: 300ms;
+		}
+		.hero__copy > .hero__description {
+			animation-delay: 540ms;
+		}
+		.hero__copy > .hero__actions {
+			animation-delay: 780ms;
+		}
+		.hero-chip {
+			animation: hero-enter 650ms var(--sg-ease-enter) both;
+		}
+		.hero-chip--one {
+			animation-delay: 950ms;
+		}
+		.hero-chip--two {
+			animation-delay: 1200ms;
+		}
+		.hero-chip--three {
+			animation-delay: 1450ms;
+		}
+		.hero__scroll {
+			animation: hero-enter 700ms ease 1.5s both;
+		}
+		.landing :global(.section[data-in-view='true'] .product-window__route) {
+			animation: route-reveal var(--sg-motion-route) var(--sg-ease-enter) 300ms both;
+		}
+		.landing :global(.section[data-in-view='true'] .section-heading),
+		.landing :global(.section[data-in-view='true'] .trail-copy),
+		.landing :global(.section[data-in-view='true'] .final-cta__copy) {
+			animation: hero-enter 700ms cubic-bezier(0.23, 1, 0.32, 1) both;
+		}
+		.landing :global(.section[data-in-view='true'] .product-window),
+		.landing :global(.section[data-in-view='true'] .feature-list),
+		.landing :global(.section[data-in-view='true'] .steps),
+		.landing :global(.section[data-in-view='true'] .place-grid),
+		.landing :global(.section[data-in-view='true'] .passport-grid),
+		.landing :global(.section[data-in-view='true'] .trail-map) {
+			animation: hero-enter 850ms cubic-bezier(0.23, 1, 0.32, 1) 120ms both;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.hero__world video {
+			display: none;
+		}
+		.hero *,
+		.section * {
+			animation: none !important;
+			transition-duration: 0.01ms !important;
+		}
+	}
+
+	@media (max-width: 390px) {
+		.hero h1 {
+			font-size: clamp(2.45rem, 10.5vw, 2.9rem);
+		}
+
+		.footer-grid {
+			gap: 1.25rem 0.75rem;
 		}
 	}
 </style>

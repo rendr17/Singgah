@@ -1,72 +1,166 @@
 <script lang="ts">
+	import { invalidateAll } from '$app/navigation';
 	import type { PageProps } from './$types';
 	import type { components } from '@singgah/api-client';
 	import BackNav from '$lib/components/app-shell/BackNav.svelte';
-	import { SectionHeading, StateBlock, Surface } from '@singgah/ui';
+	import { StateBlock } from '@singgah/ui';
 
 	type Provider = components['schemas']['Provider'];
 
 	let { data }: PageProps = $props();
 
-	function ageLabel(iso: string | undefined): string {
-		if (!iso) return 'belum pernah ingest';
-		const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
-		const date = new Date(iso).toLocaleString('id-ID');
-		if (days <= 0) return `ingest hari ini · ${date}`;
-		if (days === 1) return `ingest kemarin · ${date}`;
-		return `ingest ${days} hari lalu · ${date}`;
+	function timestamp(iso: string | undefined): string {
+		if (!iso) return 'belum tercatat';
+		return `${new Date(iso).toLocaleString('id-ID', {
+			timeZone: 'Asia/Jakarta',
+			dateStyle: 'medium',
+			timeStyle: 'short'
+		})} WIB`;
 	}
 
-	// An attempt newer than the last success (or no success at all) means the
-	// latest ingest failed — say so instead of looking merely "stale".
-	function failedAttempt(p: Provider): string {
-		if (!p.lastAttemptAt) return '';
-		const failed =
-			!p.lastSuccessAt || new Date(p.lastAttemptAt).getTime() > new Date(p.lastSuccessAt).getTime();
-		if (!failed) return '';
-		return `ingest terakhir gagal · dicoba ${new Date(p.lastAttemptAt).toLocaleString('id-ID')}`;
+	// A newer failed attempt must remain visible beside the last successful update.
+	function failedAttempt(p: Provider): boolean {
+		if (!p.lastAttemptAt) return false;
+		return (
+			!p.lastSuccessAt || new Date(p.lastAttemptAt).getTime() > new Date(p.lastSuccessAt).getTime()
+		);
 	}
 </script>
 
-<svelte:head><title>Penyedia data · Singgah</title></svelte:head>
+<svelte:head>
+	<title>Sumber data &amp; atribusi · Singgah</title>
+	<meta
+		name="description"
+		content="Lihat penyedia data Singgah, lisensi, atribusi, dan waktu pembaruan terakhir."
+	/>
+</svelte:head>
 
 <BackNav href="/" label="Beranda" />
 
-<h1 class="sg-page-title">Penyedia data</h1>
-<p class="sg-meta">Sumber data transit, lisensi, dan kesegaran ingest.</p>
+<h1 class="sg-page-title">Sumber data &amp; atribusi</h1>
+<p class="sg-meta intro">
+	Setiap sumber memiliki waktu pembaruan dan batas penggunaan sendiri. Waktu di bawah menunjukkan
+	pembaruan data sumber, bukan posisi kendaraan secara langsung.
+</p>
 
 {#if data.error}
 	<StateBlock kind="error">{data.error}</StateBlock>
+	<button class="retry" type="button" onclick={() => invalidateAll()}>Coba lagi</button>
 {:else if data.providers.length === 0}
-	<StateBlock kind="empty">Belum ada penyedia data terdaftar.</StateBlock>
+	<StateBlock kind="empty">Belum ada sumber data yang terdaftar saat ini.</StateBlock>
 {:else}
-	<div class="provider-list">
+	<ul class="provider-list">
 		{#each data.providers as p (p.code)}
-			{@const failed = failedAttempt(p)}
-			<Surface>
-				<SectionHeading>{p.name}</SectionHeading>
-				<p class="sg-meta">
-					<code>{p.code}</code>
-					{#if !p.isActive}<span class="sg-warn">· nonaktif</span>{/if}
-				</p>
-				<p>{ageLabel(p.lastSuccessAt)}</p>
-				{#if failed}<p class="sg-warn">{failed}</p>{/if}
-				{#if p.licenseName}<p>Lisensi: {p.licenseName}</p>{/if}
-				{#if p.attributionText}<p>{p.attributionText}</p>{/if}
+			<li>
+				<div class="provider-head">
+					<h2>{p.name}</h2>
+					<span class:inactive={!p.isActive}>{p.isActive ? 'Aktif' : 'Tidak aktif'}</span>
+				</div>
+				<p class="provider-code">{p.code}</p>
+				<dl>
+					<div>
+						<dt>Pembaruan berhasil</dt>
+						<dd>{timestamp(p.lastSuccessAt)}</dd>
+					</div>
+					{#if failedAttempt(p)}
+						<div class="failed">
+							<dt>Percobaan terakhir gagal</dt>
+							<dd>{timestamp(p.lastAttemptAt)}</dd>
+						</div>
+					{/if}
+					{#if p.licenseName}<div>
+							<dt>Lisensi</dt>
+							<dd>{p.licenseName}</dd>
+						</div>{/if}
+					{#if p.refreshCadence}<div>
+							<dt>Jadwal pembaruan</dt>
+							<dd>{p.refreshCadence}</dd>
+						</div>{/if}
+				</dl>
+				{#if p.attributionText}<p class="attribution">{p.attributionText}</p>{/if}
 				{#if p.allowedUse}<p class="sg-meta">{p.allowedUse}</p>{/if}
-				{#if p.refreshCadence}<p class="sg-meta">Jadwal refresh: {p.refreshCadence}</p>{/if}
 				{#if p.knownLimitations}
-					<p class="sg-meta">Keterbatasan: {p.knownLimitations}</p>
+					<p class="sg-meta">Batas data: {p.knownLimitations}</p>
 				{/if}
-			</Surface>
+			</li>
 		{/each}
-	</div>
+	</ul>
 {/if}
 
 <style>
+	.intro {
+		max-width: 42rem;
+		margin-bottom: var(--sg-space-8);
+	}
 	.provider-list {
-		display: grid;
+		max-width: 48rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+	.provider-list li {
+		padding-block: var(--sg-space-6);
+		border-top: 1px solid var(--sg-border);
+	}
+	.provider-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
 		gap: var(--sg-space-3);
-		max-width: 40rem;
+	}
+	.provider-head h2 {
+		margin: 0;
+		font-size: var(--sg-text-section);
+	}
+	.provider-head span {
+		color: var(--sg-success);
+		font-size: var(--sg-text-meta);
+		font-weight: var(--sg-weight-semibold);
+	}
+	.provider-head .inactive,
+	.failed {
+		color: var(--sg-warning);
+	}
+	.provider-code {
+		margin: var(--sg-space-1) 0 var(--sg-space-4);
+		color: var(--sg-text-muted);
+		font-family: var(--sg-font-mono);
+		font-size: var(--sg-text-meta);
+	}
+	dl {
+		display: grid;
+		gap: var(--sg-space-2);
+		margin: 0;
+	}
+	dl div {
+		display: grid;
+		grid-template-columns: minmax(9rem, 0.7fr) minmax(0, 1.3fr);
+		gap: var(--sg-space-3);
+	}
+	dt {
+		color: var(--sg-text-muted);
+	}
+	dd {
+		margin: 0;
+	}
+	.attribution {
+		margin-block: var(--sg-space-4) 0;
+		font-weight: var(--sg-weight-medium);
+	}
+	.retry {
+		min-height: var(--sg-target-min);
+		padding-inline: var(--sg-space-4);
+		border: 1px solid var(--sg-border);
+		border-radius: var(--sg-radius-button);
+		background: var(--sg-surface);
+		color: var(--sg-text);
+		font: inherit;
+		cursor: pointer;
+	}
+	@media (max-width: 32rem) {
+		dl div {
+			grid-template-columns: 1fr;
+			gap: 0;
+		}
 	}
 </style>

@@ -3,17 +3,17 @@
 	import { replaceState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
+	import { SvelteSet, SvelteURLSearchParams } from 'svelte/reactivity';
 	import { api } from '$lib/api';
 	import { loadCachedPlan, saveCachedPlan } from '$lib/plan-cache';
 	import BackNav from '$lib/components/app-shell/BackNav.svelte';
 	import StationCombobox from '$lib/components/station/StationCombobox.svelte';
 	import { unwrap } from '@singgah/api-client';
 	import type { components } from '@singgah/api-client';
-	import { Button, StateBlock, StatusBadge, Surface, TextField } from '@singgah/ui';
+	import { Button, StateBlock, StatusBadge, TextField } from '@singgah/ui';
 
 	type Station = components['schemas']['StationSummary'];
 	type Plan = components['schemas']['JourneyPlan'];
-	type Itinerary = components['schemas']['Itinerary'];
 
 	let fromStation = $state<Station | null>(null);
 	let toStation = $state<Station | null>(null);
@@ -63,7 +63,11 @@
 	}
 
 	function fmtTime(iso: string) {
-		return new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+		return new Date(iso).toLocaleTimeString('id-ID', {
+			hour: '2-digit',
+			minute: '2-digit',
+			timeZone: 'Asia/Jakarta'
+		});
 	}
 	function fmtDur(sec: number) {
 		const h = Math.floor(sec / 3600);
@@ -74,7 +78,7 @@
 	// buildParams is the single serializer for the request, the shareable
 	// URL, and the cache key — all three must stay identical.
 	function buildParams(): URLSearchParams {
-		const p = new URLSearchParams();
+		const p = new SvelteURLSearchParams();
 		p.set('from', fromStation!.id);
 		p.set('to', toStation!.id);
 		const t = departAt ? new Date(departAt).toISOString() : '';
@@ -93,7 +97,7 @@
 	}
 
 	function toggleMode(m: string) {
-		const next = new Set(modes);
+		const next = new SvelteSet(modes);
 		if (next.has(m)) next.delete(m);
 		else next.add(m);
 		modes = next;
@@ -192,7 +196,7 @@
 		} else if (fromId && toId) {
 			// Offline open of a shared link: station names can't be resolved,
 			// but the cached copy for this exact query still renders.
-			const params = new URLSearchParams();
+			const params = new SvelteURLSearchParams();
 			for (const [k, v] of sp) params.set(k, v);
 			const cached = loadCached(params.toString());
 			if (cached) {
@@ -322,7 +326,7 @@
 		</p>
 	{/if}
 	{#if plan.itineraries.length === 0}
-		<StateBlock kind="empty">
+		<StateBlock kind="empty" illustration="/illustrations/empty-transit-world.webp">
 			Tidak ada rute terjadwal antara {plan.from.name} dan {plan.to.name}
 			{#if plan.query.stepFree || (plan.query.modes?.length ?? 0) > 0}
 				dengan filter ini
@@ -470,6 +474,20 @@
 		background: var(--sg-surface);
 		text-decoration: none;
 		color: var(--sg-text);
+	}
+	@media (prefers-reduced-motion: no-preference) {
+		.itins > li {
+			animation: sg-row-enter var(--sg-motion-base) var(--sg-ease-enter) both;
+		}
+		.itins > li:nth-child(2) {
+			animation-delay: 25ms;
+		}
+		.itins > li:nth-child(3) {
+			animation-delay: 50ms;
+		}
+		.itins > li:nth-child(4) {
+			animation-delay: 75ms;
+		}
 	}
 	.itin-head {
 		display: flex;

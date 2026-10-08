@@ -2,6 +2,7 @@
 	import type { PageProps } from './$types';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
+	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import JourneyTimeline from '$lib/components/journey/JourneyTimeline.svelte';
 	import { SectionHeading, StateBlock, StatusBadge } from '@singgah/ui';
 
@@ -20,7 +21,7 @@
 	// plan's own echo so shared links keep their filters.
 	const back = $derived.by(() => {
 		if (!plan?.from.id || !plan.to.id) return '/plan';
-		const p = new URLSearchParams({ from: plan.from.id, to: plan.to.id });
+		const p = new SvelteURLSearchParams({ from: plan.from.id, to: plan.to.id });
 		if (plan.query.departAt) p.set('at', plan.query.departAt);
 		if (plan.query.arriveBy) p.set('arriveBy', plan.query.arriveBy);
 		if (plan.query.modes?.length) p.set('modes', plan.query.modes.join(','));
@@ -31,9 +32,17 @@
 	});
 
 	const fmt = (iso: string) =>
-		new Date(iso).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
+		new Date(iso).toLocaleString('id-ID', {
+			dateStyle: 'medium',
+			timeStyle: 'short',
+			timeZone: 'Asia/Jakarta'
+		});
 	const fmtTime = (iso: string) =>
-		new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+		new Date(iso).toLocaleTimeString('id-ID', {
+			hour: '2-digit',
+			minute: '2-digit',
+			timeZone: 'Asia/Jakarta'
+		});
 	const fmtDur = (sec: number) => {
 		const h = Math.floor(sec / 3600);
 		const m = Math.round((sec % 3600) / 60);
@@ -67,7 +76,7 @@
 	{/if}
 
 	{#if itin === null}
-		<StateBlock kind="empty">
+		<StateBlock kind="empty" illustration="/illustrations/empty-transit-world.webp">
 			Tidak ada rute terjadwal antara {plan.from.name} dan {plan.to.name} dengan filter ini.
 		</StateBlock>
 	{:else}
@@ -99,7 +108,9 @@
 							<li>
 								<a
 									class="alt-card"
-									href={resolve(`/journey?${page.url.searchParams.toString().replace(/&?i=\d+/, '')}&i=${i}` as `/journey?${string}`)}
+									href={resolve(
+										`/journey?${page.url.searchParams.toString().replace(/&?i=\d+/, '')}&i=${i}` as `/journey?${string}`
+									)}
 								>
 									<span class="label">{LABELS[other.label] ?? other.label}</span>
 									<span class="sg-tabular"
@@ -131,15 +142,17 @@
 					{/each}
 				</ul>
 				{#if plan.fareReference.total != null}
-					<p class="sg-meta">Total referensi: Rp{plan.fareReference.total.toLocaleString('id-ID')}</p>
+					<p class="sg-meta">
+						Total referensi: Rp{plan.fareReference.total.toLocaleString('id-ID')}
+					</p>
 				{/if}
 			</details>
 		{/if}
 	{/if}
 
 	<p class="sg-meta source">
-		Sumber: jadwal ter-ingest ({plan.source.provider}) · snapshot {fmt(plan.source.snapshotAt)} ·
-		diminta {fmt(plan.source.requestedAt)}
+		Sumber: jadwal ter-ingest ({plan.source.provider}) · snapshot {fmt(plan.source.snapshotAt)} · diminta
+		{fmt(plan.source.requestedAt)}
 	</p>
 {/if}
 

@@ -7,7 +7,10 @@ export const load: PageLoad = async ({ fetch }) => {
 		const data = await unwrap(api.GET('/api/v1/providers', { fetch }));
 		return { providers: data.providers, error: '' };
 	} catch (e) {
-		const message = e instanceof ApiError ? e.message : 'Data penyedia gagal dimuat.';
+		const message =
+			e instanceof ApiError
+				? `Sumber data belum dapat dimuat (${e.status}). Coba lagi saat koneksi tersedia.`
+				: 'Sumber data belum dapat dimuat. Coba lagi saat koneksi tersedia.';
 		return { providers: [], error: message };
 	}
 };

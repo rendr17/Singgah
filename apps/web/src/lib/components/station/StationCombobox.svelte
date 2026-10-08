@@ -18,6 +18,7 @@
 		value?: string;
 		selected?: Station | null;
 		onpick?: (station: Station) => void;
+		onclear?: () => void;
 	}
 
 	let {
@@ -26,7 +27,8 @@
 		placeholder,
 		value = $bindable(''),
 		selected = $bindable(null),
-		onpick
+		onpick,
+		onclear
 	}: Props = $props();
 
 	const listboxId = $props.id();
@@ -46,7 +48,10 @@
 			open = false;
 			return;
 		}
-		if (selected) selected = null;
+		if (selected) {
+			selected = null;
+			onclear?.();
+		}
 		if (q === '') {
 			results = [];
 			open = false;

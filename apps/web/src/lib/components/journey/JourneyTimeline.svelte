@@ -279,14 +279,14 @@
 	/* Corridor code lozenge on the rail — names the colored line so the hue is
 	   never the only carrier of "which corridor". */
 	.line-badge {
-		display: flex;
+		display: inline-flex;
 		align-items: center;
 		justify-content: center;
 		box-sizing: border-box;
 		min-width: 1.5rem;
 		height: 1.5rem;
-		padding-inline: var(--sg-space-1);
-		margin-inline-start: calc(-1 * var(--sg-space-4) - 10px);
+		padding-inline: var(--sg-space-2);
+		margin-inline-start: calc(-1 * var(--sg-space-4) - 8px);
 		margin-block: var(--sg-space-1);
 		border-radius: var(--sg-radius-pill);
 		background: var(--leg-color, var(--sg-line-default));

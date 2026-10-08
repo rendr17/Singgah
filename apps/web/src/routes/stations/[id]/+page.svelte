@@ -39,30 +39,6 @@
 		<span>{station.lat.toFixed(5)}, {station.lon.toFixed(5)}</span>
 	</p>
 
-	{#if browser}
-		<CheckinButton stopId={station.id} />
-	{/if}
-
-	{#if browser}
-		<section class="journal-section">
-			<SectionHeading>Catatan</SectionHeading>
-			<JournalNoteForm stopId={station.id} />
-		</section>
-	{/if}
-
-	{#if browser}
-		<div class="mini-map">
-			<TransitMap
-				styleUrl={STYLE_URL}
-				data={stationsToGeoJSON([station])}
-				center={[station.lon, station.lat]}
-				zoom={14}
-				interactive={false}
-				fitToData
-			/>
-		</div>
-	{/if}
-
 	<section>
 		<SectionHeading>Rute yang melayani</SectionHeading>
 		{#if station.lines.length === 0}
@@ -85,11 +61,6 @@
 	</section>
 
 	<section>
-		<SectionHeading>Tempat di sekitar</SectionHeading>
-		<NearbyPlaces {places} />
-	</section>
-
-	<section>
 		<SectionHeading>Jadwal keberangkatan</SectionHeading>
 		{#if departures === null}
 			<StateBlock kind="error">Jadwal keberangkatan sedang tidak tersedia.</StateBlock>
@@ -99,6 +70,26 @@
 			<DepartureBoard lines={departures.lines} />
 			<p class="sg-meta">
 				Jadwal statis {departures.source.provider} — bukan posisi live.
+			</p>
+		{/if}
+	</section>
+
+	<section>
+		<SectionHeading>Fasilitas</SectionHeading>
+		{#if station.facilities.length === 0}
+			<StateBlock kind="empty">Belum ada data fasilitas untuk stasiun ini.</StateBlock>
+		{:else}
+			<ul class="sg-list">
+				{#each station.facilities as f (f.type + f.text)}
+					<li>
+						{facilityLabel(f.type)}
+						{#if f.text}<span class="muted">· {f.text}</span>{/if}
+						{#if f.accessibilityRelevant}<span class="muted">· relevan aksesibilitas</span>{/if}
+					</li>
+				{/each}
+			</ul>
+			<p class="sg-meta">
+				Keberadaan fasilitas dilaporkan penyedia data — bukan jaminan berfungsi.
 			</p>
 		{/if}
 	</section>
@@ -124,21 +115,32 @@
 		{/if}
 	</section>
 
-	{#if station.facilities.length > 0}
-		<section>
-			<SectionHeading>Fasilitas</SectionHeading>
-			<ul class="sg-list">
-				{#each station.facilities as f (f.type + f.text)}
-					<li>
-						{facilityLabel(f.type)}
-						{#if f.text}<span class="muted">· {f.text}</span>{/if}
-						{#if f.accessibilityRelevant}<span class="muted">· relevan aksesibilitas</span>{/if}
-					</li>
-				{/each}
-			</ul>
-			<p class="sg-meta">
-				Keberadaan fasilitas dilaporkan penyedia data — bukan jaminan berfungsi.
-			</p>
+	<section>
+		<SectionHeading>Tempat di sekitar</SectionHeading>
+		<NearbyPlaces {places} />
+	</section>
+
+	{#if browser}
+		<div class="mini-map">
+			<TransitMap
+				styleUrl={STYLE_URL}
+				data={stationsToGeoJSON([station])}
+				center={[station.lon, station.lat]}
+				zoom={14}
+				interactive={false}
+				fitToData
+			/>
+		</div>
+	{/if}
+
+	{#if browser}
+		<CheckinButton stopId={station.id} />
+	{/if}
+
+	{#if browser}
+		<section class="journal-section">
+			<SectionHeading>Catatan</SectionHeading>
+			<JournalNoteForm stopId={station.id} />
 		</section>
 	{/if}
 

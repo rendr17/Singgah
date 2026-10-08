@@ -34,6 +34,14 @@ export const MODE_LABELS: Record<RouteMode, string> = {
 	other: 'Lainnya'
 };
 
+// Mode → ModeIcon glyph key. Modes without a pictogram render label-only.
+export const MODE_ICON: Partial<Record<RouteMode, 'commuter' | 'metro' | 'bus' | 'light-rail'>> = {
+	rail: 'commuter',
+	subway: 'metro',
+	tram: 'light-rail',
+	bus: 'bus'
+};
+
 // Numeric collation so corridor codes order the way riders read them:
 // 1, 1A, 2, 9, 10 — not the lexicographic 1, 10, 1A, 2 the DB gives.
 const collator = new Intl.Collator('id', { numeric: true, sensitivity: 'base' });
