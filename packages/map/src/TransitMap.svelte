@@ -37,6 +37,8 @@
 		/** Imperative camera target: ease to this lon/lat only when it falls
 		 *  outside the current view — in-view selections never move the map. */
 		focus?: [number, number];
+		/** Pixels obscured at the bottom of the mobile viewport by the nav and sheet. */
+		bottomPadding?: number;
 		/** Called once when the map can never become ready (init or style load
 		 *  failure) — lets parents drop loading affordances that would otherwise
 		 *  spin forever. */
@@ -58,6 +60,7 @@
 		lines,
 		linesVisible = true,
 		focus,
+		bottomPadding = 0,
 		onFailed,
 		class: className
 	}: Props = $props();
@@ -66,6 +69,7 @@
 	let map: MLMap | undefined;
 	let ready = $state(false);
 	let failed = $state(false);
+	let initialTileErrors = 0;
 
 	const SOURCE = 'singgah-stations';
 	const ROUTE = 'singgah-route';
@@ -112,18 +116,24 @@
 					m.addControl(new ml.ScaleControl({ unit: 'metric' }), 'bottom-left');
 				}
 				map = m;
-				// A failed style/sprite fetch never reaches 'load' — emit() and the
-				// data fetches it drives would silently never run. Surface it as
-				// failed instead of hanging on "Memuat peta…". Tile/source errors
-				// carry sourceId/tile and are transient — leave those alone.
+				// A failed style or repeated initial tile fetch never reaches a
+				// usable first frame. Ignore a few transient tile failures, then
+				// expose the fallback instead of leaving a blank canvas.
 				m.on('error', (e) => {
 					const ev = e as { sourceId?: string; tile?: unknown };
-					if (cancelled || ready || ev.sourceId || ev.tile) return;
+					if (cancelled || failed) return;
+					if (ev.sourceId || ev.tile) {
+						if (!ready && ++initialTileErrors >= 4) {
+							failed = true;
+							onFailed?.();
+						}
+						return;
+					}
 					failed = true;
 					onFailed?.();
 				});
 				m.on('load', () => {
-					if (cancelled) return;
+					if (cancelled || failed) return;
 					// Singgah paints its own stop/station marks — drop the basemap's
 					// transit POIs (station, bus_stop, ferry_terminal) so icons and
 					// labels don't double up (71_ICONS_MAP_STYLE.md). Wraps the
@@ -312,11 +322,39 @@
 						source: ROUTE,
 						filter: ['all', ['==', ['geometry-type'], 'Point'], ['==', ['get', 'endpoint'], true]],
 						paint: {
-							'circle-color': FEATURE_COLOR,
+							'circle-color': [
+								'match',
+								['get', 'endpointRole'],
+								'origin',
+								'#176B4A',
+								'destination',
+								'#B44343',
+								FEATURE_COLOR
+							],
 							'circle-radius': 7,
 							'circle-stroke-width': 2.5,
 							'circle-stroke-color': '#FFFFFF'
 						}
+					});
+					m!.addLayer({
+						id: 'route-endpoint-labels',
+						type: 'symbol',
+						source: ROUTE,
+						filter: ['all', ['==', ['geometry-type'], 'Point'], ['==', ['get', 'endpoint'], true]],
+						layout: {
+							'text-field': [
+								'match',
+								['get', 'endpointRole'],
+								'origin',
+								'A',
+								'destination',
+								'B',
+								''
+							],
+							'text-size': 10,
+							'text-allow-overlap': true
+						},
+						paint: { 'text-color': '#FFFFFF' }
 					});
 					// Official operator marks ride on top of the badge circles —
 					// decorative, so a failed decode leaves the badges in place.
@@ -474,6 +512,17 @@
 			zoom: Math.max(map.getZoom(), 13.5),
 			duration: reduced ? 0 : 600
 		});
+	});
+
+	// Keep the camera's visual center in the portion of the map above the mobile
+	// navigation and sheet. This only follows panel geometry, never data updates.
+	$effect(() => {
+		if (!ready || !map) return;
+		const bottom = Math.max(0, Math.round(bottomPadding));
+		const current = map.getPadding();
+		if (current.top === 0 && current.right === 0 && current.bottom === bottom && current.left === 0)
+			return;
+		map.setPadding({ top: 0, right: 0, bottom, left: 0 });
 	});
 
 	$effect(() => {

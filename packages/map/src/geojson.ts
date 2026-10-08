@@ -64,7 +64,7 @@ export function journeyToGeoJSON(legs: MapJourneyLeg[]): FeatureCollection {
 		features.push({
 			type: 'Feature',
 			geometry: { type: 'Point', coordinates: first.coordinates[0] },
-			properties: { endpoint: true, name: fromName ?? '' }
+			properties: { endpoint: true, endpointRole: 'origin', name: fromName ?? '' }
 		});
 	}
 	// Same LineString for a single-leg journey still gets both endpoints —
@@ -73,7 +73,7 @@ export function journeyToGeoJSON(legs: MapJourneyLeg[]): FeatureCollection {
 		features.push({
 			type: 'Feature',
 			geometry: { type: 'Point', coordinates: last.coordinates[last.coordinates.length - 1] },
-			properties: { endpoint: true, name: toName ?? '' }
+			properties: { endpoint: true, endpointRole: 'destination', name: toName ?? '' }
 		});
 	}
 	return { type: 'FeatureCollection', features };

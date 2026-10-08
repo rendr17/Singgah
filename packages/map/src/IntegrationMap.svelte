@@ -86,6 +86,7 @@
 	let vh = $state(0);
 	let hovering = $state(false);
 	let animating = $state(false);
+	let reducedMotion = $state(false);
 
 	const world = $derived({ width: worldWidth, height: worldHeight });
 
@@ -172,7 +173,7 @@
 		// still runs effects but reports a 0-size viewport.
 		if (!introArmed || lines.length === 0 || vw <= 0) return;
 		introArmed = false;
-		if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+		if (reducedMotion) return;
 		const seq = introSequence(lines, points, world, {
 			strokeMs: INTRO_STROKE_MS,
 			spanMs: INTRO_SPAN_MS
@@ -328,8 +329,13 @@
 
 	onMount(() => {
 		dpr = window.devicePixelRatio || 1;
+		const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
+		reducedMotion = motionPreference.matches;
+		const updateMotionPreference = () => (reducedMotion = motionPreference.matches);
+		motionPreference.addEventListener('change', updateMotionPreference);
 		el.addEventListener('wheel', onWheel, { passive: false });
 		return () => {
+			motionPreference.removeEventListener('change', updateMotionPreference);
 			el.removeEventListener('wheel', onWheel);
 			for (const t of introTimers) clearTimeout(t);
 		};
@@ -468,7 +474,7 @@
 						width={worldWidth}
 						height={worldHeight}
 						mask="url(#sg-im-veil-mask)"
-						transition:fade={{ duration: 220 }}
+						transition:fade={{ duration: reducedMotion ? 0 : 220 }}
 					/>
 				{/if}
 				{#each points as p (p.id)}
@@ -500,7 +506,7 @@
 							{/if}
 							<g
 								transform="translate({hcx} {hcy}) rotate({(Math.atan2(hdy, hdx) * 180) / Math.PI})"
-								transition:fade={{ duration: 180 }}
+								transition:fade={{ duration: reducedMotion ? 0 : 180 }}
 							>
 								<rect
 									x={-hlen / 2 - pad}

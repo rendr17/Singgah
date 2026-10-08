@@ -76,9 +76,9 @@ describe('journeyToGeoJSON', () => {
 		expect(leg2.properties?.color).toBe('');
 		expect(leg2.geometry.type).toBe('LineString');
 		expect(orig.geometry).toEqual({ type: 'Point', coordinates: [106.8, -6.2] });
-		expect(orig.properties).toEqual({ endpoint: true, name: 'A' });
+		expect(orig.properties).toEqual({ endpoint: true, endpointRole: 'origin', name: 'A' });
 		expect(dest.geometry).toEqual({ type: 'Point', coordinates: [106.82, -6.22] });
-		expect(dest.properties).toEqual({ endpoint: true, name: 'C' });
+		expect(dest.properties).toEqual({ endpoint: true, endpointRole: 'destination', name: 'C' });
 	});
 
 	it('keeps both endpoints on a single-leg journey', () => {

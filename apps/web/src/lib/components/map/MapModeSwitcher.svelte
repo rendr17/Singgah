@@ -2,17 +2,15 @@
 	import { mapStore } from '$lib/stores/map.svelte';
 </script>
 
-<div class="sg-mode-switch" role="tablist" aria-label="Mode peta">
+<div class="sg-mode-switch" role="group" aria-label="Mode peta">
 	<button
-		role="tab"
-		aria-selected={mapStore.mode === 'geographic'}
+		aria-pressed={mapStore.mode === 'geographic'}
 		onclick={() => mapStore.setMode('geographic')}
 	>
 		Peta
 	</button>
 	<button
-		role="tab"
-		aria-selected={mapStore.mode === 'integration'}
+		aria-pressed={mapStore.mode === 'integration'}
 		onclick={() => mapStore.setMode('integration')}
 	>
 		Integrasi
@@ -23,8 +21,8 @@
 	/* Segmented overlay — same visual family as the lines toggle on /map. */
 	.sg-mode-switch {
 		position: absolute;
-		/* Bottom-center — the top edge carries the floating chrome bar on /map. */
-		bottom: var(--sg-space-3);
+		/* Keep the switch above the floating bottom navigation. */
+		bottom: calc(var(--nav-h) + var(--sg-space-6) + env(safe-area-inset-bottom, 0px));
 		left: 50%;
 		translate: -50% 0;
 		display: flex;
@@ -48,7 +46,7 @@
 		font-weight: var(--sg-weight-bold);
 		cursor: pointer;
 	}
-	.sg-mode-switch button[aria-selected='true'] {
+	.sg-mode-switch button[aria-pressed='true'] {
 		background-color: var(--sg-brand);
 		color: var(--sg-brand-contrast);
 	}
