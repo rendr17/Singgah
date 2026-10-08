@@ -1,0 +1,19 @@
+get:
+  operationId: listTrails
+  summary: Curated walking trails
+  description: Published editor-curated routes. Availability is based on canonical POI resolution and transit access, not popularity.
+  tags:
+    - places
+  responses:
+    '200':
+      description: Published trails with transit start/end context
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/trails.yaml#/TrailList'
+    default:
+      description: Error envelope
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

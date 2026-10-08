@@ -1,0 +1,66 @@
+post:
+  operationId: recordPlaceVisit
+  summary: Record an explicit manual place visit
+  description: >-
+    This action does not collect device location. clientMutationId makes offline
+    retries idempotent; reusing it with a different place/time returns 409.
+  tags:
+    - places
+  security:
+    - bearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  requestBody:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: '../schemas/places.yaml#/PlaceVisitRequest'
+  responses:
+    '201':
+      description: Visit recorded
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/places.yaml#/PlaceVisitResponse'
+    '200':
+      description: Idempotent replay of the original visit
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/places.yaml#/PlaceVisitResponse'
+    '400':
+      description: Invalid body, mutation ID or timestamp
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
+    '401':
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
+    '404':
+      description: Place not found
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
+    '409':
+      description: Idempotency key was used for a different visit
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
+    default:
+      description: Error envelope
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

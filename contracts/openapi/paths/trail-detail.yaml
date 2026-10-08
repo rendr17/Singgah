@@ -1,0 +1,42 @@
+get:
+  operationId: getTrail
+  summary: Curated walking trail detail
+  description: >-
+    Stop order is editorial and deterministic. Distances come from straight-line
+    spatial access links with an explicit detour estimate; they are not a
+    pedestrian route. Opening hours are not supplied by this dataset.
+  tags:
+    - places
+  parameters:
+    - name: slug
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+        maxLength: 80
+  responses:
+    '200':
+      description: Trail and resolved stops; stops/estimates are absent when the curated chain is unavailable.
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/trails.yaml#/TrailDetail'
+    '400':
+      description: Invalid trail slug
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
+    '404':
+      description: Trail not found
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
+    default:
+      description: Error envelope
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

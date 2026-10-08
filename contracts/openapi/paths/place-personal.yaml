@@ -1,0 +1,39 @@
+get:
+  operationId: getPlacePersonalState
+  summary: Get my saved/visited state for a place
+  tags:
+    - places
+  security:
+    - bearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    '200':
+      description: Private state for this session owner
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/places.yaml#/PlacePersonalResponse'
+    '401':
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
+    '404':
+      description: Place not found
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
+    default:
+      description: Error envelope
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

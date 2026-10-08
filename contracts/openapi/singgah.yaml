@@ -47,6 +47,20 @@ paths:
     $ref: './paths/collections.yaml'
   /api/v1/places:
     $ref: './paths/places.yaml'
+  /api/v1/places/saved:
+    $ref: './paths/places-saved.yaml'
+  /api/v1/places/{id}:
+    $ref: './paths/place-detail.yaml'
+  /api/v1/places/{id}/personal:
+    $ref: './paths/place-personal.yaml'
+  /api/v1/places/{id}/saved:
+    $ref: './paths/place-saved.yaml'
+  /api/v1/places/{id}/visits:
+    $ref: './paths/place-visits.yaml'
+  /api/v1/trails:
+    $ref: './paths/trails.yaml'
+  /api/v1/trails/{slug}:
+    $ref: './paths/trail-detail.yaml'
 components:
   securitySchemes:
     bearerAuth:

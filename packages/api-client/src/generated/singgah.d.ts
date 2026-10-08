@@ -395,6 +395,138 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/places/saved": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List my saved places */
+        get: operations["listSavedPlaces"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/places/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Place detail
+         * @description Canonical place detail with provider provenance, source-updated time, accessibility metadata and known transit access links.
+         */
+        get: operations["getPlaceDetail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/places/{id}/personal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get my saved/visited state for a place */
+        get: operations["getPlacePersonalState"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/places/{id}/saved": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save a place to my private list */
+        put: operations["savePlace"];
+        post?: never;
+        /** Remove a place from my private saved list */
+        delete: operations["unsavePlace"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/places/{id}/visits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record an explicit manual place visit
+         * @description This action does not collect device location. clientMutationId makes offline retries idempotent; reusing it with a different place/time returns 409.
+         */
+        post: operations["recordPlaceVisit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Curated walking trails
+         * @description Published editor-curated routes. Availability is based on canonical POI resolution and transit access, not popularity.
+         */
+        get: operations["listTrails"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trails/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Curated walking trail detail
+         * @description Stop order is editorial and deterministic. Distances come from straight-line spatial access links with an explicit detour estimate; they are not a pedestrian route. Opening hours are not supplied by this dataset.
+         */
+        get: operations["getTrail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -690,7 +822,7 @@ export interface components {
             geometry?: components["schemas"]["LegShape"];
             /** @description Upcoming boardings at leg.from on this route — populated on the first ride leg only, computed from the same schedule snapshot. */
             nextDepartures?: components["schemas"]["Departure"][];
-            /** @description Other catalog routes that also carry this leg's endpoints — corridors the rider can board instead of the planner's pick. */
+            /** @description Other catalog routes that also carry this leg's endpoints — corridors the rider can board instead of the planner's pick, each verified against a scheduled trip actually riding from→to. Omitted entirely when the plan contains a no-transfer itinerary: corridor choices only exist for journeys that genuinely need one. */
             alternatives?: components["schemas"]["JourneyLegAlternative"][];
         };
         /** @description One end-to-end plan computed by the in-house schedule planner. Labels name the trade-off this option actually wins against the others — an honest differentiator, not a ranking score. */
@@ -946,6 +1078,215 @@ export interface components {
         };
         PlaceList: {
             places: components["schemas"]["PlaceSummary"][];
+        };
+        PlaceSource: {
+            code: string;
+            name: string;
+            /** Format: uri */
+            url?: string;
+            /** Format: uri */
+            termsUrl?: string;
+            licenseName?: string;
+            attributionText?: string;
+        };
+        SavedPlace: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @enum {string} */
+            category: "makan" | "ngopi" | "hiburan" | "taman" | "budaya" | "belanja" | "other";
+            lat: number;
+            lon: number;
+            /** Format: int32 */
+            priceBand?: number;
+            /** Format: int32 */
+            walkDistanceM: number;
+            /** Format: int32 */
+            walkSeconds: number | null;
+            /** Format: date-time */
+            savedAt: string;
+            /** Format: date-time */
+            visitedAt: string | null;
+            curated: boolean;
+            /** Format: uuid */
+            transitStopId: string;
+            transitStopName: string;
+            source: components["schemas"]["PlaceSource"];
+        };
+        SavedPlaceList: {
+            places: components["schemas"]["SavedPlace"][];
+        };
+        PlaceTransitAccess: {
+            /** Format: uuid */
+            stopId: string;
+            stopName: string;
+            stopKind: string;
+            /** Format: int32 */
+            walkDistanceM: number;
+            /**
+             * Format: int32
+             * @description Estimated straight-line × detour walk time, not a pedestrian route.
+             */
+            walkSeconds: number | null;
+            /** Format: date-time */
+            computedAt: string;
+        };
+        PlaceDetail: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @enum {string} */
+            category: "makan" | "ngopi" | "hiburan" | "taman" | "budaya" | "belanja" | "other";
+            lat: number;
+            lon: number;
+            /** Format: int32 */
+            priceBand?: number | null;
+            curated: boolean;
+            accessibility: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            sourceUpdatedAt?: string;
+            source: components["schemas"]["PlaceSource"];
+            transitAccess: components["schemas"]["PlaceTransitAccess"][];
+        };
+        PlaceDetailResponse: {
+            place: components["schemas"]["PlaceDetail"];
+        };
+        PlacePersonalResponse: {
+            personal: {
+                saved: boolean;
+                /** Format: date-time */
+                visitedAt: string | null;
+            };
+        };
+        PlaceVisitRequest: {
+            /** Format: uuid */
+            clientMutationId: string;
+            /**
+             * Format: date-time
+             * @description User-declared visit time; no device location is collected.
+             */
+            observedAt: string;
+        };
+        PlaceVisitResponse: {
+            replayed: boolean;
+            visit: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                placeId: string;
+                /** Format: date-time */
+                observedAt: string;
+                /** @enum {string} */
+                validationMethod: "manual";
+                /** Format: date-time */
+                createdAt: string;
+            };
+        };
+        TrailTransitAnchor: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            lat: number;
+            lon: number;
+        };
+        TrailSummary: {
+            slug: string;
+            title: string;
+            description: string;
+            theme: string;
+            startTransit: components["schemas"]["TrailTransitAnchor"];
+            endTransit: components["schemas"]["TrailTransitAnchor"];
+            /** Format: int64 */
+            expectedStopCount: number;
+            /** Format: int64 */
+            availableStopCount: number;
+            /** @description True only when all curated places resolve and the final place has access to the end transit stop. */
+            canStart: boolean;
+            /** Format: int32 */
+            budgetMinIDR?: number;
+            /** Format: int32 */
+            budgetMaxIDR?: number;
+        };
+        TrailList: {
+            trails: components["schemas"]["TrailSummary"][];
+        };
+        TrailSource: {
+            provider: string;
+            name: string;
+            /** Format: uri */
+            sourceUrl?: string;
+            /** Format: uri */
+            termsUrl?: string;
+            licenseName?: string;
+            attribution?: string;
+            /** Format: date-time */
+            sourceUpdatedAt?: string;
+        };
+        TrailPlace: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @enum {string} */
+            category: "makan" | "ngopi" | "hiburan" | "taman" | "budaya" | "belanja" | "other";
+            /** Format: int32 */
+            priceBand?: number;
+            curated: boolean;
+            lat: number;
+            lon: number;
+            /** @description Source-supplied accessibility attributes; absent when unknown. */
+            accessibility?: {
+                [key: string]: unknown;
+            };
+            /**
+             * @description Opening hours are not provided by this trail dataset.
+             * @enum {string}
+             */
+            operatingHoursStatus: "not-provided";
+            source: components["schemas"]["TrailSource"];
+        };
+        TrailStop: {
+            sequence: number;
+            stayMinutes: number;
+            notes?: string;
+            place: components["schemas"]["TrailPlace"];
+            /**
+             * Format: int32
+             * @description Straight-line estimate between the transit anchor/previous stop and this stop.
+             */
+            walkDistanceFromPreviousM: number;
+        };
+        TrailDetail: {
+            slug: string;
+            title: string;
+            description: string;
+            theme: string;
+            startTransit: components["schemas"]["TrailTransitAnchor"];
+            endTransit: components["schemas"]["TrailTransitAnchor"];
+            /** Format: int64 */
+            expectedStopCount: number;
+            /** Format: int64 */
+            availableStopCount: number;
+            canStart: boolean;
+            /** Format: int32 */
+            budgetMinIDR?: number;
+            /** Format: int32 */
+            budgetMaxIDR?: number;
+            /**
+             * Format: int32
+             * @description Sum of straight-line transit/place links, when the entire chain is available.
+             */
+            walkDistanceM?: number;
+            /**
+             * Format: int32
+             * @description Walking estimate plus planned stop stays; excludes transit travel and opening-hour waits.
+             */
+            estimatedDurationMinutes?: number;
+            /** @description Explicit estimate basis; never a routed pedestrian path. */
+            walkingEstimateBasis?: string;
+            durationIncludes?: string;
+            stops?: components["schemas"]["TrailStop"][];
         };
     };
     responses: never;
@@ -1735,6 +2076,387 @@ export interface operations {
                 };
             };
             /** @description Error envelope — shared by all endpoints */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    listSavedPlaces: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Private saved places for the authenticated session owner */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedPlaceList"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+            /** @description Error envelope */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    getPlaceDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Place detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaceDetailResponse"];
+                };
+            };
+            /** @description Invalid place UUID */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+            /** @description Place not found or hidden */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+            /** @description Error envelope */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    getPlacePersonalState: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Private state for this session owner */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlacePersonalResponse"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+            /** @description Place not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+            /** @description Error envelope */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    savePlace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Saved (idempotent if already saved) */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+            /** @description Place not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+            /** @description Error envelope */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    unsavePlace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed (idempotent if already absent) */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+            /** @description Error envelope */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    recordPlaceVisit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaceVisitRequest"];
+            };
+        };
+        responses: {
+            /** @description Idempotent replay of the original visit */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaceVisitResponse"];
+                };
+            };
+            /** @description Visit recorded */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaceVisitResponse"];
+                };
+            };
+            /** @description Invalid body, mutation ID or timestamp */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+            /** @description Place not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+            /** @description Idempotency key was used for a different visit */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+            /** @description Error envelope */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    listTrails: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Published trails with transit start/end context */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrailList"];
+                };
+            };
+            /** @description Error envelope */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    getTrail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Trail and resolved stops; stops/estimates are absent when the curated chain is unavailable. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrailDetail"];
+                };
+            };
+            /** @description Invalid trail slug */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+            /** @description Trail not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+            /** @description Error envelope */
             default: {
                 headers: {
                     [name: string]: unknown;

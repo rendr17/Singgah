@@ -1,0 +1,64 @@
+put:
+  operationId: savePlace
+  summary: Save a place to my private list
+  tags:
+    - places
+  security:
+    - bearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    '204':
+      description: Saved (idempotent if already saved)
+    '401':
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
+    '404':
+      description: Place not found
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
+    default:
+      description: Error envelope
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
+delete:
+  operationId: unsavePlace
+  summary: Remove a place from my private saved list
+  tags:
+    - places
+  security:
+    - bearerAuth: []
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    '204':
+      description: Removed (idempotent if already absent)
+    '401':
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
+    default:
+      description: Error envelope
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

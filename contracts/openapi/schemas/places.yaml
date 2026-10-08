@@ -49,3 +49,213 @@ PlaceList:
       type: array
       items:
         $ref: '#/PlaceSummary'
+
+PlaceSource:
+  type: object
+  required: [code, name]
+  properties:
+    code:
+      type: string
+    name:
+      type: string
+    url:
+      type: string
+      format: uri
+    termsUrl:
+      type: string
+      format: uri
+    licenseName:
+      type: string
+    attributionText:
+      type: string
+
+PlaceTransitAccess:
+  type: object
+  required: [stopId, stopName, stopKind, walkDistanceM, walkSeconds, computedAt]
+  properties:
+    stopId:
+      type: string
+      format: uuid
+    stopName:
+      type: string
+    stopKind:
+      type: string
+    walkDistanceM:
+      type: integer
+      format: int32
+    walkSeconds:
+      type: integer
+      format: int32
+      nullable: true
+      description: Estimated straight-line × detour walk time, not a pedestrian route.
+    computedAt:
+      type: string
+      format: date-time
+
+PlaceDetail:
+  type: object
+  required: [id, name, category, lat, lon, curated, accessibility, source, transitAccess]
+  properties:
+    id:
+      type: string
+      format: uuid
+    name:
+      type: string
+    category:
+      type: string
+      enum: [makan, ngopi, hiburan, taman, budaya, belanja, other]
+    lat:
+      type: number
+    lon:
+      type: number
+    priceBand:
+      type: integer
+      format: int32
+      nullable: true
+    curated:
+      type: boolean
+    accessibility:
+      type: object
+      additionalProperties: true
+    sourceUpdatedAt:
+      type: string
+      format: date-time
+    source:
+      $ref: '#/PlaceSource'
+    transitAccess:
+      type: array
+      items:
+        $ref: '#/PlaceTransitAccess'
+
+PlaceDetailResponse:
+  type: object
+  required: [place]
+  additionalProperties: false
+  properties:
+    place:
+      $ref: '#/PlaceDetail'
+
+SavedPlace:
+  type: object
+  required:
+    [
+      id,
+      name,
+      category,
+      lat,
+      lon,
+      walkDistanceM,
+      walkSeconds,
+      savedAt,
+      visitedAt,
+      curated,
+      transitStopId,
+      transitStopName,
+      source
+    ]
+  properties:
+    id:
+      type: string
+      format: uuid
+    name:
+      type: string
+    category:
+      type: string
+      enum: [makan, ngopi, hiburan, taman, budaya, belanja, other]
+    lat:
+      type: number
+    lon:
+      type: number
+    priceBand:
+      type: integer
+      format: int32
+    walkDistanceM:
+      type: integer
+      format: int32
+      minimum: 0
+    walkSeconds:
+      type: integer
+      format: int32
+      nullable: true
+    savedAt:
+      type: string
+      format: date-time
+    visitedAt:
+      type: string
+      format: date-time
+      nullable: true
+    curated:
+      type: boolean
+    transitStopId:
+      type: string
+      format: uuid
+    transitStopName:
+      type: string
+    source:
+      $ref: '#/PlaceSource'
+
+SavedPlaceList:
+  type: object
+  required: [places]
+  additionalProperties: false
+  properties:
+    places:
+      type: array
+      items:
+        $ref: '#/SavedPlace'
+
+PlacePersonalResponse:
+  type: object
+  required: [personal]
+  additionalProperties: false
+  properties:
+    personal:
+      type: object
+      required: [saved, visitedAt]
+      properties:
+        saved:
+          type: boolean
+        visitedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+PlaceVisitRequest:
+  type: object
+  required: [clientMutationId, observedAt]
+  additionalProperties: false
+  properties:
+    clientMutationId:
+      type: string
+      format: uuid
+    observedAt:
+      type: string
+      format: date-time
+      description: User-declared visit time; no device location is collected.
+
+PlaceVisitResponse:
+  type: object
+  required: [visit, replayed]
+  additionalProperties: false
+  properties:
+    replayed:
+      type: boolean
+    visit:
+      type: object
+      required: [id, placeId, observedAt, validationMethod, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        placeId:
+          type: string
+          format: uuid
+        observedAt:
+          type: string
+          format: date-time
+        validationMethod:
+          type: string
+          enum: [manual]
+        createdAt:
+          type: string
+          format: date-time

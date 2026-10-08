@@ -1,0 +1,209 @@
+TrailTransitAnchor:
+  type: object
+  required: [id, name, lat, lon]
+  additionalProperties: false
+  properties:
+    id:
+      type: string
+      format: uuid
+    name:
+      type: string
+    lat:
+      type: number
+    lon:
+      type: number
+
+TrailSummary:
+  type: object
+  required:
+    [
+      slug,
+      title,
+      description,
+      theme,
+      startTransit,
+      endTransit,
+      expectedStopCount,
+      availableStopCount,
+      canStart
+    ]
+  properties:
+    slug:
+      type: string
+    title:
+      type: string
+    description:
+      type: string
+    theme:
+      type: string
+    startTransit:
+      $ref: '#/TrailTransitAnchor'
+    endTransit:
+      $ref: '#/TrailTransitAnchor'
+    expectedStopCount:
+      type: integer
+      format: int64
+    availableStopCount:
+      type: integer
+      format: int64
+    canStart:
+      type: boolean
+      description: True only when all curated places resolve and the final place has access to the end transit stop.
+    budgetMinIDR:
+      type: integer
+      format: int32
+      minimum: 0
+    budgetMaxIDR:
+      type: integer
+      format: int32
+      minimum: 0
+
+TrailSource:
+  type: object
+  required: [provider, name]
+  additionalProperties: false
+  properties:
+    provider:
+      type: string
+    name:
+      type: string
+    sourceUrl:
+      type: string
+      format: uri
+    termsUrl:
+      type: string
+      format: uri
+    licenseName:
+      type: string
+    attribution:
+      type: string
+    sourceUpdatedAt:
+      type: string
+      format: date-time
+
+TrailPlace:
+  type: object
+  required: [id, name, category, curated, lat, lon, operatingHoursStatus, source]
+  additionalProperties: false
+  properties:
+    id:
+      type: string
+      format: uuid
+    name:
+      type: string
+    category:
+      type: string
+      enum: [makan, ngopi, hiburan, taman, budaya, belanja, other]
+    priceBand:
+      type: integer
+      format: int32
+    curated:
+      type: boolean
+    lat:
+      type: number
+    lon:
+      type: number
+    accessibility:
+      type: object
+      description: Source-supplied accessibility attributes; absent when unknown.
+      additionalProperties: true
+    operatingHoursStatus:
+      type: string
+      enum: [not-provided]
+      description: Opening hours are not provided by this trail dataset.
+    source:
+      $ref: '#/TrailSource'
+
+TrailStop:
+  type: object
+  required: [sequence, stayMinutes, place, walkDistanceFromPreviousM]
+  additionalProperties: false
+  properties:
+    sequence:
+      type: integer
+      minimum: 1
+      maximum: 6
+    stayMinutes:
+      type: integer
+      minimum: 0
+      maximum: 240
+    notes:
+      type: string
+    place:
+      $ref: '#/TrailPlace'
+    walkDistanceFromPreviousM:
+      type: integer
+      format: int32
+      minimum: 0
+      description: Straight-line estimate between the transit anchor/previous stop and this stop.
+
+TrailDetail:
+  type: object
+  required:
+    [
+      slug,
+      title,
+      description,
+      theme,
+      startTransit,
+      endTransit,
+      expectedStopCount,
+      availableStopCount,
+      canStart
+    ]
+  properties:
+    slug:
+      type: string
+    title:
+      type: string
+    description:
+      type: string
+    theme:
+      type: string
+    startTransit:
+      $ref: '#/TrailTransitAnchor'
+    endTransit:
+      $ref: '#/TrailTransitAnchor'
+    expectedStopCount:
+      type: integer
+      format: int64
+    availableStopCount:
+      type: integer
+      format: int64
+    canStart:
+      type: boolean
+    budgetMinIDR:
+      type: integer
+      format: int32
+    budgetMaxIDR:
+      type: integer
+      format: int32
+    walkDistanceM:
+      type: integer
+      format: int32
+      minimum: 0
+      description: Sum of straight-line transit/place links, when the entire chain is available.
+    estimatedDurationMinutes:
+      type: integer
+      format: int32
+      minimum: 0
+      description: Walking estimate plus planned stop stays; excludes transit travel and opening-hour waits.
+    walkingEstimateBasis:
+      type: string
+      description: Explicit estimate basis; never a routed pedestrian path.
+    durationIncludes:
+      type: string
+    stops:
+      type: array
+      items:
+        $ref: '#/TrailStop'
+
+TrailList:
+  type: object
+  required: [trails]
+  additionalProperties: false
+  properties:
+    trails:
+      type: array
+      items:
+        $ref: '#/TrailSummary'

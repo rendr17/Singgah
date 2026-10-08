@@ -1,0 +1,40 @@
+get:
+  operationId: getPlaceDetail
+  summary: Place detail
+  description: >-
+    Canonical place detail with provider provenance, source-updated time,
+    accessibility metadata and known transit access links.
+  tags:
+    - places
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    '200':
+      description: Place detail
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/places.yaml#/PlaceDetailResponse'
+    '400':
+      description: Invalid place UUID
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
+    '404':
+      description: Place not found or hidden
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
+    default:
+      description: Error envelope
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
