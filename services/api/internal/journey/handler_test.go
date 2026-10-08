@@ -115,12 +115,17 @@ const (
 	fromUUID = "b7f4b2a0-1f3d-4e5a-9c6b-2a1d3e4f5a6b" // A "Sudirman"
 	toUUID   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" // B "Lebak Bulus"
 	cUUID    = "cccccccc-1111-2222-3333-444444444444" // C "Dukuh Atas"
+	dUUID    = "dddddddd-dddd-dddd-dddd-dddddddddddd" // D "Karet"
 	routeR1  = "11111111-2222-3333-4444-555555555555" // rail line
 	routeR2  = "66666666-7777-8888-9999-000000000000" // subway line
+	routeR3  = "77777777-8888-9999-aaaa-bbbbbbbbbbbb" // bus line
 	tripT1   = "11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	tripT2   = "22222222-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 	tripT3   = "33333333-cccc-4ccc-8ccc-cccccccccccc"
 	tripT4   = "44444444-dddd-4ddd-8ddd-dddddddddddd"
+	tripT5   = "55555555-eeee-4eee-8eee-eeeeeeeeeeee"
+	tripT6   = "66666666-ffff-4fff-8fff-ffffffffffff"
+	tripT7   = "77777777-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	testDay  = "2026-09-28T08%3A00%3A00%2B07%3A00" // Monday 08:00 WIB, URL-encoded
 )
 
@@ -160,12 +165,16 @@ func stopRow(id, name string, elevator bool) generated.ListPlannerStopsRow {
 // testEngine builds the fixture network:
 //   - T1/T4 rail R1: A 08:00→B 08:30 and A 08:20→B 08:50 (direct rides)
 //   - T2/T3 subway R2: C 08:05→B 08:40 and C 09:00→B 09:35
+//   - T5 bus R3: B 09:10→D 09:30 — makes A→D require a ride transfer
 //   - walk edge A→C 100 m (~80 s) — both directions
-func testEngine(t *testing.T) *planner.Engine {
+//
+// extraRows let tests park serving trips on corridor-alternative routes —
+// legAlternatives now verifies a real trip rides the leg's endpoints.
+func testEngine(t *testing.T, extraRows ...generated.ListScheduleRowsRow) *planner.Engine {
 	t.Helper()
-	A, B, C := mustUUID2(fromUUID), mustUUID2(toUUID), mustUUID2(cUUID)
+	A, B, C, D := mustUUID2(fromUUID), mustUUID2(toUUID), mustUUID2(cUUID), mustUUID2(dUUID)
 	loader := &fakeLoader{
-		rows: []generated.ListScheduleRowsRow{
+		rows: append([]generated.ListScheduleRowsRow{
 			schedRow(tripT1, routeR1, "KCI:C", "rail", "Lebak Bulus", "T1", A, 1, 8*3600, 8*3600, false),
 			schedRow(tripT1, routeR1, "KCI:C", "rail", "Lebak Bulus", "T1", B, 2, 8*3600+1800, 8*3600+1800, false),
 			schedRow(tripT4, routeR1, "KCI:C", "rail", "Lebak Bulus", "T4", A, 1, 8*3600+1200, 8*3600+1200, false),
@@ -174,7 +183,9 @@ func testEngine(t *testing.T) *planner.Engine {
 			schedRow(tripT2, routeR2, "MRTJ:M", "subway", "Lebak Bulus", "T2", B, 2, 8*3600+2400, 8*3600+2400, false),
 			schedRow(tripT3, routeR2, "MRTJ:M", "subway", "Lebak Bulus", "T3", C, 1, 9*3600, 9*3600, false),
 			schedRow(tripT3, routeR2, "MRTJ:M", "subway", "Lebak Bulus", "T3", B, 2, 9*3600+2100, 9*3600+2100, false),
-		},
+			schedRow(tripT5, routeR3, "TJB:9", "bus", "Karet", "T5", B, 1, 9*3600+600, 9*3600+600, false),
+			schedRow(tripT5, routeR3, "TJB:9", "bus", "Karet", "T5", D, 2, 9*3600+1800, 9*3600+1800, false),
+		}, extraRows...),
 		edges: []generated.ListTransferEdgesRow{
 			{FromStopID: A, ToStopID: C, WalkDistanceM: pgtype.Int4{Int32: 100, Valid: true}},
 			{FromStopID: C, ToStopID: A, WalkDistanceM: pgtype.Int4{Int32: 100, Valid: true}},
@@ -183,6 +194,7 @@ func testEngine(t *testing.T) *planner.Engine {
 			stopRow(fromUUID, "Sudirman", false),
 			stopRow(toUUID, "Lebak Bulus", true),
 			stopRow(cUUID, "Dukuh Atas", false),
+			stopRow(dUUID, "Karet", true),
 		},
 	}
 	eng, err := planner.Load(context.Background(), loader)
@@ -210,6 +222,7 @@ func baseStore(t *testing.T) *fakeStore {
 		stops: map[string]generated.GetStopRow{
 			fromUUID: {ID: mustUUID(t, fromUUID), Name: "Sudirman", ProviderCode: "commute", ProviderEntityID: "KCI-SUD"},
 			toUUID:   {ID: mustUUID(t, toUUID), Name: "Lebak Bulus", ProviderCode: "commute", ProviderEntityID: "MRTJ-LBB"},
+			dUUID:    {ID: mustUUID(t, dUUID), Name: "Karet", ProviderCode: "commute", ProviderEntityID: "TJB-KAR"},
 		},
 	}
 }
@@ -224,6 +237,9 @@ func decode(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 }
 
 const target = "/journeys?from=" + fromUUID + "&to=" + toUUID
+
+// targetD needs a ride transfer — no single route serves A→D.
+const targetD = "/journeys?from=" + fromUUID + "&to=" + dUUID
 
 func TestPlanRequiresBothParams(t *testing.T) {
 	for _, tgt := range []string{"/journeys", "/journeys?from=" + fromUUID, "/journeys?from=x&to=y"} {
@@ -438,7 +454,10 @@ func TestPlanSliceScoringSendsWholeStopSequence(t *testing.T) {
 }
 
 // Corridor alternatives are catalog-derived: the candidate route's own stop
-// slice and its own shape cut — never the chosen leg's data.
+// slice and its own shape cut — never the chosen leg's data. They only
+// exist for journeys that need a transfer (the fixture queries A→D) and
+// only when a scheduled trip actually rides the leg's endpoints (the
+// alternative route carries its own T6 run).
 func TestPlanLegAlternatives(t *testing.T) {
 	store := baseStore(t)
 	store.coordRows = []generated.ListStopCoordsRow{
@@ -459,7 +478,12 @@ func TestPlanLegAlternatives(t *testing.T) {
 			{ID: mustUUID(t, fromUUID), Name: "Sumur Batu", Seq: 10, Lon: 106.870, Lat: -6.169},
 		},
 	}
-	rec := serve(t, store, testEngine(t), &fakePlanner{}, target+"&at="+testDay)
+	A, B := mustUUID2(fromUUID), mustUUID2(toUUID)
+	eng := testEngine(t,
+		schedRow(tripT6, altRouteID.String(), "TJ:2", "bus", "Monas", "T6", A, 1, 8*3600+600, 8*3600+600, false),
+		schedRow(tripT6, altRouteID.String(), "TJ:2", "bus", "Monas", "T6", B, 2, 8*3600+2400, 8*3600+2400, false),
+	)
+	rec := serve(t, store, eng, &fakePlanner{}, targetD+"&at="+testDay)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -481,5 +505,120 @@ func TestPlanLegAlternatives(t *testing.T) {
 	}
 	if store.gotSlice.RouteID != altRouteID || len(store.gotSlice.Lons) != 3 || store.gotSlice.Lons[0] != 106.870 {
 		t.Fatalf("slice params = %+v", store.gotSlice)
+	}
+}
+
+// A direct ride already answers "bisa satu kali naik" — corridor chips
+// would only offer swapping a hop of a journey that needs no swap, so no
+// leg may carry alternatives when the plan contains a no-transfer option.
+func TestPlanNoAlternativesWhenDirectServes(t *testing.T) {
+	store := baseStore(t)
+	altRouteID := mustUUID(t, "c2c2c2c2-2c2c-4c2c-8c2c-2c2c2c2c2c2c")
+	store.altRows = []generated.ListRouteAlternativesRow{
+		{ID: altRouteID, ProviderEntityID: "TJ:2", SeqFrom: 10, SeqTo: 1},
+	}
+	store.altSlices = map[string][]generated.ListRouteStopSliceRow{
+		altRouteID.String(): {
+			{ID: mustUUID(t, fromUUID), Name: "Sumur Batu", Seq: 10, Lon: 106.870, Lat: -6.169},
+			{ID: mustUUID(t, toUUID), Name: "Monumen Nasional", Seq: 1, Lon: 106.823, Lat: -6.176},
+		},
+	}
+	rec := serve(t, store, testEngine(t), &fakePlanner{}, target+"&at="+testDay)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	for _, it := range decode(t, rec)["itineraries"].([]any) {
+		for _, l := range it.(map[string]any)["legs"].([]any) {
+			if _, ok := l.(map[string]any)["alternatives"]; ok {
+				t.Fatalf("leg carries corridor alternatives on a direct O-D: %v", l)
+			}
+		}
+	}
+}
+
+// A folded provider sequence can order the leg's endpoints around a whole
+// loop — such an alternative is a different journey, not a same-hop swap,
+// and the detour bound drops it.
+func TestPlanLegAlternativesDropLoopSlices(t *testing.T) {
+	store := baseStore(t)
+	saneRouteID := mustUUID(t, "c2c2c2c2-2c2c-4c2c-8c2c-2c2c2c2c2c2c")
+	loopRouteID := mustUUID(t, "b1b1b1b1-b1b1-4b1b-8b1b-b1b1b1b1b1b1")
+	store.altRows = []generated.ListRouteAlternativesRow{
+		{ID: saneRouteID, ProviderEntityID: "TJ:2", SeqFrom: 10, SeqTo: 1},
+		{ID: loopRouteID, ProviderEntityID: "TJ:7F", SeqFrom: 3, SeqTo: 25},
+	}
+	store.altSlices = map[string][]generated.ListRouteStopSliceRow{
+		saneRouteID.String(): {
+			{ID: mustUUID(t, toUUID), Name: "Monumen Nasional", Seq: 1, Lon: 106.823, Lat: -6.176},
+			{ID: mustUUID(t, cUUID), Name: "Kwitang", Seq: 2, Lon: 106.830, Lat: -6.174},
+			{ID: mustUUID(t, fromUUID), Name: "Sumur Batu", Seq: 10, Lon: 106.870, Lat: -6.169},
+		},
+		// The slice swings ~14 km south and back before reaching the
+		// endpoint — the 7F-folded-sequence signature.
+		loopRouteID.String(): {
+			{ID: mustUUID(t, cUUID), Name: "Kwitang", Seq: 3, Lon: 106.838, Lat: -6.181},
+			{ID: mustUUID2("e1e1e1e1-e1e1-4e1e-8e1e-e1e1e1e1e1e1"), Name: "Kampung Rambutan", Seq: 18, Lon: 106.872, Lat: -6.309},
+			{ID: mustUUID(t, toUUID), Name: "Monumen Nasional", Seq: 25, Lon: 106.823, Lat: -6.176},
+		},
+	}
+	// Both candidate routes carry a real A→B trip — only the loop slice's
+	// detour, not a missing service, is what drops TJ:7F here.
+	A, B := mustUUID2(fromUUID), mustUUID2(toUUID)
+	eng := testEngine(t,
+		schedRow(tripT6, saneRouteID.String(), "TJ:2", "bus", "Monas", "T6", A, 1, 8*3600+600, 8*3600+600, false),
+		schedRow(tripT6, saneRouteID.String(), "TJ:2", "bus", "Monas", "T6", B, 2, 8*3600+2400, 8*3600+2400, false),
+		schedRow(tripT7, loopRouteID.String(), "TJ:7F", "bus", "Monas", "T7", A, 1, 8*3600+600, 8*3600+600, false),
+		schedRow(tripT7, loopRouteID.String(), "TJ:7F", "bus", "Monas", "T7", B, 2, 8*3600+2400, 8*3600+2400, false),
+	)
+	rec := serve(t, store, eng, &fakePlanner{}, targetD+"&at="+testDay)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	legs := decode(t, rec)["itineraries"].([]any)[0].(map[string]any)["legs"].([]any)
+	alts := legs[0].(map[string]any)["alternatives"].([]any)
+	if len(alts) != 1 || alts[0].(map[string]any)["line"] != "TJ:2" {
+		t.Fatalf("alternatives = %v — the loop slice must be dropped, the sane one kept", alts)
+	}
+}
+
+// When the earliest-arrival plan transfers but a single corridor also
+// serves the O-D, the no-transfer itinerary leads the list — every client
+// renders itineraries[0] as the answer.
+func TestPlanPrefersNoTransferItinerary(t *testing.T) {
+	A, B, D := mustUUID2(fromUUID), mustUUID2(toUUID), mustUUID2(dUUID)
+	// R2+R3 via B arrives 08:40; the direct R1 ride arrives 09:00.
+	eng, err := planner.Load(context.Background(), &fakeLoader{
+		rows: []generated.ListScheduleRowsRow{
+			schedRow(tripT2, routeR2, "MRTJ:M", "subway", "Lebak Bulus", "T2", A, 1, 8*3600, 8*3600, false),
+			schedRow(tripT2, routeR2, "MRTJ:M", "subway", "Lebak Bulus", "T2", B, 2, 8*3600+900, 8*3600+900, false),
+			schedRow(tripT5, routeR3, "TJB:9", "bus", "Karet", "T5", B, 1, 8*3600+1500, 8*3600+1500, false),
+			schedRow(tripT5, routeR3, "TJB:9", "bus", "Karet", "T5", D, 2, 8*3600+2400, 8*3600+2400, false),
+			schedRow(tripT1, routeR1, "KCI:C", "rail", "Karet", "T1", A, 1, 8*3600+1800, 8*3600+1800, false),
+			schedRow(tripT1, routeR1, "KCI:C", "rail", "Karet", "T1", D, 2, 8*3600+3600, 8*3600+3600, false),
+		},
+		stops: []generated.ListPlannerStopsRow{
+			stopRow(fromUUID, "Sudirman", false),
+			stopRow(toUUID, "Lebak Bulus", true),
+			stopRow(dUUID, "Karet", true),
+		},
+	})
+	if err != nil {
+		t.Fatalf("engine load: %v", err)
+	}
+	rec := serve(t, baseStore(t), eng, &fakePlanner{}, targetD+"&at="+testDay)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	its := decode(t, rec)["itineraries"].([]any)
+	if len(its) < 2 {
+		t.Fatalf("expected the transfer plan plus the direct alternative, got %v", its)
+	}
+	first := its[0].(map[string]any)
+	legs := first["legs"].([]any)
+	if first["rideLegs"] != float64(1) || len(legs) != 1 || legs[0].(map[string]any)["routeId"] != routeR1 {
+		t.Fatalf("itineraries[0] = %v — the single-ride itinerary must lead", first)
+	}
+	if its[1].(map[string]any)["label"] != "fastest" {
+		t.Fatalf("itineraries[1].label = %v — the transfer plan keeps its earned label", its[1])
 	}
 }

@@ -42,7 +42,10 @@ type Leg struct {
 	// computed from the same schedule snapshot the plan rode on.
 	NextDepartures []Departure `json:"nextDepartures,omitempty"`
 	// Alternatives are other routes that also carry this leg's endpoints —
-	// corridors the rider could board instead of the planner's pick.
+	// corridors the rider could board instead of the planner's pick, each
+	// verified against a scheduled trip actually riding from→to. Omitted
+	// entirely when the plan contains a no-transfer itinerary: corridor
+	// choices only exist for journeys that genuinely need one.
 	Alternatives []LegAlternative `json:"alternatives,omitempty"`
 }
 

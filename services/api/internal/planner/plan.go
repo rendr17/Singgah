@@ -14,6 +14,12 @@ import (
 //
 // Alternatives that lose on every axis still surface with
 // Label="alternative" — an honest different path, not a decoration.
+//
+// Display order carries one product rule search order doesn't: when any
+// itinerary rides without a transfer it leads the list, even if a
+// transfer plan optimizes the anchored clock — itineraries[0] is the
+// answer clients render, and "tidak perlu transit" beats a faster
+// departure/arrival. The promoted itinerary keeps its earned label.
 func (e *Engine) Plan(q Query) ([]*Itinerary, error) {
 	fwd := q.DepartAt != nil
 	if fwd == (q.ArriveBy != nil) {
@@ -87,6 +93,23 @@ func (e *Engine) Plan(q Query) ([]*Itinerary, error) {
 		} else if alt.WalkM < primary.WalkM {
 			alt.Label = "least_walking"
 		}
+	}
+
+	// Best no-transfer itinerary = earliest arrival (depart queries) or
+	// latest departure (arrive-by), same metric the anchor optimizes.
+	direct := -1
+	for i, it := range out {
+		if it.Transfers > 0 {
+			continue
+		}
+		if direct < 0 || (fwd && it.Arrive < out[direct].Arrive) || (!fwd && it.Depart > out[direct].Depart) {
+			direct = i
+		}
+	}
+	if direct > 0 {
+		it := out[direct]
+		copy(out[1:direct+1], out[:direct])
+		out[0] = it
 	}
 	return out, nil
 }

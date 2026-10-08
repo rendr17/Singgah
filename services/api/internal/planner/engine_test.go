@@ -218,4 +218,29 @@ func TestPlanStepFree(t *testing.T) {
 	}
 }
 
+// RouteServes backs corridor alternatives: only pairs a real trip rides
+// in order count — the published topology can fold stops around segments
+// and directions no trip serves.
+func TestRouteServes(t *testing.T) {
+	e := testEngine()
+	for _, tc := range []struct {
+		name     string
+		route    pgtype.UUID
+		from, to pgtype.UUID
+		want     bool
+	}{
+		{"R1 first hop", r1, uA, uB, true},
+		{"R1 later hop", r1, uB, uD, true},
+		{"R1 full ride", r1, uA, uD, true},
+		{"R1 reverse", r1, uD, uA, false},
+		{"R2 never calls at B", r2, uB, uD, false},
+		{"headway line", r3, uE, uF, true},
+		{"headway reverse", r3, uF, uE, false},
+	} {
+		if got := e.RouteServes(tc.route, tc.from, tc.to); got != tc.want {
+			t.Errorf("%s: RouteServes = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func ptrTime(u int64) *time.Time { t := time.Unix(u, 0); return &t }

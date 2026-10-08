@@ -211,6 +211,27 @@ func (e *Engine) Stop(id pgtype.UUID) (Stop, bool) {
 	return s, ok
 }
 
+// RouteServes reports whether any scheduled trip on the route serves
+// `from` before `to` in ride order — the schedule-truth check behind
+// corridor alternatives: published topology alone can't tell whether a
+// real trip rides the slice or only its reverse.
+func (e *Engine) RouteServes(routeID, from, to pgtype.UUID) bool {
+	for _, t := range e.trips {
+		if t.routeID != routeID {
+			continue
+		}
+		boarded := false
+		for _, s := range t.stops {
+			if s == from {
+				boarded = true
+			} else if boarded && s == to {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // BuiltAt is when the snapshot was loaded — source freshness for the API.
 func (e *Engine) BuiltAt() time.Time { return e.builtAt }
 

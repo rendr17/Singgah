@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"slices"
 	"sort"
@@ -37,6 +38,17 @@ const maxDepartures = 3
 // Beyond it, drawing the shape would lie about the path — the leg carries
 // no geometry and the client falls back to the stop-to-stop polyline.
 const maxShapeSnapM = 250
+
+// altMaxDetourFactor/altMaxDetourKm bound a corridor alternative's stop
+// path against the leg's straight-line distance. Folded provider
+// sequences can order the leg's endpoints around an entire loop (TJ:7F
+// offered "Kwitang→Monas, 22 perhentian" via Kampung Rambutan) — a slice
+// that detours this much is a different journey wearing the leg's
+// endpoints, not an interchangeable boarding.
+const (
+	altMaxDetourFactor = 3.0
+	altMaxDetourKm     = 4.0
+)
 
 // knownModes are the catalog's mode vocabulary — the modes filter is
 // validated against it so typos fail loudly instead of silently planning
@@ -185,6 +197,13 @@ func (h *Handler) mapItineraries(ctx context.Context, eng *planner.Engine, its [
 	out := make([]Itinerary, 0, len(its))
 	coords := h.stopCoords(ctx, eng, its)
 	colors := h.routeColors(ctx, its)
+	// Per-leg corridor swaps are a transfer tool: when an itinerary covers
+	// the O-D in a single ride, "bisa juga naik koridor X" chips are noise
+	// around an answer that needs no choosing — the itinerary list itself
+	// already presents the direct corridors.
+	needsTransit := !slices.ContainsFunc(its, func(it *planner.Itinerary) bool {
+		return it.Transfers <= 0
+	})
 	for _, pit := range its {
 		it := Itinerary{
 			Label: pit.Label, Reason: pit.Reason,
@@ -203,6 +222,8 @@ func (h *Handler) mapItineraries(ctx context.Context, eng *planner.Engine, its [
 			l := h.mapLeg(ctx, eng, pl, coords, colors)
 			if l.Type == "walk" {
 				it.WalkTransfers++
+			} else if needsTransit {
+				l.Alternatives = h.legAlternatives(ctx, eng, pl.RouteID, pl.From, pl.To)
 			}
 			it.Legs = append(it.Legs, l)
 		}
@@ -236,7 +257,6 @@ func (h *Handler) mapLeg(ctx context.Context, eng *planner.Engine, pl planner.Le
 		l.Stops = append(l.Stops, h.stopRef(eng, s))
 	}
 	l.Geometry = h.legGeometry(ctx, pl, coords)
-	l.Alternatives = h.legAlternatives(ctx, pl.RouteID, pl.From.String(), pl.To.String())
 	return l
 }
 
@@ -402,15 +422,14 @@ func (h *Handler) fareReference(ctx context.Context, from, to generated.GetStopR
 }
 
 // legAlternatives lists other catalog routes that also carry the leg's
-// endpoints — "bisa juga naik koridor 2". Each entry carries that route's
-// own stop slice and shape cut, so a picked alternative never borrows the
-// chosen leg's stops to describe a different corridor. Catalogue gaps
-// degrade to no alternatives, never a failed plan.
-func (h *Handler) legAlternatives(ctx context.Context, routeID pgtype.UUID, fromUUID, toUUID string) []LegAlternative {
-	var fromID, toID pgtype.UUID
-	if fromID.Scan(fromUUID) != nil || toID.Scan(toUUID) != nil {
-		return nil
-	}
+// endpoints — "bisa juga naik koridor 2". A candidate only counts when a
+// scheduled trip actually rides from→to in order: the topology table can
+// order stops around folds and directions no trip serves. Each entry
+// carries that route's own stop slice and shape cut, so a picked
+// alternative never borrows the chosen leg's stops to describe a
+// different corridor. Catalogue gaps degrade to no alternatives, never a
+// failed plan.
+func (h *Handler) legAlternatives(ctx context.Context, eng *planner.Engine, routeID, fromID, toID pgtype.UUID) []LegAlternative {
 	rows, err := h.store.ListRouteAlternatives(ctx, generated.ListRouteAlternativesParams{
 		StopID:   fromID,
 		StopID_2: toID,
@@ -426,6 +445,9 @@ func (h *Handler) legAlternatives(ctx context.Context, routeID pgtype.UUID, from
 			continue // min-hops seq pair already taken — rows are ABS-diff ordered
 		}
 		seen[row.ID] = true
+		if !eng.RouteServes(row.ID, fromID, toID) {
+			continue
+		}
 		slice, err := h.store.ListRouteStopSlice(ctx, generated.ListRouteStopSliceParams{
 			RouteID: row.ID,
 			Seq:     min(row.SeqFrom, row.SeqTo),
@@ -446,6 +468,9 @@ func (h *Handler) legAlternatives(ctx context.Context, routeID pgtype.UUID, from
 			if i > 0 && i < len(slice)-1 {
 				stops = append(stops, StopRef{ID: s.ID.String(), Name: s.Name})
 			}
+		}
+		if pathKm(lons, lats) > haversineKm(lons[0], lats[0], lons[len(lons)-1], lats[len(lats)-1])*altMaxDetourFactor+altMaxDetourKm {
+			continue
 		}
 		op, _ := splitLineKey(row.ProviderEntityID)
 		alt := LegAlternative{
@@ -490,6 +515,24 @@ func (h *Handler) sliceShape(ctx context.Context, routeID pgtype.UUID, lons, lat
 		return nil
 	}
 	return json.RawMessage(g)
+}
+
+// haversineKm is exact enough for a detour bound at Jakarta's latitude —
+// equirectangular, one cosine per segment.
+func haversineKm(lon1, lat1, lon2, lat2 float64) float64 {
+	dx := (lon2 - lon1) * 111.2 * math.Cos(lat1*math.Pi/180)
+	dy := (lat2 - lat1) * 111.2
+	return math.Hypot(dx, dy)
+}
+
+// pathKm sums straight segments over a stop slice — an underestimate of
+// the real driven path, which suits a conservative detour bound.
+func pathKm(lons, lats []float64) float64 {
+	var d float64
+	for i := 1; i < len(lons); i++ {
+		d += haversineKm(lons[i-1], lats[i-1], lons[i], lats[i])
+	}
+	return d
 }
 
 // splitLineKey turns "MRTJ:M" into operator "MRTJ" and line code "M".
