@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+
+	"singgah/services/api/internal/realtime"
 )
 
 // Public DTOs — the API contract shape. Canonical UUIDs only; provider ids
@@ -86,6 +88,10 @@ type Departure struct {
 	TripNumber *string `json:"tripNumber"`
 	BoundFor   string  `json:"boundFor"`
 	Estimated  bool    `json:"estimated,omitempty"`
+	// DelaySec/Canceled come from a trip-updates feed — both absent when no
+	// feed reports on this trip, so "no news" and "on time" stay distinct.
+	DelaySec *int32 `json:"delaySec,omitempty"`
+	Canceled bool   `json:"canceled,omitempty"`
 }
 
 // DepartureDirection is one boundFor group on a line. PreviousDeparture is
@@ -111,14 +117,17 @@ type DepartureSource struct {
 	SnapshotAt  *time.Time `json:"snapshotAt,omitempty"`
 }
 
-// StationDepartures is a station's departure board. Status is fixed
-// "scheduled" — the source is a static timetable, never realtime.
+// StationDepartures is a station's departure board. Status stays
+// "scheduled" — the timetable is the source of truth — while Realtime
+// reports the trip-updates feed's health when one is wired (omitted when
+// none exists; the board never claims realtime it does not have).
 type StationDepartures struct {
-	Station       StopRef         `json:"station"`
-	Status        string          `json:"status"`
-	WindowMinutes int             `json:"windowMinutes"`
-	Lines         []DepartureLine `json:"lines"`
-	Source        DepartureSource `json:"source"`
+	Station       StopRef              `json:"station"`
+	Status        string               `json:"status"`
+	WindowMinutes int                  `json:"windowMinutes"`
+	Lines         []DepartureLine      `json:"lines"`
+	Source        DepartureSource      `json:"source"`
+	Realtime      *realtime.FeedStatus `json:"realtime,omitempty"`
 }
 
 // RouteStop is a StopRef plus its position on the route — seq is the

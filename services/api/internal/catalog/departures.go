@@ -116,6 +116,18 @@ func (h *Handler) buildBoard(
 			BoundFor:   d.Headsign,
 			Estimated:  d.Estimated,
 		}
+		// Trip-updates annotation — the feed's stop ids are provider ids, so
+		// the join compares against this station's own provider_entity_id.
+		// A canceled trip stays on the board flagged, not silently dropped.
+		if h.tripUpdates != nil && d.TripID.Valid {
+			if delay, canceled, found := h.tripUpdates.DelayAt(d.TripID.String(), stop.ProviderEntityID); found {
+				if canceled {
+					dep.Canceled = true
+				} else {
+					dep.DelaySec = &delay
+				}
+			}
+		}
 		c := cand{d: dep, u: d.Unix}
 		if d.Unix < anchorUnix {
 			if dir.prev == nil || dir.prev.u < c.u {
@@ -147,6 +159,12 @@ func (h *Handler) buildBoard(
 		WindowMinutes: window,
 		Lines:         make([]DepartureLine, 0, len(lines)),
 		Source:        DepartureSource{Provider: "schedule", RequestedAt: h.now().UTC(), SnapshotAt: &snap},
+	}
+	// The updates feed's own health travels with the board — a dead feed
+	// degrades the whole surface, delays are last-known not silent absence.
+	if h.updatesPoller != nil {
+		s := h.updatesPoller.Status()
+		board.Realtime = &s
 	}
 	// Soonest-departure-first ordering across lines; lines with no upcoming
 	// boarding sort last, alphabetically.

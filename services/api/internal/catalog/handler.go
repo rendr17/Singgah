@@ -16,6 +16,7 @@ import (
 	generated "singgah/services/api/db/generated"
 	"singgah/services/api/internal/http/response"
 	"singgah/services/api/internal/planner"
+	"singgah/services/api/internal/realtime"
 )
 
 const defaultLimit = 20
@@ -25,10 +26,24 @@ type Handler struct {
 	store  Store
 	engine *planner.EngineSource
 	now    func() time.Time
+
+	// tripUpdates annotates the departures board when a trip-updates feed is
+	// wired. nil = scheduled truth only, and the board omits realtime fields
+	// rather than claiming an update source it does not have.
+	tripUpdates   *realtime.TripUpdateStore
+	updatesPoller *realtime.Poller
 }
 
 func NewHandler(store Store, engine *planner.EngineSource) *Handler {
 	return &Handler{store: store, engine: engine, now: time.Now}
+}
+
+// WithTripUpdates attaches the updates store + its poller (the feed-status
+// source) — the board annotates delays only for trips the feed reports.
+func (h *Handler) WithTripUpdates(store *realtime.TripUpdateStore, poller *realtime.Poller) *Handler {
+	h.tripUpdates = store
+	h.updatesPoller = poller
+	return h
 }
 
 // RegisterRoutes mounts the domain's paths on an existing mux — the router

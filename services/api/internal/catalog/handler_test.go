@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -14,6 +16,7 @@ import (
 
 	generated "singgah/services/api/db/generated"
 	"singgah/services/api/internal/planner"
+	"singgah/services/api/internal/realtime"
 )
 
 type fakeStore struct {
@@ -669,6 +672,100 @@ func TestDeparturesEngineDown(t *testing.T) {
 	if decode(t, rec)["error"].(map[string]any)["code"] != "PLANNER_UNAVAILABLE" {
 		t.Fatal("expected PLANNER_UNAVAILABLE")
 	}
+}
+
+// A trip-updates feed annotates the board: per-stop delay where the feed
+// names this station, canceled stays visible flagged, trips the feed never
+// mentions keep the schedule's silence — and the feed's health travels on
+// the board itself.
+func TestDeparturesTripUpdates(t *testing.T) {
+	stop := departureStop(t)
+	stop.ProviderEntityID = "KCI:SW"
+	store := &fakeStore{getStop: stop}
+
+	upd := realtime.NewTripUpdateStore()
+	d := int32(240)
+	upd.Replace([]realtime.TripUpdate{
+		// 10:05 Bogor — feed delays this stop's departure by 4m.
+		{TripID: "11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+			StopKeys: []realtime.StopDelay{{StopKey: "KCI:SW", DelaySec: 240}}},
+		// 09:55 Kota — already gone, but canceled beats delayed.
+		{TripID: "22222222-bbbb-4bbb-8bbb-bbbbbbbbbbbb", Canceled: true},
+		// 10:20 Kota — only a propagated delay, no stop named.
+		{TripID: "33333333-cccc-4ccc-8ccc-cccccccccccc", DelaySec: &d},
+		// 10:50 Kota — trip reported, but skips this station.
+		{TripID: "44444444-dddd-4ddd-8ddd-dddddddddddd",
+			StopKeys: []realtime.StopDelay{{StopKey: "KCI:SW", Skipped: true}}},
+		// MRTJ:M 10:15 — feed knows the trip but nothing about this stop:
+		// silence, not a fake "on time".
+		{TripID: "77777777-ffff-4fff-8fff-ffffffffffff"},
+	})
+	// A live poller proves the feed health rides the board; it writes to its
+	// own store so one successful poll can't clobber the fixture.
+	poller := realtime.NewTripUpdatePoller(&quietUpdates{}, "tj-rt", realtime.NewTripUpdateStore(), time.Minute, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := poller.Run(ctx)
+	waitFor(t, "updates poll", func() bool { return poller.Status().Status == "live" })
+	cancel()
+	<-done
+
+	h := NewHandler(store, engineSource(t, depFixture(), nil)).WithTripUpdates(upd, poller)
+	h.now = func() time.Time { return departuresNow }
+	rec := httptest.NewRecorder()
+	h.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, depTarget, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	board := decode(t, rec)["departures"].(map[string]any)
+	if board["status"] != "scheduled" {
+		t.Fatal("schedule stays the source of truth even with a live updates feed")
+	}
+	rt := board["realtime"].(map[string]any)
+	if rt["status"] != "live" || rt["source"] != "tj-rt" {
+		t.Fatalf("realtime = %v", rt)
+	}
+
+	line := board["lines"].([]any)[0].(map[string]any)
+	bogor := line["directions"].([]any)[0].(map[string]any)["departures"].([]any)
+	if bogor[0].(map[string]any)["delaySec"] != 240.0 {
+		t.Fatalf("stop delay = %v", bogor[0])
+	}
+	kota := line["directions"].([]any)[1].(map[string]any)
+	kotaDeps := kota["departures"].([]any)
+	if kotaDeps[0].(map[string]any)["delaySec"] != 240.0 {
+		t.Fatalf("propagated delay = %v", kotaDeps[0])
+	}
+	if kotaDeps[1].(map[string]any)["canceled"] != true {
+		t.Fatalf("skipped stop must read canceled: %v", kotaDeps[1])
+	}
+	prev := kota["previousDeparture"].(map[string]any)
+	if prev["canceled"] != true {
+		t.Fatalf("previousDeparture keeps its flag: %v", prev)
+	}
+	mrt := board["lines"].([]any)[1].(map[string]any)["directions"].([]any)[0].(map[string]any)["departures"].([]any)[0].(map[string]any)
+	if _, ok := mrt["delaySec"]; ok {
+		t.Fatalf("trip with no stop report must not claim on-time: %v", mrt)
+	}
+}
+
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+// quietUpdates answers an empty update list — the poller only exists so
+// Status() reports a live feed; the store content is the test's own.
+type quietUpdates struct{}
+
+func (quietUpdates) FetchTripUpdates(context.Context) ([]realtime.TripUpdate, error) {
+	return nil, nil
 }
 
 func TestDeparturesNoScheduleIsEmptyBoard(t *testing.T) {

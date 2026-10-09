@@ -464,6 +464,18 @@ Departure:
         True when the time comes from a headway template (frequency-based
         service) or a derived row the source never published — ESTIMATED per
         docs/09, not a scheduled departure.
+    delaySec:
+      type: integer
+      description: >-
+        Seconds of delay the trip-updates feed reports for this boarding —
+        per-stop when the feed names this station, else the trip's
+        propagated delay. Absent when no feed is wired or the feed says
+        nothing about this boarding; absence is silence, not "on time".
+    canceled:
+      type: boolean
+      description: >-
+        True when the feed cancels the trip or skips this stop — the
+        boarding will not happen. Kept on the board flagged, not dropped.
 
 DepartureDirection:
   type: object
@@ -511,10 +523,12 @@ DepartureLine:
 StationDepartures:
   type: object
   description: >-
-    A station's departure board. status is fixed "scheduled" — the source is
-    the in-house schedule snapshot (GTFS + reconstructed timetables), never
-    realtime. Lines and directions are ordered by soonest upcoming
-    departure.
+    A station's departure board. status stays "scheduled" — the timetable
+    remains the source of truth. When a trip-updates feed is wired,
+    realtime carries that feed's health and individual departures may
+    carry delaySec/canceled; without a feed the field is absent and the
+    board claims nothing realtime. Lines and directions are ordered by
+    soonest upcoming departure.
   required:
     - station
     - status
@@ -529,6 +543,8 @@ StationDepartures:
       type: string
       enum:
         - scheduled
+    realtime:
+      $ref: '../schemas/realtime.yaml#/FeedStatus'
     windowMinutes:
       type: integer
       description: Effective lookahead window the board was computed with
