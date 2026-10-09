@@ -54,6 +54,27 @@ func (q *Queries) GetProviderByCode(ctx context.Context, code string) (Provider,
 	return i, err
 }
 
+const getTripByProviderEntityID = `-- name: GetTripByProviderEntityID :one
+SELECT t.id
+FROM trips t
+JOIN providers p ON p.id = t.provider_id
+WHERE p.code = $1 AND t.provider_entity_id = $2
+`
+
+type GetTripByProviderEntityIDParams struct {
+	Code             string `json:"code"`
+	ProviderEntityID string `json:"provider_entity_id"`
+}
+
+// Resolves a realtime feed's trip_id (with the configured prefix) to the
+// canonical trip UUID — the join key TripUpdates attach delays to.
+func (q *Queries) GetTripByProviderEntityID(ctx context.Context, arg GetTripByProviderEntityIDParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getTripByProviderEntityID, arg.Code, arg.ProviderEntityID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const insertFrequency = `-- name: InsertFrequency :exec
 INSERT INTO frequencies (trip_id, start_seconds, end_seconds, headway_seconds, exact_times)
 VALUES ($1, $2, $3, $4, $5)
@@ -221,7 +242,9 @@ func (q *Queries) ListCatalogStops(ctx context.Context, code string) ([]ListCata
 }
 
 const listPlannerStops = `-- name: ListPlannerStops :many
-SELECT s.id, s.provider_entity_id, s.name, s.metadata
+SELECT s.id, s.provider_entity_id, s.name, s.metadata,
+	st_x(s.location::geometry) AS lon,
+	st_y(s.location::geometry) AS lat
 FROM stops s
 WHERE s.removed_at IS NULL
 `
@@ -231,9 +254,12 @@ type ListPlannerStopsRow struct {
 	ProviderEntityID string      `json:"provider_entity_id"`
 	Name             string      `json:"name"`
 	Metadata         []byte      `json:"metadata"`
+	Lon              float64     `json:"lon"`
+	Lat              float64     `json:"lat"`
 }
 
-// Stop refs the planner needs: names for output, amenities for stepFree.
+// Stop refs the planner needs: names for output, amenities for stepFree,
+// coordinates for schedule-derived position estimates.
 func (q *Queries) ListPlannerStops(ctx context.Context) ([]ListPlannerStopsRow, error) {
 	rows, err := q.db.Query(ctx, listPlannerStops)
 	if err != nil {
@@ -248,6 +274,8 @@ func (q *Queries) ListPlannerStops(ctx context.Context) ([]ListPlannerStopsRow, 
 			&i.ProviderEntityID,
 			&i.Name,
 			&i.Metadata,
+			&i.Lon,
+			&i.Lat,
 		); err != nil {
 			return nil, err
 		}

@@ -12,6 +12,7 @@ import (
 type Departure struct {
 	Unix      int64
 	TripKey   string
+	TripID    pgtype.UUID // canonical trip — join key for realtime updates
 	Headsign  string
 	Estimated bool // frequency template or derived times
 	RouteID   pgtype.UUID
@@ -80,6 +81,7 @@ func (e *Engine) departure(c *conn, unix int64) Departure {
 	return Departure{
 		Unix:      unix,
 		TripKey:   tr.key,
+		TripID:    tr.id,
 		Headsign:  tr.headsign,
 		Estimated: c.derived || c.tpl,
 		RouteID:   tr.routeID,

@@ -31,6 +31,7 @@ type Stop struct {
 	EntityID string
 	Name     string
 	StepFree bool // an ELEVATOR_* amenity exists in provider metadata
+	Lon, Lat float64
 }
 
 type walkEdge struct {
@@ -176,6 +177,7 @@ func Load(ctx context.Context, q Loader) (*Engine, error) {
 		e.stops[s.ID] = Stop{
 			ID: s.ID, EntityID: s.ProviderEntityID, Name: s.Name,
 			StepFree: hasElevator(s.Metadata),
+			Lon:      s.Lon, Lat: s.Lat,
 		}
 	}
 	edges, err := q.ListTransferEdges(ctx)

@@ -125,8 +125,19 @@ FROM frequencies;
 -- name: ListTransferEdges :many
 SELECT from_stop_id, to_stop_id, walk_distance_m FROM transfers;
 
+-- name: GetTripByProviderEntityID :one
+-- Resolves a realtime feed's trip_id (with the configured prefix) to the
+-- canonical trip UUID — the join key TripUpdates attach delays to.
+SELECT t.id
+FROM trips t
+JOIN providers p ON p.id = t.provider_id
+WHERE p.code = $1 AND t.provider_entity_id = $2;
+
 -- name: ListPlannerStops :many
--- Stop refs the planner needs: names for output, amenities for stepFree.
-SELECT s.id, s.provider_entity_id, s.name, s.metadata
+-- Stop refs the planner needs: names for output, amenities for stepFree,
+-- coordinates for schedule-derived position estimates.
+SELECT s.id, s.provider_entity_id, s.name, s.metadata,
+	st_x(s.location::geometry) AS lon,
+	st_y(s.location::geometry) AS lat
 FROM stops s
 WHERE s.removed_at IS NULL;
