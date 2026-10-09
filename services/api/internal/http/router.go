@@ -17,6 +17,7 @@ import (
 	"singgah/services/api/internal/journey"
 	"singgah/services/api/internal/passport"
 	"singgah/services/api/internal/places"
+	"singgah/services/api/internal/realtime"
 	"singgah/services/api/internal/trails"
 )
 
@@ -35,6 +36,7 @@ type Deps struct {
 	Collections *collections.Handler
 	Places      *places.Handler
 	Trails      *trails.Handler
+	Realtime    *realtime.Handler
 	// CORSOrigin is the Access-Control-Allow-Origin value ("*" for local dev).
 	CORSOrigin string
 }
@@ -72,6 +74,9 @@ func NewRouter(deps Deps) http.Handler {
 		}
 		if deps.Trails != nil {
 			deps.Trails.RegisterRoutes(v1)
+		}
+		if deps.Realtime != nil {
+			deps.Realtime.RegisterRoutes(v1)
 		}
 	})
 

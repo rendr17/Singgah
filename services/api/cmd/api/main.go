@@ -24,6 +24,8 @@ import (
 	"singgah/services/api/internal/places"
 	"singgah/services/api/internal/planner"
 	"singgah/services/api/internal/provider/commute"
+	"singgah/services/api/internal/provider/gtfsrt"
+	"singgah/services/api/internal/realtime"
 	"singgah/services/api/internal/trails"
 )
 
@@ -47,6 +49,19 @@ func main() {
 
 	var refreshDone <-chan struct{}
 	var cleanupDone <-chan struct{}
+	var realtimeDone <-chan struct{}
+	var alertsDone <-chan struct{}
+	var updatesDone <-chan struct{}
+	var queries *generated.Queries
+
+	// Realtime mounts unconditionally: with no poller the handler reports
+	// feedStatus=unavailable rather than 404ing or claiming live.
+	rtCache := realtime.NewCache()
+	rtAlerts := realtime.NewAlertStore()
+	rtUpdates := realtime.NewTripUpdateStore()
+	var rtPoller, rtAlertPoller, rtUpdatesPoller *realtime.Poller
+	var rtEstimator realtime.Estimator
+
 	if cfg.DatabaseURL != "" {
 		connectCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		pool, err := db.Connect(connectCtx, cfg.DatabaseURL)
@@ -57,7 +72,7 @@ func main() {
 		}
 		defer pool.Close()
 		deps.DB = pool
-		queries := generated.New(pool)
+		queries = generated.New(pool)
 		commuteClient := commute.NewClient(cfg.CommuteBaseURL)
 		// The planner snapshot reloads lazily on a TTL — schedule ingests are
 		// rare, so five minutes keeps responses fresh without churning. The
@@ -65,6 +80,12 @@ func main() {
 		engSrc := planner.NewEngineSource(func(ctx context.Context) (*planner.Engine, error) {
 			return planner.Load(ctx, queries)
 		}, 5*time.Minute)
+		// Rail modes have no licensed position feed — their honest answer is
+		// a timetable-derived estimate, labeled "estimated", never "live".
+		rtEstimator = &realtime.ScheduledEstimator{
+			Engine: engSrc,
+			Modes:  map[string]bool{"rail": true, "subway": true, "tram": true},
+		}
 		deps.Catalog = catalog.NewHandler(queries, engSrc)
 		deps.Journey = journey.NewHandler(queries, engSrc, commuteClient)
 		authSvc := auth.NewService(queries)
@@ -89,6 +110,73 @@ func main() {
 	} else {
 		logger.Warn("DATABASE_URL unset — database endpoints report unavailable")
 	}
+
+	// A licensed GTFS-RT feed turns the cache into a live pipeline. Route
+	// resolution needs the DB; without it RouteID stays empty, which the
+	// response shape already supports.
+	var resolve gtfsrt.RouteResolver
+	if queries != nil && (cfg.RealtimeFeedURL != "" || cfg.RealtimeAlertsURL != "" || cfg.RealtimeTripUpdatesURL != "") {
+		resolved := map[string]string{}
+		resolve = func(ctx context.Context, rid string) (string, bool) {
+			if id, ok := resolved[rid]; ok {
+				return id, true
+			}
+			u, err := queries.GetRouteByProviderEntityID(ctx, generated.GetRouteByProviderEntityIDParams{
+				Code: "commute", ProviderEntityID: cfg.RealtimeRoutePrefix + rid,
+			})
+			if err != nil || !u.Valid {
+				return "", false
+			}
+			resolved[rid] = u.String()
+			return resolved[rid], true
+		}
+	}
+	// TripUpdates join on canonical trip ids — the resolver maps the feed's
+	// trip_id (with the configured prefix) through trips.provider_entity_id.
+	var resolveTrip gtfsrt.TripResolver
+	if queries != nil && cfg.RealtimeTripUpdatesURL != "" {
+		resolved := map[string]string{}
+		resolveTrip = func(ctx context.Context, tid string) (string, bool) {
+			if id, ok := resolved[tid]; ok {
+				return id, true
+			}
+			u, err := queries.GetTripByProviderEntityID(ctx, generated.GetTripByProviderEntityIDParams{
+				Code: "commute", ProviderEntityID: cfg.RealtimeTripPrefix + tid,
+			})
+			if err != nil || !u.Valid {
+				return "", false
+			}
+			resolved[tid] = u.String()
+			return resolved[tid], true
+		}
+	}
+	if cfg.RealtimeFeedURL != "" {
+		rtPoller = realtime.NewPoller(
+			gtfsrt.NewClient(cfg.RealtimeFeedURL, cfg.RealtimeFeedSource, resolve),
+			cfg.RealtimeFeedSource, rtCache, cfg.RealtimePollInterval, logger)
+		realtimeDone = rtPoller.Run(ctx)
+		logger.Info("realtime poll enabled", "source", cfg.RealtimeFeedSource, "interval", cfg.RealtimePollInterval)
+	}
+	if cfg.RealtimeAlertsURL != "" {
+		rtAlertPoller = realtime.NewAlertPoller(
+			gtfsrt.NewClient(cfg.RealtimeAlertsURL, cfg.RealtimeFeedSource, resolve),
+			cfg.RealtimeFeedSource, rtAlerts, cfg.RealtimeAlertsInterval, logger)
+		alertsDone = rtAlertPoller.Run(ctx)
+		logger.Info("alerts poll enabled", "source", cfg.RealtimeFeedSource, "interval", cfg.RealtimeAlertsInterval)
+	}
+	if cfg.RealtimeTripUpdatesURL != "" {
+		rtUpdatesPoller = realtime.NewTripUpdatePoller(
+			gtfsrt.NewClient(cfg.RealtimeTripUpdatesURL, cfg.RealtimeFeedSource, resolve).
+				WithTripResolver(resolveTrip),
+			cfg.RealtimeFeedSource, rtUpdates, cfg.RealtimeTripUpdatesInterval, logger)
+		updatesDone = rtUpdatesPoller.Run(ctx)
+		logger.Info("trip-updates poll enabled", "source", cfg.RealtimeFeedSource, "interval", cfg.RealtimeTripUpdatesInterval)
+	}
+	if deps.Catalog != nil && rtUpdatesPoller != nil {
+		deps.Catalog.WithTripUpdates(rtUpdates, rtUpdatesPoller)
+	}
+	deps.Realtime = realtime.NewHandler(rtCache, rtPoller, rtEstimator, rtAlerts, rtAlertPoller).
+		WithDone(ctx.Done())
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
@@ -129,6 +217,24 @@ func main() {
 		if cleanupDone != nil {
 			select {
 			case <-cleanupDone:
+			case <-time.After(5 * time.Second):
+			}
+		}
+		if realtimeDone != nil {
+			select {
+			case <-realtimeDone:
+			case <-time.After(5 * time.Second):
+			}
+		}
+		if alertsDone != nil {
+			select {
+			case <-alertsDone:
+			case <-time.After(5 * time.Second):
+			}
+		}
+		if updatesDone != nil {
+			select {
+			case <-updatesDone:
 			case <-time.After(5 * time.Second):
 			}
 		}

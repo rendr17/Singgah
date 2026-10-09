@@ -33,6 +33,18 @@ func (w *statusWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }
 
+// Flush lets SSE handlers use the ordinary w.(http.Flusher) assertion.
+// Going through WriteHeader first keeps status tracking consistent —
+// a bare Unwrap+Flush would bypass it and double the 200 header.
+func (w *statusWriter) Flush() {
+	if !w.wrote {
+		w.WriteHeader(http.StatusOK)
+	}
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // Logging emits one structured slog line per completed request.
 func Logging(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
