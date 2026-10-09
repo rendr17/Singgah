@@ -527,6 +527,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/vehicles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Live vehicles inside a viewport
+         * @description Snapshot of the normalized live cache (docs/22, docs/40). A viewport bbox is required — the API never returns a whole-city feed. Entity `state` and `feedStatus` together tell the client exactly how truthful the answer is: when no licensed source is configured the endpoint still answers with feedStatus=unavailable and an empty list, never a fabricated marker.
+         */
+        get: operations["listVehicles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Currently active service alerts
+         * @description Alerts the configured feed currently publishes (docs/22, docs/40). Visibility is decided by each alert's own active period — inactive alerts are not listed. Unlike /vehicles this is not viewport-scoped: alerts are few and route-scoped. When no alert source is configured the endpoint still answers with feedStatus=unavailable and an empty list.
+         */
+        get: operations["listAlerts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/realtime/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Realtime feed status
+         * @description Feed-level health: whether a realtime source is configured and polling successfully. Lets clients distinguish "nothing moving nearby" from "the feed is dead" before rendering any live UI.
+         */
+        get: operations["realtimeHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/realtime/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Live vehicle snapshot as an SSE stream
+         * @description Server-Sent Events alternative to polling /vehicles (docs/22, docs/40). Each `event: vehicles` frame carries the identical VehicleList payload, so push and poll never diverge. The stream emits immediately on connect, then every ~15s on the same cadence the upstream feed is polled. The bbox is required for the same reason it is on /vehicles: viewport scoping is the privacy/cost contract, not an option. Rescoping after a pan/zoom is a reconnect; EventSource handles that natively.
+         */
+        get: operations["streamVehicles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -623,6 +703,21 @@ export interface components {
             facilities: components["schemas"]["Facility"][];
             source: components["schemas"]["SourceMeta"];
         };
+        /** @description Feed-level health — whether a realtime source is configured and succeeding. Independent of entity freshness: a "live" feed can legitimately serve zero vehicles, and last-known entities keep serving while a degraded feed recovers. */
+        FeedStatus: {
+            /**
+             * @description unavailable = no source configured; degraded = consecutive fetch failures or no success yet; live = source answering on schedule.
+             * @enum {string}
+             */
+            status: "live" | "degraded" | "unavailable";
+            /** @description Provider code of the configured feed. */
+            source?: string;
+            /** Format: date-time */
+            lastSuccessAt?: string;
+            /** Format: date-time */
+            lastErrorAt?: string;
+            consecutiveFailures?: number;
+        };
         Departure: {
             /**
              * @description Asia/Jakarta wall clock, HH:MM
@@ -635,6 +730,10 @@ export interface components {
             boundFor: string;
             /** @description True when the time comes from a headway template (frequency-based service) or a derived row the source never published — ESTIMATED per docs/09, not a scheduled departure. */
             estimated?: boolean;
+            /** @description Seconds of delay the trip-updates feed reports for this boarding — per-stop when the feed names this station, else the trip's propagated delay. Absent when no feed is wired or the feed says nothing about this boarding; absence is silence, not "on time". */
+            delaySec?: number;
+            /** @description True when the feed cancels the trip or skips this stop — the boarding will not happen. Kept on the board flagged, not dropped. */
+            canceled?: boolean;
         };
         /** @description One direction (boundFor) on a line. departures holds upcoming boardings inside the requested window, soonest first; previousDeparture is the latest boarding already gone inside the lookback window, absent when none is seen. */
         DepartureDirection: {
@@ -650,11 +749,12 @@ export interface components {
             route?: components["schemas"]["RouteRef"];
             directions: components["schemas"]["DepartureDirection"][];
         };
-        /** @description A station's departure board. status is fixed "scheduled" — the source is the in-house schedule snapshot (GTFS + reconstructed timetables), never realtime. Lines and directions are ordered by soonest upcoming departure. */
+        /** @description A station's departure board. status stays "scheduled" — the timetable remains the source of truth. When a trip-updates feed is wired, realtime carries that feed's health and individual departures may carry delaySec/canceled; without a feed the field is absent and the board claims nothing realtime. Lines and directions are ordered by soonest upcoming departure. */
         StationDepartures: {
             station: components["schemas"]["StopRef"];
             /** @enum {string} */
             status: "scheduled";
+            realtime?: components["schemas"]["FeedStatus"];
             /** @description Effective lookahead window the board was computed with */
             windowMinutes: number;
             lines: components["schemas"]["DepartureLine"][];
@@ -1288,6 +1388,68 @@ export interface components {
             durationIncludes?: string;
             stops?: components["schemas"]["TrailStop"][];
         };
+        /** @description Normalized vehicle/trip position. `observedAt` is the provider's own timestamp and is the freshness truth — UI must label data age from it, not from response time. `state` is classified server-side at read time. */
+        LiveVehicle: {
+            /** @description Provider-scoped vehicle/trip id — unique only within `source`. */
+            id: string;
+            /** @description Provider code, e.g. a GTFS-RT feed id. */
+            source: string;
+            /**
+             * Format: uuid
+             * @description Canonical route UUID; absent when the adapter could not resolve it.
+             */
+            routeId?: string;
+            /** @description Provider trip id; absent when the feed does not publish it. */
+            tripId?: string;
+            lat: number;
+            lon: number;
+            /** @description Degrees clockwise from north, when the source provides it. */
+            bearing?: number;
+            /**
+             * @description live = observed inside the live window; estimated = source-declared inference; stale = outside the live window (last-known, degradable).
+             * @enum {string}
+             */
+            state: "live" | "estimated" | "stale";
+            /**
+             * Format: date-time
+             * @description Provider timestamp of this observation.
+             */
+            observedAt: string;
+            /**
+             * Format: date-time
+             * @description Singgah ingest timestamp — diagnostic for upstream delay.
+             */
+            receivedAt: string;
+        };
+        VehicleList: {
+            feedStatus: components["schemas"]["FeedStatus"];
+            vehicles: components["schemas"]["LiveVehicle"][];
+        };
+        /** @description One active window; an absent end is open-ended. */
+        AlertPeriod: {
+            /** Format: date-time */
+            start?: string;
+            /** Format: date-time */
+            end?: string;
+        };
+        /** @description Normalized service alert (docs/40). `cause`/`effect` are the feed's own GTFS-RT vocabulary, lowercased — never reinterpreted. Alerts with no informed entities are network-wide; scoped alerts carry the canonical route ids that could be resolved. An alert absent `activePeriods` stays visible until the feed withdraws it. */
+        ServiceAlert: {
+            /** @description Provider-scoped alert id — unique only within `source`. */
+            id: string;
+            source: string;
+            cause?: string;
+            effect?: string;
+            headerText?: string;
+            descriptionText?: string;
+            url?: string;
+            routeIds?: string[];
+            activePeriods?: components["schemas"]["AlertPeriod"][];
+        };
+        AlertList: {
+            feedStatus: components["schemas"]["FeedStatus"];
+            alerts: components["schemas"]["ServiceAlert"][];
+        };
+        RealtimeHealth: components["schemas"]["FeedStatus"];
     };
     responses: never;
     parameters: never;
@@ -2457,6 +2619,153 @@ export interface operations {
                 };
             };
             /** @description Error envelope */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    listVehicles: {
+        parameters: {
+            query: {
+                /** @description minLon,minLat,maxLon,maxLat in WGS84. */
+                bbox: string;
+                /** @description Narrow to one canonical route. */
+                route_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Viewport-scoped vehicle snapshot with feed status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VehicleList"];
+                };
+            };
+            /** @description Missing/invalid bbox */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+            /** @description Error envelope — shared by all endpoints */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    listAlerts: {
+        parameters: {
+            query?: {
+                /** @description Narrow to alerts informing one canonical route; network-wide alerts (no informed entities) are always included. */
+                route_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Active alerts with feed status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertList"];
+                };
+            };
+            /** @description Error envelope — shared by all endpoints */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    realtimeHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Feed status — always answers, including when unconfigured */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RealtimeHealth"];
+                };
+            };
+            /** @description Error envelope — shared by all endpoints */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+        };
+    };
+    streamVehicles: {
+        parameters: {
+            query: {
+                /** @description minLon,minLat,maxLon,maxLat in WGS84 — fixed for the connection's lifetime. */
+                bbox: string;
+                /** @description Narrow to one canonical route. */
+                route_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description text/event-stream of vehicles events; each data line is a VehicleList JSON payload. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            /** @description Missing/invalid bbox */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["error"];
+                };
+            };
+            /** @description Error envelope — shared by all endpoints */
             default: {
                 headers: {
                     [name: string]: unknown;
