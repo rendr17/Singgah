@@ -1,0 +1,152 @@
+FeedStatus:
+  type: object
+  required: [status]
+  additionalProperties: false
+  description: >-
+    Feed-level health — whether a realtime source is configured and
+    succeeding. Independent of entity freshness: a "live" feed can
+    legitimately serve zero vehicles, and last-known entities keep serving
+    while a degraded feed recovers.
+  properties:
+    status:
+      type: string
+      enum: [live, degraded, unavailable]
+      description: >-
+        unavailable = no source configured; degraded = consecutive fetch
+        failures or no success yet; live = source answering on schedule.
+    source:
+      type: string
+      description: Provider code of the configured feed.
+    lastSuccessAt:
+      type: string
+      format: date-time
+    lastErrorAt:
+      type: string
+      format: date-time
+    consecutiveFailures:
+      type: integer
+      minimum: 0
+
+LiveVehicle:
+  type: object
+  required: [id, source, lat, lon, state, observedAt, receivedAt]
+  additionalProperties: false
+  description: >-
+    Normalized vehicle/trip position. `observedAt` is the provider's own
+    timestamp and is the freshness truth — UI must label data age from it,
+    not from response time. `state` is classified server-side at read time.
+  properties:
+    id:
+      type: string
+      description: Provider-scoped vehicle/trip id — unique only within `source`.
+    source:
+      type: string
+      description: Provider code, e.g. a GTFS-RT feed id.
+    routeId:
+      type: string
+      format: uuid
+      description: Canonical route UUID; absent when the adapter could not resolve it.
+    tripId:
+      type: string
+      description: Provider trip id; absent when the feed does not publish it.
+    lat:
+      type: number
+      minimum: -90
+      maximum: 90
+    lon:
+      type: number
+      minimum: -180
+      maximum: 180
+    bearing:
+      type: number
+      description: Degrees clockwise from north, when the source provides it.
+    state:
+      type: string
+      enum: [live, estimated, stale]
+      description: >-
+        live = observed inside the live window; estimated = source-declared
+        inference; stale = outside the live window (last-known, degradable).
+    observedAt:
+      type: string
+      format: date-time
+      description: Provider timestamp of this observation.
+    receivedAt:
+      type: string
+      format: date-time
+      description: Singgah ingest timestamp — diagnostic for upstream delay.
+
+VehicleList:
+  type: object
+  required: [feedStatus, vehicles]
+  additionalProperties: false
+  properties:
+    feedStatus:
+      $ref: '#/FeedStatus'
+    vehicles:
+      type: array
+      items:
+        $ref: '#/LiveVehicle'
+
+RealtimeHealth:
+  allOf:
+    - $ref: '#/FeedStatus'
+
+AlertPeriod:
+  type: object
+  additionalProperties: false
+  description: One active window; an absent end is open-ended.
+  properties:
+    start:
+      type: string
+      format: date-time
+    end:
+      type: string
+      format: date-time
+
+ServiceAlert:
+  type: object
+  required: [id, source]
+  additionalProperties: false
+  description: >-
+    Normalized service alert (docs/40). `cause`/`effect` are the feed's own
+    GTFS-RT vocabulary, lowercased — never reinterpreted. Alerts with no
+    informed entities are network-wide; scoped alerts carry the canonical
+    route ids that could be resolved. An alert absent `activePeriods` stays
+    visible until the feed withdraws it.
+  properties:
+    id:
+      type: string
+      description: Provider-scoped alert id — unique only within `source`.
+    source:
+      type: string
+    cause:
+      type: string
+    effect:
+      type: string
+    headerText:
+      type: string
+    descriptionText:
+      type: string
+    url:
+      type: string
+    routeIds:
+      type: array
+      items:
+        type: string
+        format: uuid
+    activePeriods:
+      type: array
+      items:
+        $ref: '#/AlertPeriod'
+
+AlertList:
+  type: object
+  required: [feedStatus, alerts]
+  additionalProperties: false
+  properties:
+    feedStatus:
+      $ref: '#/FeedStatus'
+    alerts:
+      type: array
+      items:
+        $ref: '#/ServiceAlert'

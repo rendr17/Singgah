@@ -1,0 +1,34 @@
+get:
+  operationId: listAlerts
+  summary: Currently active service alerts
+  description: >-
+    Alerts the configured feed currently publishes (docs/22, docs/40).
+    Visibility is decided by each alert's own active period — inactive alerts
+    are not listed. Unlike /vehicles this is not viewport-scoped: alerts are
+    few and route-scoped. When no alert source is configured the endpoint
+    still answers with feedStatus=unavailable and an empty list.
+  tags:
+    - realtime
+  parameters:
+    - name: route_id
+      in: query
+      required: false
+      schema:
+        type: string
+        format: uuid
+      description: >-
+        Narrow to alerts informing one canonical route; network-wide alerts
+        (no informed entities) are always included.
+  responses:
+    '200':
+      description: Active alerts with feed status
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/realtime.yaml#/AlertList'
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

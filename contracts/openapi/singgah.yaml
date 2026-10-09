@@ -61,6 +61,14 @@ paths:
     $ref: './paths/trails.yaml'
   /api/v1/trails/{slug}:
     $ref: './paths/trail-detail.yaml'
+  /api/v1/vehicles:
+    $ref: './paths/vehicles.yaml'
+  /api/v1/alerts:
+    $ref: './paths/alerts.yaml'
+  /api/v1/realtime/health:
+    $ref: './paths/realtime-health.yaml'
+  /api/v1/realtime/stream:
+    $ref: './paths/realtime-stream.yaml'
 components:
   securitySchemes:
     bearerAuth:

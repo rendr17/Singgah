@@ -1,0 +1,22 @@
+get:
+  operationId: realtimeHealth
+  summary: Realtime feed status
+  description: >-
+    Feed-level health: whether a realtime source is configured and polling
+    successfully. Lets clients distinguish "nothing moving nearby" from
+    "the feed is dead" before rendering any live UI.
+  tags:
+    - realtime
+  responses:
+    '200':
+      description: Feed status — always answers, including when unconfigured
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/realtime.yaml#/RealtimeHealth'
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

@@ -3,8 +3,10 @@ module singgah/services/api
 go 1.26.4
 
 require (
+	github.com/MobilityData/gtfs-realtime-bindings/golang/gtfs v1.0.0
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/jackc/pgx/v5 v5.11.0
+	google.golang.org/protobuf v1.26.0
 )
 
 require (

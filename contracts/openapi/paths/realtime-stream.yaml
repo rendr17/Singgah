@@ -1,0 +1,47 @@
+get:
+  operationId: streamVehicles
+  summary: Live vehicle snapshot as an SSE stream
+  description: >-
+    Server-Sent Events alternative to polling /vehicles (docs/22, docs/40).
+    Each `event: vehicles` frame carries the identical VehicleList payload,
+    so push and poll never diverge. The stream emits immediately on connect,
+    then every ~15s on the same cadence the upstream feed is polled. The
+    bbox is required for the same reason it is on /vehicles:
+    viewport scoping is the privacy/cost contract, not an option. Rescoping
+    after a pan/zoom is a reconnect; EventSource handles that natively.
+  tags:
+    - realtime
+  parameters:
+    - name: bbox
+      in: query
+      required: true
+      schema:
+        type: string
+      description: minLon,minLat,maxLon,maxLat in WGS84 — fixed for the connection's lifetime.
+    - name: route_id
+      in: query
+      required: false
+      schema:
+        type: string
+        format: uuid
+      description: Narrow to one canonical route.
+  responses:
+    '200':
+      description: text/event-stream of vehicles events; each data line is a VehicleList JSON payload.
+      content:
+        text/event-stream:
+          schema:
+            type: string
+            description: SSE wire format carrying VehicleList JSON frames.
+    '400':
+      description: Missing/invalid bbox
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

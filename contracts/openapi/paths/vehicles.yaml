@@ -1,0 +1,44 @@
+get:
+  operationId: listVehicles
+  summary: Live vehicles inside a viewport
+  description: >-
+    Snapshot of the normalized live cache (docs/22, docs/40). A viewport bbox
+    is required — the API never returns a whole-city feed. Entity `state` and
+    `feedStatus` together tell the client exactly how truthful the answer is:
+    when no licensed source is configured the endpoint still answers with
+    feedStatus=unavailable and an empty list, never a fabricated marker.
+  tags:
+    - realtime
+  parameters:
+    - name: bbox
+      in: query
+      required: true
+      schema:
+        type: string
+      description: minLon,minLat,maxLon,maxLat in WGS84.
+    - name: route_id
+      in: query
+      required: false
+      schema:
+        type: string
+        format: uuid
+      description: Narrow to one canonical route.
+  responses:
+    '200':
+      description: Viewport-scoped vehicle snapshot with feed status
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/realtime.yaml#/VehicleList'
+    '400':
+      description: Missing/invalid bbox
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'
+    default:
+      description: Error envelope — shared by all endpoints
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/error.yaml'

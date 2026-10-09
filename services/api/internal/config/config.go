@@ -36,6 +36,31 @@ type Config struct {
 	// for staging and fixture servers.
 	GTFSFeedURL string
 
+	// RealtimeFeedURL enables the GTFS-RT VehiclePositions poll when set.
+	// No default: the feed is only wired once its license/terms are
+	// documented in docs/35_DATA_SOURCES.md — an empty value is the honest
+	// "unavailable" state.
+	RealtimeFeedURL      string
+	RealtimePollInterval time.Duration
+	// RealtimeFeedSource is the provider label stamped on normalized
+	// entities; RealtimeRoutePrefix maps the feed's route_ids into the
+	// catalog provider_entity_id space ("commute" uses TJ:<short_name>).
+	RealtimeFeedSource  string
+	RealtimeRoutePrefix string
+
+	// RealtimeAlertsURL enables the GTFS-RT Alerts poll when set — usually a
+	// dedicated endpoint; the same licensing gate applies.
+	RealtimeAlertsURL      string
+	RealtimeAlertsInterval time.Duration
+
+	// RealtimeTripUpdatesURL enables the GTFS-RT TripUpdates poll when set —
+	// delays annotate the departures board. Same licensing gate.
+	// RealtimeTripPrefix maps the feed's trip_ids into catalog
+	// provider_entity_id space; empty means match verbatim.
+	RealtimeTripUpdatesURL      string
+	RealtimeTripUpdatesInterval time.Duration
+	RealtimeTripPrefix          string
+
 	// AuthSessionCleanupInterval drives the dead-session sweeper (expired or
 	// revoked rows can never authenticate — deleting them is pure hygiene).
 	// Unlike the schedule refresh it only touches our own tables, so it
@@ -82,6 +107,47 @@ func Load() (Config, error) {
 	cfg.GTFSFeedURL = os.Getenv("GTFS_FEED_URL")
 	if cfg.GTFSFeedURL == "" {
 		cfg.GTFSFeedURL = "https://gtfs.transjakarta.co.id/files/file_gtfs.zip"
+	}
+
+	cfg.RealtimeFeedURL = os.Getenv("REALTIME_FEED_URL")
+	cfg.RealtimeFeedSource = os.Getenv("REALTIME_FEED_SOURCE")
+	if cfg.RealtimeFeedSource == "" {
+		cfg.RealtimeFeedSource = "gtfs-rt"
+	}
+	cfg.RealtimeRoutePrefix = os.Getenv("REALTIME_ROUTE_PREFIX")
+	if cfg.RealtimeRoutePrefix == "" {
+		cfg.RealtimeRoutePrefix = "TJ:"
+	}
+	cfg.RealtimePollInterval = 15 * time.Second
+	if v := os.Getenv("REALTIME_POLL_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 5*time.Second {
+			return Config{}, fmt.Errorf("invalid REALTIME_POLL_INTERVAL %q", v)
+		}
+		cfg.RealtimePollInterval = d
+	}
+
+	cfg.RealtimeAlertsURL = os.Getenv("REALTIME_ALERTS_URL")
+	// Alerts change far slower than positions — docs/22 budgets 30–60s.
+	cfg.RealtimeAlertsInterval = 45 * time.Second
+	if v := os.Getenv("REALTIME_ALERTS_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 5*time.Second {
+			return Config{}, fmt.Errorf("invalid REALTIME_ALERTS_INTERVAL %q", v)
+		}
+		cfg.RealtimeAlertsInterval = d
+	}
+
+	cfg.RealtimeTripUpdatesURL = os.Getenv("REALTIME_TRIP_UPDATES_URL")
+	cfg.RealtimeTripPrefix = os.Getenv("REALTIME_TRIP_PREFIX")
+	// Delays sit between positions and alerts — docs/22 budgets 15–60s.
+	cfg.RealtimeTripUpdatesInterval = 30 * time.Second
+	if v := os.Getenv("REALTIME_TRIP_UPDATES_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 5*time.Second {
+			return Config{}, fmt.Errorf("invalid REALTIME_TRIP_UPDATES_INTERVAL %q", v)
+		}
+		cfg.RealtimeTripUpdatesInterval = d
 	}
 
 	cfg.AuthSessionCleanupInterval = 24 * time.Hour
