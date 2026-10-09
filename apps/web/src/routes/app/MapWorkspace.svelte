@@ -1,4 +1,5 @@
 <script lang="ts">
+	import '$lib/styles/singgah-map-redesign.css';
 	import { resolve } from '$app/paths';
 	import { browser } from '$app/environment';
 	import { onMount, tick, untrack } from 'svelte';
@@ -45,6 +46,19 @@
 	type RouteDetail = components['schemas']['RouteDetail'];
 	type Plan = components['schemas']['JourneyPlan'];
 	type Place = components['schemas']['PlaceSummary'];
+	type FeedStatus = components['schemas']['FeedStatus'];
+
+	// Structural GeoJSON — same shape TransitMap's vehicles prop expects,
+	// without dragging @types/geojson into the app package.
+	type VehicleFC = {
+		type: 'FeatureCollection';
+		features: {
+			type: 'Feature';
+			geometry: { type: 'Point'; coordinates: [number, number] };
+			properties: { id: string; state: string };
+		}[];
+	};
+	const EMPTY_VEHICLES: VehicleFC = { type: 'FeatureCollection', features: [] };
 
 	const STYLE_URL = basemapStyleUrl();
 
@@ -59,6 +73,11 @@
 	let stations = $state<Station[]>([]);
 	let lines = $state<RouteLines | undefined>();
 	let linesVisible = $state(false);
+	// Realtime: viewport-scoped vehicle snapshot + feed truth. The badge copy
+	// is derived from these two — it never claims live the API didn't claim.
+	let vehicles = $state<VehicleFC>(EMPTY_VEHICLES);
+	let feedStatus = $state<FeedStatus>({ status: 'unavailable' });
+	let lastBbox: [number, number, number, number] | null = null;
 	let error = $state('');
 	// First fetch only — later pans keep the last markers and don't flash a
 	// loading note over a usable map.
@@ -445,15 +464,24 @@
 				routeCatalogLoading = false;
 			}
 		})();
+
+		// Slow poll independent of panning — the feed itself refreshes faster,
+		// but 20s keeps markers moving without burning mobile data.
+		const rtTimer = setInterval(() => {
+			if (lastBbox) void refreshVehicles(lastBbox.map((n) => n.toFixed(5)).join(','));
+		}, 20_000);
+		return () => clearInterval(rtTimer);
 	});
 
 	let timer: ReturnType<typeof setTimeout>;
 	let viewportRequest = 0;
 	function onViewportChange(bbox: [number, number, number, number]) {
+		lastBbox = bbox;
 		const requestId = ++viewportRequest;
 		clearTimeout(timer);
 		timer = setTimeout(() => {
 			const bboxStr = bbox.map((n) => n.toFixed(5)).join(',');
+			void refreshVehicles(bboxStr);
 			void (async () => {
 				try {
 					const data = await unwrap(
@@ -483,6 +511,46 @@
 			})();
 		}, 250);
 	}
+
+	// Vehicles refresh with the viewport (above) and on a slow timer — the
+	// server cache is already viewport-scoped, so panning only needs the same
+	// debounced call. Failures keep the last snapshot: stale markers are more
+	// honest than a flickering empty map.
+	async function refreshVehicles(bboxStr: string) {
+		try {
+			const d = await unwrap(api.GET('/api/v1/vehicles', { params: { query: { bbox: bboxStr } } }));
+			feedStatus = d.feedStatus;
+			vehicles = {
+				type: 'FeatureCollection',
+				features: d.vehicles.map((v) => ({
+					type: 'Feature',
+					geometry: { type: 'Point', coordinates: [v.lon, v.lat] },
+					properties: { id: v.id, state: v.state }
+				}))
+			};
+		} catch {
+			/* realtime layer degrades silently — schedule data still serves */
+		}
+	}
+
+	// Badge copy is derived, never asserted: live names the configured source,
+	// degraded admits staleness, and an unconfigured feed with only schedule
+	// guesses shows as estimation — not a dead-map error.
+	let feedBadge = $derived.by(() => {
+		const hasEstimated = vehicles.features.some((f) => f.properties.state === 'estimated');
+		if (feedStatus.status === 'live') {
+			const src = feedStatus.source ?? 'sumber';
+			return {
+				text: hasEstimated ? `Live · ${src} + estimasi jadwal` : `Live · ${src}`,
+				cls: 'live'
+			};
+		}
+		if (feedStatus.status === 'degraded') {
+			return { text: 'Live terganggu — posisi terakhir', cls: 'degraded' };
+		}
+		if (hasEstimated) return { text: 'Estimasi jadwal — bukan posisi live', cls: 'estimated' };
+		return null;
+	});
 
 	function openStation(id: string) {
 		routeCatalogOpen = false;
@@ -649,7 +717,14 @@
 	Stasiun dimuat mengikuti area yang terlihat. Klik titik untuk melihat jadwal stasiun.
 </p>
 
-<div class="map-wrap">
+<div
+	class="map-wrap"
+	class:map-wrap--panel-open={plannerOpen ||
+		routeCatalogOpen ||
+		!!mapStore.selectedStationId ||
+		!!mapStore.selectedLineId ||
+		overlayHeightVh > 0}
+>
 	<!-- Chrome overlays the fullscreen map (blueprint §30): back link,
 	     mode-independent search, and the from/to chip bar. -->
 	<div class="map-chrome">
@@ -693,6 +768,11 @@
 				Garis rute
 			</label>
 		{/if}
+		{#if feedBadge}
+			<div class="feed-badge feed-badge--{feedBadge.cls}" role="status">
+				<span class="feed-badge__dot" aria-hidden="true"></span>{feedBadge.text}
+			</div>
+		{/if}
 		{#if !mapFailed && firstLoad}
 			<div class="map-note">
 				<StateBlock kind="loading">Memuat stasiun…</StateBlock>
@@ -700,15 +780,23 @@
 		{/if}
 		{#if !mapFailed && error}
 			<div class="map-note map-note--interactive">
-				<StateBlock kind="error">{error}</StateBlock>
-				<button class="action" type="button" onclick={retryMap}>Coba muat ulang</button>
+				<div class="map-note__error-icon" aria-hidden="true">!</div>
+				<div class="map-note__message">
+					<strong>Data stasiun belum tersedia</strong>
+					<StateBlock kind="error">{error}</StateBlock>
+				</div>
+				<button class="action action--primary" type="button" onclick={retryMap}
+					>Coba muat ulang</button
+				>
 			</div>
 		{/if}
 		{#if mapFailed && mapStore.mode === 'geographic'}
-			<div class="map-note map-note--interactive" role="alert">
-				<StateBlock kind="error"
-					>Peta jalan belum tersedia. Periksa koneksi lalu coba lagi.</StateBlock
-				>
+			<div class="map-note map-note--interactive">
+				<div class="map-note__error-icon" aria-hidden="true">!</div>
+				<div class="map-note__message">
+					<strong>Peta jalan belum tersedia</strong>
+					<StateBlock kind="error">Periksa koneksi internet, lalu coba lagi.</StateBlock>
+				</div>
 				<div class="map-recovery">
 					<button class="action action--primary" type="button" onclick={retryMap}>Coba lagi</button>
 					<button class="action" type="button" onclick={() => mapStore.setMode('integration')}
@@ -728,6 +816,7 @@
 					styleUrl={STYLE_URL}
 					data={stationsToGeoJSON(stations)}
 					{lines}
+					{vehicles}
 					{linesVisible}
 					bottomPadding={mapBottomPadding}
 					{onViewportChange}
@@ -1121,9 +1210,15 @@
 			bind:this={sheetEl}
 		>
 			<header class="sheet-head">
-				<h2>Rencanakan perjalanan</h2>
+				<div class="planner-head__copy">
+					<p class="planner-head__eyebrow">SINGGAH / PERJALANAN</p>
+					<h2>Rencanakan perjalanan</h2>
+					<p class="planner-head__description">
+						Temukan rute transportasi publik yang paling sesuai untuk perjalananmu.
+					</p>
+				</div>
 				<SheetSizeControls size={sheetSize} onChange={(size) => (sheetSize = size)} />
-				<IconButton label="Hapus rencana" onclick={closePlanner}>
+				<IconButton label="Tutup dan hapus rencana" onclick={closePlanner}>
 					<svg
 						viewBox="0 0 24 24"
 						width="20"
@@ -1231,9 +1326,29 @@
 					/>
 				</div>
 				<section class="planner-preferences" aria-labelledby="planner-preferences-title">
-					<h3 class="planner-section-title" id="planner-preferences-title">
-						Preferensi perjalanan
-					</h3>
+					<div class="planner-preferences__intro">
+						<svg
+							viewBox="0 0 24 24"
+							width="22"
+							height="22"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="1.8"
+							stroke-linecap="round"
+							aria-hidden="true"
+						>
+							<path d="M4 6h5m4 0h7M4 12h9m4 0h3M4 18h2m4 0h10" />
+							<circle cx="11" cy="6" r="2" />
+							<circle cx="15" cy="12" r="2" />
+							<circle cx="8" cy="18" r="2" />
+						</svg>
+						<div>
+							<h3 class="planner-section-title" id="planner-preferences-title">
+								Preferensi perjalanan
+							</h3>
+							<p class="planner-preferences__description">Atur moda dan batasan perjalanan.</p>
+						</div>
+					</div>
 					<fieldset class="planner-modes">
 						<legend>Moda transportasi</legend>
 						<div class="mode-chips">
@@ -1242,8 +1357,27 @@
 									type="button"
 									class:mode-chip--on={plannerModes.has(value)}
 									aria-pressed={plannerModes.has(value)}
-									onclick={() => toggleMode(value)}>{label}</button
+									onclick={() => toggleMode(value)}
 								>
+									<svg
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="1.8"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										aria-hidden="true"
+									>
+										{#if value === 'bus'}
+											<path d="M5 18V6a3 3 0 0 1 3-3h8a3 3 0 0 1 3 3v12H5Z" />
+											<path d="M7 7h10v5H7zM7 15h10M8 18v3m8-3v3" />
+										{:else}
+											<rect x="6" y="3" width="12" height="18" rx="3" />
+											<path d="M8 7h8M8 12h8M7 16h10M9 21v1m6-1v1" />
+										{/if}
+									</svg>
+									<span>{label}</span>
+								</button>
 							{/each}
 						</div>
 					</fieldset>
@@ -1272,6 +1406,17 @@
 					type="submit"
 					disabled={!fromStation || !toStation || journeyLoading}
 				>
+					<svg
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						aria-hidden="true"
+					>
+						<circle cx="11" cy="11" r="7" />
+						<path d="m16 16 5 5" />
+					</svg>
 					{journeyLoading ? 'Mencari rute…' : 'Cari rute'}
 				</button>
 			</form>
@@ -1309,7 +1454,7 @@
 
 				<ol class="journey-legs">
 					{#each itin.legs as leg, i (i)}
-						<li class="jleg">
+						<li class={leg.type === 'walk' ? 'jleg jleg--walk' : 'jleg jleg--ride'}>
 							{#if leg.type === 'walk'}
 								<span class="jleg-icon" aria-hidden="true">↔</span>
 								<span>
@@ -1393,9 +1538,32 @@
 						.name}.</StateBlock
 				>
 			{:else}
-				<p class="planner-hint">
-					Pilih stasiun asal dan tujuan untuk mencari rute. Hasil perjalanan akan muncul di sini.
-				</p>
+				<div class="planner-empty">
+					<div class="planner-empty__art" aria-hidden="true">
+						<svg
+							viewBox="0 0 40 40"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2.2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+						>
+							<path
+								d="m5 30 11-22 10 8 9-10v24L24 35l-10-7-9 7V30z"
+								opacity=".25"
+								fill="currentColor"
+								stroke="none"
+							/>
+							<path d="M8 28c7-3 6-15 15-13s8 9 9 11" stroke-dasharray="3 4" />
+							<circle cx="9" cy="28" r="3" fill="white" />
+							<path d="M32 21a5 5 0 0 0-10 0c0 4 5 9 5 9s5-5 5-9Z" fill="white" />
+							<circle cx="27" cy="21" r="1.5" />
+						</svg>
+					</div>
+					<p>
+						Pilih stasiun asal dan tujuan untuk mencari rute. Hasil perjalanan akan muncul di sini.
+					</p>
+				</div>
 			{/if}
 		</aside>
 	{/if}
@@ -1418,6 +1586,19 @@
 		align-items: flex-start;
 		gap: var(--sg-space-2);
 		z-index: 2;
+	}
+	.map-brand {
+		display: none;
+		min-height: var(--sg-target-min);
+		align-items: center;
+		color: var(--sg-hero-deep);
+		font:
+			30px/1 Georgia,
+			'Times New Roman',
+			serif;
+		letter-spacing: -0.04em;
+		text-decoration: none;
+		white-space: nowrap;
 	}
 	/* BackNav renders a flow element — restyle it as a floating chip. */
 	.map-chrome :global(.back-nav) {

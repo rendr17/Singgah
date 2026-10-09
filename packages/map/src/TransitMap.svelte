@@ -32,6 +32,9 @@
 		/** Network route lines drawn under the station dots (integrated-map style).
 		 *  Each feature's `properties.color` is hex without '#'; empty falls back to muted. */
 		lines?: FeatureCollection<LineString | MultiLineString>;
+		/** Live/estimated vehicle positions — point features whose `state`
+		 *  (live|estimated|stale) drives the honest marker styling. */
+		vehicles?: FeatureCollection<Point>;
 		/** Visibility switch for the route-lines overlay — data still loads either way. */
 		linesVisible?: boolean;
 		/** Imperative camera target: ease to this lon/lat only when it falls
@@ -58,6 +61,7 @@
 		onViewportChange,
 		route,
 		lines,
+		vehicles,
 		linesVisible = true,
 		focus,
 		bottomPadding = 0,
@@ -74,6 +78,7 @@
 	const SOURCE = 'singgah-stations';
 	const ROUTE = 'singgah-route';
 	const LINES = 'singgah-lines';
+	const VEHICLES = 'singgah-vehicles';
 	const EMPTY_FC: FeatureCollection = { type: 'FeatureCollection', features: [] };
 
 	// Canvas layers can't read CSS custom properties — mirror the token values
@@ -356,6 +361,30 @@
 						},
 						paint: { 'text-color': '#FFFFFF' }
 					});
+					// Vehicles draw above network geometry. The states differ by
+					// shape, not just colour: live is a filled dot, estimated a
+					// hollow ring (never a "live" lookalike), stale translucent.
+					m!.addSource(VEHICLES, { type: 'geojson', data: vehicles ?? EMPTY_FC });
+					m!.addLayer({
+						id: 'vehicles',
+						type: 'circle',
+						source: VEHICLES,
+						paint: {
+							'circle-color': [
+								'match',
+								['get', 'state'],
+								'live',
+								BRAND,
+								'estimated',
+								'#FFFFFF',
+								MUTED
+							],
+							'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 4, 14, 6.5],
+							'circle-stroke-color': ['match', ['get', 'state'], 'estimated', BRAND, '#FFFFFF'],
+							'circle-stroke-width': ['match', ['get', 'state'], 'estimated', 2.5, 1.5],
+							'circle-opacity': ['match', ['get', 'state'], 'stale', 0.5, 0.95]
+						}
+					});
 					// Official operator marks ride on top of the badge circles —
 					// decorative, so a failed decode leaves the badges in place.
 					void (async () => {
@@ -536,6 +565,7 @@
 			}
 		}
 		map.getSource<GeoJSONSource>(ROUTE)?.setData(route ?? EMPTY_FC);
+		map.getSource<GeoJSONSource>(VEHICLES)?.setData(vehicles ?? EMPTY_FC);
 	});
 
 	// Camera fitting tracks `route` only. If it shared the sync effect above,
