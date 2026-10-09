@@ -14,6 +14,27 @@
 	}
 
 	let { lines, compact = false, now = new Date() }: Props = $props();
+
+	// The feed reports seconds; riders read minutes. Zero is a real report —
+	// "tepat waktu" is feed truth, not schedule assumption.
+	function delayLabel(sec: number): string {
+		const m = Math.round(sec / 60);
+		if (m > 0) return `+${m} mnt`;
+		if (m < 0) return `−${-m} mnt`;
+		return 'tepat waktu';
+	}
+
+	function depText(d: {
+		time: string;
+		estimated?: boolean;
+		delaySec?: number;
+		canceled?: boolean;
+	}): string {
+		let s = fmtTime(d.time) + (d.estimated ? '≈' : '');
+		if (d.canceled) return s + ' batal';
+		if (d.delaySec != null && d.delaySec !== 0) s += ` ${delayLabel(d.delaySec)}`;
+		return s;
+	}
 </script>
 
 {#each lines as line (line.lineCode)}
@@ -31,31 +52,35 @@
 					<span class="dir-next">
 						{#if dir.departures.length > 0}
 							{@const dep = dir.departures[0]}
-							<strong class="sg-tabular"
+							<strong class="sg-tabular" class:is-canceled={dep.canceled}
 								>{fmtTime(dep.time)}{#if dep.estimated}<span
 										class="est"
 										title="Estimasi — layanan headway, bukan jadwal pasti">≈</span
 									>{/if}</strong
 							>
-							{@const label = countdownLabel(minutesUntil(dep.time, now))}
-							{#if label}<span class="countdown">{label}</span>{/if}
+							{#if dep.canceled}
+								<span class="dep-flag dep-flag--cancel">dibatalkan</span>
+							{:else}
+								{@const label = countdownLabel(minutesUntil(dep.time, now))}
+								{#if label}<span class="countdown">{label}</span>{/if}
+								{#if dep.delaySec != null}
+									<span
+										class="dep-flag"
+										class:dep-flag--delay={dep.delaySec > 0}
+										class:dep-flag--ontime={dep.delaySec === 0}>{delayLabel(dep.delaySec)}</span
+									>
+								{/if}
+							{/if}
 						{:else}
 							<span class="sg-meta">—</span>
 						{/if}
 						{#if dir.previousDeparture}
-							<span class="prev sg-meta"
-								>lalu {fmtTime(dir.previousDeparture.time)}{dir.previousDeparture.estimated
-									? '≈'
-									: ''}</span
-							>
+							<span class="prev sg-meta">lalu {depText(dir.previousDeparture)}</span>
 						{/if}
 					</span>
 					{#if !compact && dir.departures.length > 1}
 						<span class="later sg-meta sg-tabular">
-							{dir.departures
-								.slice(1)
-								.map((d) => fmtTime(d.time) + (d.estimated ? '≈' : ''))
-								.join(' · ')}
+							{dir.departures.slice(1).map(depText).join(' · ')}
 						</span>
 					{/if}
 				</li>
@@ -103,6 +128,24 @@
 		color: var(--sg-brand);
 		font-size: var(--sg-text-secondary);
 		font-weight: var(--sg-weight-semibold);
+	}
+	/* Trip-updates annotations: text + color, never color alone (docs/09). */
+	.dep-flag {
+		font-size: var(--sg-text-secondary);
+		font-weight: var(--sg-weight-semibold);
+	}
+	.dep-flag--delay {
+		color: var(--sg-warning);
+	}
+	.dep-flag--ontime {
+		color: var(--sg-brand);
+	}
+	.dep-flag--cancel {
+		color: var(--sg-danger);
+	}
+	.is-canceled {
+		text-decoration: line-through;
+		opacity: 0.55;
 	}
 	.later {
 		grid-column: 1 / -1;
