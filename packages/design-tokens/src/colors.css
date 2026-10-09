@@ -19,6 +19,9 @@
 	   component CSS. */
 	--sg-hero: #2e88ba;
 	--sg-hero-deep: #0c3a5d;
+	/* Public-story demo backdrop; never a route or freshness color. */
+	--sg-story-blue: #2d93e5;
+	--sg-story-blue-soft: #74b6e9;
 	--sg-accent: #ff8a3d;
 	--sg-scene-sky: #e4f1f4;
 	--sg-scene-leaf: #cbdfd2;

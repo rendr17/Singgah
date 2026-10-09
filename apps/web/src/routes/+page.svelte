@@ -1,99 +1,194 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { resolve } from '$app/paths';
+	import { asset, resolve } from '$app/paths';
 	import { page } from '$app/state';
-	import { Surface } from '@singgah/ui';
-	const appPanel = (panel: 'plan' | 'journey' | 'explore' | 'passport') =>
-		resolve(`/app?panel=${panel}` as `/app?${string}`);
+	import LandingPreview from '$lib/components/landing/LandingPreview.svelte';
+	import HeroScene from '$lib/components/landing/HeroScene.svelte';
+	import '@fontsource/poppins/latin-400.css';
+	import '@fontsource/poppins/latin-500.css';
+	import '@fontsource/poppins/latin-600.css';
 
-	const explorationThemes = [
+	const appPanel = (panel: 'plan' | 'explore' | 'passport') =>
+		resolve(`/app?panel=${panel}` as `/app?${string}`);
+	const features = [
 		{
-			name: 'Makan & ngopi',
-			category: 'ISTIRAHAT',
-			description: 'Cari tempat singgah setelah turun dari transit.',
-			art: 'coffee'
+			id: 'plan',
+			label: '1.0 — BERANGKAT',
+			title: 'Singgah bantu cari jalan yang masuk akal.',
+			description:
+				'Mulai dari stasiun awal dan tujuanmu. Bandingkan pilihan transit, pahami perpindahannya, lalu berangkat dengan lebih tenang.',
+			topics: [
+				{
+					title: 'Rute multimoda',
+					text: 'Lihat pilihan perjalanan dengan jaringan transit yang tersedia, tanpa harus membuka peta satu per satu.'
+				},
+				{
+					title: 'Perpindahan yang jelas',
+					text: 'Kenali stasiun dan urutan perpindahan sebelum mulai perjalanan.'
+				},
+				{
+					title: 'Konteks jalan kaki',
+					text: 'Perjalanan tidak berhenti di peron. Lihat bagian berjalan kaki dalam rencana perjalananmu.'
+				},
+				{
+					title: 'Jadwal & sumber data',
+					text: 'Jadwal bukan data live. Sumber dan keterbatasan data tetap ditampilkan apa adanya.'
+				}
+			]
 		},
 		{
-			name: 'Taman & ruang kota',
-			category: 'JALAN SANTAI',
-			description: 'Temukan alasan untuk berhenti sejenak dan menikmati kota.',
-			art: 'park'
+			id: 'explore',
+			label: '2.0 — SINGGAH',
+			title: 'Turun bentar. Siapa tahu nemu tempat favorit baru.',
+			description:
+				'Jangan cuma lewat. Temukan tempat dekat stasiun, lihat konteks jalan kakinya, dan pilih alasan untuk menikmati kota.',
+			topics: [
+				{
+					title: 'Tempat dekat transit',
+					text: 'Pilih stasiun untuk mencari tempat dengan akses transit yang relevan, bukan sekadar dekat di peta.'
+				},
+				{
+					title: 'Makan, taman & budaya',
+					text: 'Jelajahi kategori makanan, kafe, hiburan, ruang hijau, budaya, dan belanja.'
+				},
+				{
+					title: 'Walking trails',
+					text: 'Ikuti jalur jelajah kurasi dengan urutan tempat dan konteks transit yang jelas.'
+				},
+				{
+					title: 'Simpan untuk nanti',
+					text: 'Simpan tempat yang menarik dan tandai kunjungan di sesi pribadimu.'
+				}
+			]
 		},
 		{
-			name: 'Seni & budaya',
-			category: 'JELAJAH',
-			description: 'Lihat koleksi tempat yang terhubung dengan perjalananmu.',
-			art: 'museum'
+			id: 'passport',
+			label: '3.0 — CERITA',
+			title: 'Perjalanan selesai. Ceritanya tetap ikut pulang.',
+			description:
+				'Tandai stasiun yang pernah kamu singgahi dan simpan catatan kecil dari perjalanan. Paspor milikmu, cerita juga milikmu.',
+			topics: [
+				{
+					title: 'Transit Passport',
+					text: 'Kumpulkan kunjungan stasiun dengan check-in yang kamu pilih sendiri.'
+				},
+				{
+					title: 'Catatan perjalanan',
+					text: 'Simpan cerita, catatan exit, atau hal kecil yang ingin kamu ingat dari sebuah stasiun.'
+				},
+				{
+					title: 'Progres jelajah',
+					text: 'Lihat stasiun dan koleksi yang telah kamu kunjungi tanpa mengganggu kebutuhan perjalanan.'
+				},
+				{
+					title: 'Tetap pribadi',
+					text: 'Paspor tidak membutuhkan pelacakan lokasi sepanjang hari. Kunjungan dimulai dari tindakanmu.'
+				}
+			]
+		}
+	] as const;
+	const chapters = [
+		{
+			title: 'Mulai dari tujuan',
+			label: 'PERJALANAN',
+			icon: 'transfer',
+			href: appPanel('plan'),
+			roman: 'I'
+		},
+		{
+			title: 'Kenali transitnya',
+			label: 'PETA & STASIUN',
+			icon: 'station',
+			href: resolve('/app'),
+			roman: 'II'
+		},
+		{
+			title: 'Singgah sebentar',
+			label: 'CITY EXPLORER',
+			icon: 'explore',
+			href: appPanel('explore'),
+			roman: 'III'
+		},
+		{
+			title: 'Bawa pulang cerita',
+			label: 'TRANSIT PASSPORT',
+			icon: 'passport',
+			href: appPanel('passport'),
+			roman: 'IV'
 		}
 	];
-
+	const demoTabs = [
+		{
+			id: 'network',
+			name: 'Peta & perjalanan',
+			description: 'Pahami hubungan transit sebelum berangkat.'
+		},
+		{
+			id: 'explore',
+			name: 'Jelajah kota',
+			description: 'Cari alasan untuk singgah dekat stasiun.'
+		},
+		{
+			id: 'passport',
+			name: 'Paspor & jurnal',
+			description: 'Simpan kunjungan dan cerita pribadimu.'
+		}
+	] as const;
+	const wordRows = [
+		'K O T A P E R J A L A N A N',
+		'M A K A N S I N G G A H K R L',
+		'J A L A N K A K I T A M A N',
+		'T R A N S I T M U S E U M M R T',
+		'N G O P I B U D A Y A J U R N A L',
+		'S T A S I U N J E L A J A H',
+		'P A S P O R C E R I T A K O T A'
+	];
+	let activeDemo = $state(0);
 	let mobileMenuOpen = $state(false);
+	let mobileMenuToggle: HTMLElement | undefined;
 	let headerSolid = $state(false);
-	let heroWorld: HTMLDivElement;
-	let heroVideo: HTMLVideoElement;
+	let motionPaused = $state(false);
+	let prefersReducedMotion = $state(false);
+	let heroMotionReady = $state(false);
+
+	function toggleHeroMotion() {
+		motionPaused = !motionPaused;
+	}
+
+	function demoKeydown(event: KeyboardEvent, index: number) {
+		let next: number;
+		if (event.key === 'ArrowRight') next = (index + 1) % demoTabs.length;
+		else if (event.key === 'ArrowLeft') next = (index + demoTabs.length - 1) % demoTabs.length;
+		else if (event.key === 'Home') next = 0;
+		else if (event.key === 'End') next = demoTabs.length - 1;
+		else return;
+		event.preventDefault();
+		activeDemo = next;
+		(event.currentTarget as HTMLElement).parentElement
+			?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
+			[next]?.focus();
+	}
 
 	onMount(() => {
 		let scrollFrame = 0;
-		let loopTimer: number | undefined;
-		let loopFading = false;
 		const syncHeader = () => {
 			if (scrollFrame) return;
 			scrollFrame = requestAnimationFrame(() => {
-				const next = window.scrollY > 48;
-				if (next !== headerSolid) headerSolid = next;
+				headerSolid = window.scrollY > 48;
 				scrollFrame = 0;
 			});
 		};
 		const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
 		const syncMotion = () => {
-			if (motionPreference.matches) heroVideo.pause();
-			else heroVideo.play().catch(() => {});
-		};
-		const markVideoReady = () => {
-			heroWorld.style.setProperty('--hero-video-opacity', '1');
-		};
-		const softenVideoLoop = () => {
-			if (
-				loopFading ||
-				motionPreference.matches ||
-				(!heroVideo.ended &&
-					(!Number.isFinite(heroVideo.duration) ||
-						heroVideo.currentTime < heroVideo.duration - 0.36))
-			)
-				return;
-
-			loopFading = true;
-			heroWorld.style.setProperty('--hero-video-opacity', '0');
-			loopTimer = window.setTimeout(() => {
-				if (motionPreference.matches) {
-					heroWorld.style.setProperty('--hero-video-opacity', '1');
-					loopFading = false;
-					return;
-				}
-				heroVideo.currentTime = 0;
-				void heroVideo.play().catch(() => {});
-				window.requestAnimationFrame(() => {
-					heroWorld.style.setProperty('--hero-video-opacity', '1');
-					loopFading = false;
-				});
-			}, 360);
+			prefersReducedMotion = motionPreference.matches;
 		};
 		syncHeader();
 		syncMotion();
-		heroVideo.addEventListener('canplay', markVideoReady);
-		heroVideo.addEventListener('loadeddata', markVideoReady);
-		heroVideo.addEventListener('timeupdate', softenVideoLoop);
-		heroVideo.addEventListener('ended', softenVideoLoop);
-		if (heroVideo.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) markVideoReady();
+		heroMotionReady = true;
 		window.addEventListener('scroll', syncHeader, { passive: true });
 		motionPreference.addEventListener('change', syncMotion);
 		return () => {
 			if (scrollFrame) cancelAnimationFrame(scrollFrame);
-			if (loopTimer) window.clearTimeout(loopTimer);
-			heroVideo.removeEventListener('canplay', markVideoReady);
-			heroVideo.removeEventListener('loadeddata', markVideoReady);
-			heroVideo.removeEventListener('timeupdate', softenVideoLoop);
-			heroVideo.removeEventListener('ended', softenVideoLoop);
 			window.removeEventListener('scroll', syncHeader);
 			motionPreference.removeEventListener('change', syncMotion);
 		};
@@ -108,37 +203,11 @@
 					observer.disconnect();
 				}
 			},
-			{ threshold: 0.12 }
+			{ threshold: 0.1 }
 		);
 		observer.observe(node);
 		return { destroy: () => observer.disconnect() };
 	}
-	const featureCards = [
-		{
-			title: 'Rute anti-nyasar',
-			description: 'Rute multimoda yang realistis, dengan waktu jalan dan transit yang jelas.',
-			link: appPanel('plan'),
-			linkLabel: 'Cari rute'
-		},
-		{
-			title: 'Jadwal yang jelas sumbernya',
-			description: 'Lihat jadwal keberangkatan dan ketahui kapan datanya diperbarui.',
-			link: appPanel('journey'),
-			linkLabel: 'Lihat perjalanan'
-		},
-		{
-			title: 'City Explorer',
-			description: 'Temukan tempat dekat stasiun: makan, ngopi, taman, museum, sampai hidden gem.',
-			link: appPanel('explore'),
-			linkLabel: 'Jelajah kota'
-		},
-		{
-			title: 'Transit Passport',
-			description: 'Tandai stasiun yang kamu datangi, ikuti rute, lalu simpan ceritanya.',
-			link: appPanel('passport'),
-			linkLabel: 'Buka Passport'
-		}
-	];
 </script>
 
 <svelte:head>
@@ -166,2200 +235,1540 @@
 	<meta name="twitter:card" content="summary_large_image" />
 </svelte:head>
 
+<svelte:window
+	onkeydown={(event) => {
+		if (event.key === 'Escape' && mobileMenuOpen) {
+			event.preventDefault();
+			mobileMenuOpen = false;
+			mobileMenuToggle?.focus();
+		}
+	}}
+/>
+
 <div class="landing">
 	<header class="site-header" class:site-header--solid={headerSolid}>
 		<div class="site-header__inner">
-			<a class="brand" href="#top" aria-label="Singgah, kembali ke beranda">
-				<span>Singgah</span>
-			</a>
-
+			<a class="wordmark" href="#top" aria-label="Singgah, kembali ke beranda">Singgah</a>
 			<nav class="desktop-nav" aria-label="Navigasi halaman">
-				<a href="#top">Beranda</a>
-				<a href="#features">Fitur</a>
-				<a href="#city-explorer">Jelajah Kota</a>
-				<a href="#passport">Transit Passport</a>
-				<a href="#about">Tentang</a>
+				<div class="nav-group">
+					<span>Mulai dari</span><a href="#plan">Perjalanan</a><a href="#explore">Jelajah</a><a
+						href="#passport">Paspor</a
+					>
+				</div>
+				<a class="nav-surface" href="#guide">Panduan</a><a
+					class="nav-surface"
+					href={resolve('/providers')}>Sumber data</a
+				>
 			</nav>
-
-			<a class="header-cta" href={resolve('/app')}
-				>Buka Aplikasi <span aria-hidden="true">↗</span></a
-			>
-
+			<a class="button button--light header-cta" href={resolve('/app')}>Buka aplikasi</a>
 			<details class="mobile-menu" bind:open={mobileMenuOpen}>
-				<summary aria-label="Buka menu navigasi">
-					<span>Menu</span>
-					<svg viewBox="0 0 24 24" aria-hidden="true">
-						<path d="M4 7h16M4 12h16M4 17h16" />
-					</svg>
-				</summary>
-				<nav aria-label="Navigasi halaman">
-					<a href="#top" onclick={() => (mobileMenuOpen = false)}>Beranda</a>
-					<a href="#features" onclick={() => (mobileMenuOpen = false)}>Fitur</a>
-					<a href="#city-explorer" onclick={() => (mobileMenuOpen = false)}>Jelajah Kota</a>
-					<a href="#passport" onclick={() => (mobileMenuOpen = false)}>Transit Passport</a>
-					<a href="#about" onclick={() => (mobileMenuOpen = false)}>Tentang</a>
-					<a class="mobile-menu__cta" href={resolve('/app')}>Buka Aplikasi</a>
+				<summary bind:this={mobileMenuToggle} aria-label="Buka menu navigasi"
+					><svg
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="1.5"
+						aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg
+					></summary
+				>
+				<nav aria-label="Navigasi halaman mobile">
+					{#each features as feature (feature.id)}<a
+							href="#{feature.id}"
+							onclick={() => (mobileMenuOpen = false)}
+							>{feature.id === 'plan'
+								? 'Perjalanan'
+								: feature.id === 'explore'
+									? 'Jelajah kota'
+									: 'Transit Passport'}</a
+						>{/each}
+					<a href="#guide" onclick={() => (mobileMenuOpen = false)}>Panduan</a><a
+						href={resolve('/providers')}>Sumber data</a
+					>
 				</nav>
 			</details>
 		</div>
 	</header>
 
 	<section class="hero" id="top" aria-labelledby="hero-title">
-		<div class="hero__world" bind:this={heroWorld} aria-hidden="true">
-			<img
-				src="/illustrations/singgah-pixel-world-loop-poster.webp"
-				alt=""
-				width="1280"
-				height="720"
-				fetchpriority="high"
-				decoding="async"
-			/>
-			<video
-				bind:this={heroVideo}
-				autoplay
-				muted
-				playsinline
-				preload="metadata"
-				poster="/illustrations/singgah-pixel-world-loop-poster.webp"
-				tabindex="-1"
-			>
-				<source src="/illustrations/singgah-pixel-world-loop.webm" type="video/webm" />
-				<source src="/illustrations/singgah-pixel-world-loop.mp4" type="video/mp4" />
-			</video>
+		<div class="hero__world" aria-hidden="true">
+			<HeroScene paused={!heroMotionReady || motionPaused || prefersReducedMotion} />
 		</div>
-		<div class="hero__content container">
-			<div class="hero__copy">
-				<p class="eyebrow"><span class="eyebrow__dot"></span> JELAJAH TRANSIT · JAKARTA</p>
-				<h1 id="hero-title">
-					<span>Pergi boleh spontan.</span>
-					<span>Rute jangan.</span>
-				</h1>
-				<p class="hero__description">
-					Rencanakan perjalanan, temukan tempat dekat transit, dan nikmati kotanya dengan lebih
-					tenang.
-				</p>
-				<div class="hero__actions">
-					<a class="action action--primary" href={appPanel('plan')}>
-						Cari Jalan <span aria-hidden="true">↗</span>
-					</a>
-					<a class="action action--secondary" href="#features"
-						>Jelajahi Singgah <span aria-hidden="true">↓</span></a
-					>
-				</div>
+		<div class="hero__content">
+			<h1 id="hero-title">Pergi boleh spontan.<br />Rute jangan.</h1>
+			<p>
+				Rencanakan perjalanan, temukan tempat dekat transit,<br class="desktop-break" /> dan nikmati Jakarta
+				dengan lebih tenang.
+			</p>
+			<div class="hero__actions">
+				<a class="button button--light" href={appPanel('plan')}>Cari Jalan</a><a
+					class="button button--glass"
+					href="#features">Jelajahi Singgah</a
+				>
 			</div>
-			<div class="hero__chips" aria-hidden="true">
-				<div class="hero-chip hero-chip--one">
-					<span>01</span><strong>Pilih tujuan</strong><small>Mulai dari mana saja</small>
-				</div>
-				<div class="hero-chip hero-chip--two">
-					<span>02</span><strong>Temukan rute</strong><small>Transit + jalan kaki</small>
-				</div>
-				<div class="hero-chip hero-chip--three">
-					<span>03</span><strong>Singgah sebentar</strong><small>Kota punya banyak cerita</small>
-				</div>
-			</div>
-			<a class="hero__scroll" href="#features"
-				>Gulir untuk melihat <span aria-hidden="true">↓</span></a
-			>
 		</div>
+		<div class="hero__notes" aria-hidden="true">
+			<div><i></i><span>01 · Mulai perjalanan</span><strong>Pilih tujuan</strong></div>
+			<div><i></i><span>02 · Pahami transitnya</span><strong>Temukan rute</strong></div>
+			<div><i></i><span>03 · Nikmati kotanya</span><strong>Singgah sebentar</strong></div>
+		</div>
+		<p class="hero__caption">Ilustrasi kota · bukan pelacakan live</p>
+		{#if heroMotionReady && !prefersReducedMotion}
+			<button class="button button--glass hero__motion" type="button" onclick={toggleHeroMotion}>
+				{motionPaused ? 'Putar animasi' : 'Jeda animasi'}
+			</button>
+		{/if}
 	</section>
 
-	<section
-		class="section section--features"
-		id="features"
-		aria-labelledby="features-title"
-		use:reveal
-	>
+	<div class="transit-strip" aria-label="Jaringan transit Jakarta">
+		<div class="transit-strip__marks">
+			{#each ['KRL Commuterline', 'MRT Jakarta', 'TransJakarta', 'LRT Jakarta & Jabodebek'] as mode (mode)}<a
+					href={resolve('/providers')}
+					><svg
+						viewBox="0 0 64 64"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="3"
+						aria-hidden="true"><use href="/icons/transit.svg#station" /></svg
+					><span>{mode}</span></a
+				>{/each}
+		</div>
+		<p>
+			Ketersediaan data mengikuti masing-masing sumber. <a href={resolve('/providers')}
+				>Lihat sumber data.</a
+			>
+		</p>
+	</div>
+
+	<section class="overview section" id="features" aria-labelledby="overview-title" use:reveal>
 		<div class="container">
-			<div class="section-heading section-heading--center">
-				<div>
-					<p class="eyebrow">BERGERAK · SINGGAH · JELAJAH</p>
-					<h2 id="features-title">Kota terasa lebih dekat<br />saat jalannya jelas.</h2>
-				</div>
+			<h2 id="overview-title">
+				Singgah mendekatkan kamu dengan kota.<br /><span
+					>Dari perjalanan transit sampai cerita di setiap singgahan.</span
+				>
+			</h2>
+			<div class="overview__preview" use:reveal><LandingPreview /></div>
+			<div class="overview__principles" use:reveal>
 				<p>
-					Satu tempat untuk merencanakan perjalanan, mengikuti informasi transit, dan menemukan
-					alasan untuk singgah.
+					<strong>Perjalanan yang jelas</strong> — Rute, perpindahan, dan jalan kaki dalam satu konteks
+					transit.
+				</p>
+				<p>
+					<strong>Data apa adanya</strong> — Jadwal, estimasi, dan sumber data tidak disamarkan sebagai
+					live.
+				</p>
+				<p>
+					<strong>Jelajah dengan caramu</strong> — Pilih tempat untuk singgah dan simpan cerita pribadimu.
 				</p>
 			</div>
-
-			<div class="product-window" aria-label="Pintu masuk ke perencana perjalanan Singgah">
-				<div class="product-window__bar">
-					<span class="product-window__brand">Singgah</span><span>Mulai perjalanan</span><span
-						aria-hidden="true">↗</span
-					>
-				</div>
-				<div class="product-window__body">
-					<div class="product-window__panel">
-						<p class="product-window__label">RENCANAKAN PERJALANAN</p>
-						<h3>Ke mana hari ini?</h3>
-						<a class="product-window__field" href={appPanel('plan')}>
-							<span aria-hidden="true">○</span> Titik berangkat
-						</a>
-						<a class="product-window__field" href={appPanel('plan')}>
-							<span aria-hidden="true">◇</span> Tujuan perjalanan
-						</a>
-						<a class="product-window__button" href={appPanel('plan')}
-							>Temukan rute <span aria-hidden="true">↗</span></a
-						>
-						<p>Bandingkan pilihan transit dan langkah kaki dalam satu tampilan.</p>
-					</div>
-					<div class="product-window__scene" aria-hidden="true">
-						<div class="product-window__route"></div>
-						<span class="product-window__stop product-window__stop--one"></span>
-						<span class="product-window__stop product-window__stop--two"></span>
-						<span class="product-window__stop product-window__stop--three"></span>
-						<div class="product-window__note">
-							<strong>Jelajahi dari transit</strong><span>Makan · taman · budaya</span>
-						</div>
-					</div>
-				</div>
-			</div>
-
-			<div class="feature-list">
-				{#each featureCards as feature, index (feature.title)}
-					<a href={feature.link} class="feature-row">
-						<span class="feature-row__number">0{index + 1}</span>
-						<span class="feature-row__copy"
-							><strong>{feature.title}</strong><span>{feature.description}</span></span
-						>
-						<span class="feature-row__link"
-							>{feature.linkLabel} <span aria-hidden="true">↗</span></span
-						>
-					</a>
-				{/each}
+			<div class="overview__cta" use:reveal>
+				<p>Mulai dari tujuanmu. Sisanya, cari jalan yang paling masuk akal.</p>
+				<a class="button button--dark" href={appPanel('plan')}>Mulai di Singgah</a>
 			</div>
 		</div>
 	</section>
 
-	<section class="section how-section" aria-labelledby="how-title" use:reveal>
+	<section class="features section" aria-labelledby="features-title">
 		<div class="container">
-			<div class="section-heading section-heading--center">
-				<div>
-					<p class="eyebrow">DARI BERANGKAT SAMPAI SINGGAH</p>
-					<h2 id="how-title">Cara Kerja</h2>
-				</div>
-				<p>Cuma 4 langkah, jalan-jalan jadi lebih terarah.</p>
+			<div class="features__intro" use:reveal>
+				<p class="eyebrow">YANG BISA KAMU LAKUKAN</p>
+				<h2 id="features-title">
+					Kamu nikmati kotanya.<br /><span>Singgah bantu cari jalannya.</span>
+				</h2>
+				<p>
+					Berangkat dengan rencana, singgah dengan alasan, pulang dengan cerita. Tidak perlu rumit.
+				</p>
 			</div>
-			<ol class="steps">
-				<li>
-					<span class="step-number">01</span>
-					<h3>Cari tujuan</h3>
-					<p>Masukkan lokasi yang ingin kamu tuju.</p>
-				</li>
-				<li>
-					<span class="step-number">02</span>
-					<h3>Pilih rute</h3>
-					<p>Bandingkan waktu, jalan kaki, dan jumlah transit.</p>
-				</li>
-				<li>
-					<span class="step-number">03</span>
-					<h3>Ikuti perjalanan</h3>
-					<p>Lihat informasi yang kamu butuhkan selama di jalan.</p>
-				</li>
-				<li>
-					<span class="step-number">04</span>
-					<h3>Sampai &amp; jelajah</h3>
-					<p>Turun, cari tempat menarik di sekitar transit.</p>
-				</li>
-			</ol>
+			{#each features as feature, index (feature.id)}
+				<div class="feature" class:feature--reverse={index === 1} id={feature.id} use:reveal>
+					<div class="feature__copy">
+						<p class="eyebrow">{feature.label}</p>
+						<h3>{feature.title}</h3>
+						<p>{feature.description}</p>
+						<div class="feature__details">
+							{#each feature.topics as topic, topicIndex (topic.title)}<details>
+									<summary
+										><span class="topic-number">{index + 1}.{topicIndex + 1}</span
+										>{topic.title}<span class="topic-plus" aria-hidden="true"></span></summary
+									>
+									<p>{topic.text}</p>
+								</details>{/each}
+						</div>
+					</div>
+					<div class="feature__preview"><LandingPreview variant={feature.id} /></div>
+				</div>
+			{/each}
 		</div>
 	</section>
 
-	<section
-		class="section explorer-section"
-		id="city-explorer"
-		aria-labelledby="explorer-title"
-		use:reveal
-	>
+	<section class="guide section" id="guide" aria-labelledby="guide-title" use:reveal>
 		<div class="container">
-			<div class="section-heading">
-				<div>
-					<p class="eyebrow">BOLEH SINGGAH SEBENTAR</p>
-					<h2 id="explorer-title">Jelajah Kota dari Transit</h2>
-				</div>
-				<p>Tempat seru di sekitar stasiun, biar perjalananmu nggak cuma soal sampai.</p>
+			<div class="center-heading">
+				<h2 id="guide-title">Kenali kota. Satu langkah dulu.</h2>
+				<p>
+					Empat pintu masuk untuk perjalanan yang lebih tenang.<br />Pilih yang kamu butuhkan hari
+					ini.
+				</p>
+				<a class="button button--dark" href={resolve('/app')}>Mulai jelajah</a>
 			</div>
-
-			<div class="place-grid">
-				{#each explorationThemes as place (place.name)}
-					<a class="place-card" href={appPanel('explore')}>
-						<div
-							class="place-art"
-							class:place-art--coffee={place.art === 'coffee'}
-							class:place-art--park={place.art === 'park'}
-							class:place-art--museum={place.art === 'museum'}
-							aria-hidden="true"
-						>
-							<div class="place-art__block place-art__block--one"></div>
-							<div class="place-art__block place-art__block--two"></div>
-							<div class="place-art__sun"></div>
-							<svg viewBox="0 0 64 64" fill="none">
-								{#if place.art === 'coffee'}
-									<path
-										d="M16 23h27v20a9 9 0 0 1-9 9h-9a9 9 0 0 1-9-9V23Zm27 5h5a6 6 0 0 1 0 12h-5M22 16c-2-3 2-4 0-7m10 7c-2-3 2-4 0-7m10 7c-2-3 2-4 0-7"
-									/>
-								{:else if place.art === 'park'}
-									<path d="M32 8 15 31h10L13 45h16v9h6v-9h16L39 31h10L32 8Z" />
-								{:else}
-									<path
-										d="M10 52h44M15 52V23h34v29M10 23 32 11l22 12M22 31h5v7h-5zm15 0h5v7h-5zM29 52V40h7v12"
-									/>
-								{/if}
-							</svg>
-							<span class="place-art__pin"><span></span></span>
-						</div>
-						<div class="place-card__body">
-							<p class="place-category">{place.category}</p>
-							<h3>{place.name}</h3>
-							<p class="place-description">{place.description}</p>
-							<span class="place-card__action"
-								>Jelajahi koleksi <span aria-hidden="true">↗</span></span
+			<div class="books">
+				{#each chapters as chapter, index (chapter.title)}<a
+						class="book-link"
+						href={chapter.href}
+						use:reveal
+						><article class="book">
+							<h3>Bab {index + 1}<br />{chapter.title}</h3>
+							<hr />
+							<p class="book__chapter">Panduan {chapter.roman} · {chapter.label}</p>
+							<svg
+								viewBox="0 0 64 64"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="1.5"
+								aria-hidden="true"><use href="/icons/transit.svg#{chapter.icon}" /></svg
 							>
-						</div>
-					</a>
-				{/each}
+							<div class="book__footer">
+								<span>Singgah · Jakarta</span><span>0{index + 1}</span>
+							</div>
+						</article>
+						<span class="book-link__caption"
+							>Buka bab ({chapter.roman}) <span aria-hidden="true">↗</span></span
+						></a
+					>{/each}
 			</div>
-
-			<a class="text-link explorer-link" href={appPanel('explore')}>
-				Lihat City Explorer <span aria-hidden="true">↗</span>
-			</a>
 		</div>
 	</section>
 
-	<section
-		class="section passport-section"
-		id="passport"
-		aria-labelledby="passport-title"
-		use:reveal
-	>
+	<section class="product-demo" aria-labelledby="demo-title" use:reveal>
 		<div class="container">
-			<div class="section-heading">
-				<div>
-					<p class="eyebrow">CERITA YANG IKUT PULANG</p>
-					<h2 id="passport-title">Transit Passport &amp; Journal</h2>
-				</div>
-				<p>Setiap perjalanan punya cerita. Kumpulkan, jelajahi, dan simpan semuanya.</p>
-			</div>
-
-			<div class="passport-grid">
-				<Surface class="passport-preview">
-					<div class="preview-caption">
-						<span>TRANSIT PASSPORT</span><span>KENANGAN PERJALANAN</span>
-					</div>
-					<div class="passport-preview__head">
-						<div>
-							<p class="eyebrow">TRANSIT PASSPORT</p>
-							<h3>Stasiun yang pernah kamu singgahi.</h3>
-							<p>Tandai kunjungan dan simpan catatanmu.</p>
-						</div>
-						<img
-							src="/stickers/sticker-checkpoint-masuk.webp"
-							alt=""
-							width="180"
-							height="180"
-							loading="lazy"
-						/>
-					</div>
-					<div class="passport-progress">
-						<div><strong>Catat dengan caramu</strong><span>di Paspor</span></div>
-						<div class="passport-stamps" aria-label="Langkah di Paspor">
-							<span>Pilih stasiun</span><span>Tandai kunjungan</span><span>Tulis cerita</span>
-						</div>
-					</div>
-				</Surface>
-
-				<Surface class="journal-preview">
-					<div class="journal-preview__top">
-						<span class="journal-mark" aria-hidden="true"></span>
-						<span>JURNAL PRIBADI</span>
-					</div>
-					<p class="eyebrow">SETELAH PERJALANAN</p>
-					<h3>Yang ingin kamu ingat.</h3>
-					<p class="journal-quote">Cerita kecil dari setiap stasiun bisa kamu simpan di sini.</p>
-					<div class="journal-preview__footer">
-						<span>Catatan pribadi</span>
-						<a href={appPanel('passport')}>Lihat Passport <span aria-hidden="true">↗</span></a>
-					</div>
-				</Surface>
-			</div>
-		</div>
-	</section>
-
-	<section class="section trail-section" aria-labelledby="trail-title" use:reveal>
-		<div class="trail-layout container">
-			<div class="trail-copy">
-				<p class="eyebrow">DUA CARA MELIHAT KOTA</p>
-				<h2 id="trail-title">Pilih peta yang cocok dengan langkahmu.</h2>
+			<div class="center-heading">
+				<h2 id="demo-title">
+					Satu tempat untuk bergerak.<br /><span>Banyak alasan untuk singgah.</span>
+				</h2>
 				<p>
-					Lihat posisi stasiun di peta geografis, lalu pindah ke peta integrasi untuk memahami
-					hubungan antarjalur.
+					Dari rencana perjalanan sampai catatan pribadi.<br />Kamu yang pilih langkah berikutnya.
 				</p>
-				<a class="text-link" href={resolve('/app')}>
-					Buka peta <span aria-hidden="true">↗</span>
-				</a>
 			</div>
-			<div class="trail-map">
-				<div class="trail-map__heading">
-					<div>
-						<span class="trail-map__kicker">PETA SINGGAH</span>
-						<h3>Dari lokasi ke koneksi.</h3>
-					</div>
-					<img
-						src="/stickers/sticker-side-quest.webp"
-						alt=""
-						width="150"
-						height="150"
-						loading="lazy"
-					/>
-				</div>
-				<ol class="trail-stops">
-					<li>
-						<span class="trail-stop__node"></span><strong>Peta geografis</strong><small
-							>Letak di kota</small
-						>
-					</li>
-					<li>
-						<span class="trail-stop__node"></span><strong>Peta integrasi</strong><small
-							>Hubungan jalur</small
-						>
-					</li>
-					<li>
-						<span class="trail-stop__node"></span><strong>Detail stasiun</strong><small
-							>Jadwal &amp; sekitar</small
-						>
-					</li>
-				</ol>
+			<div class="demo-tabs" role="tablist" aria-label="Pratinjau aplikasi Singgah">
+				{#each demoTabs as tab, index (tab.id)}<button
+						type="button"
+						role="tab"
+						id="demo-tab-{tab.id}"
+						aria-controls="demo-panel-{tab.id}"
+						aria-selected={activeDemo === index}
+						tabindex={activeDemo === index ? 0 : -1}
+						onclick={() => (activeDemo = index)}
+						onkeydown={(event) => demoKeydown(event, index)}
+						><strong>{tab.name}</strong><span>{tab.description}</span></button
+					>{/each}
 			</div>
+			{#each demoTabs as tab, index (tab.id)}<div
+					class="demo-stage"
+					id="demo-panel-{tab.id}"
+					role="tabpanel"
+					aria-labelledby="demo-tab-{tab.id}"
+					tabindex="0"
+					hidden={activeDemo !== index}
+				>
+					{#if activeDemo === index}<LandingPreview variant={tab.id} />{/if}
+				</div>{/each}
 		</div>
 	</section>
 
-	<section class="section final-section" aria-labelledby="final-title" use:reveal>
-		<div class="final-cta">
-			<div class="final-cta__copy">
-				<p class="eyebrow">SATU KOTA. BANYAK CERITA.</p>
-				<h2 id="final-title">Untuk yang suka spontan,<br />tapi tetap pengen sampai.</h2>
-				<p>Jelajahi Jakarta dengan perjalanan yang lebih masuk akal.</p>
-				<div class="hero__actions">
-					<a class="action action--light" href={appPanel('plan')}
-						>Cari Jalan <span aria-hidden="true">↗</span></a
-					>
-					<a class="action action--outline-light" href={resolve('/app')}>Buka Aplikasi</a>
-				</div>
+	<section class="city-section section" aria-labelledby="city-title" use:reveal>
+		<div class="container">
+			<div class="center-heading">
+				<h2 id="city-title">Satu kota. Banyak cerita.</h2>
+				<p>
+					Makan, ngopi, ruang hijau, budaya, hiburan, atau belanja.<br />Selalu ada alasan untuk
+					singgah sebentar.
+				</p>
 			</div>
-			<div class="final-cta__art" aria-hidden="true">
-				<img
-					src="/illustrations/singgah-pixel-street-v2.webp"
-					alt=""
-					width="1672"
-					height="941"
-					loading="lazy"
-				/>
-				<div class="final-cta__app">
-					<strong>Ke mana hari ini?</strong><span>Mulai perjalananmu dari sini.</span><span
-						class="final-cta__app-line">○ &nbsp; Titik berangkat</span
-					><span class="final-cta__app-line">◇ &nbsp; Tujuan perjalanan</span><span
-						class="final-cta__app-line">Temukan rute &nbsp; ↗</span
-					>
-				</div>
+			<div class="city-word-grid" aria-hidden="true">
+				{#each wordRows as row (row)}<div>{row}</div>{/each}
 			</div>
+			<a class="city-section__link" href={appPanel('explore')}
+				>Temukan tempat dekat transit <span aria-hidden="true">↗</span></a
+			>
 		</div>
 	</section>
 
 	<footer class="site-footer" id="about">
-		<div class="footer-grid container">
-			<div class="footer-brand">
-				<a class="brand" href="#top">
-					<img src="/brand/app-icon-blue.svg" alt="" width="36" height="36" loading="lazy" />
-					<span>Singgah</span>
-				</a>
-				<p>Jelajah transit Jakarta</p>
-				<p class="footer-note">Kota lebih dekat dengan cerita baik.</p>
+		<div class="footer-layout container">
+			<div class="footer-copy">
+				<h2>Pergi boleh spontan.<br /><span>Rute jangan.</span></h2>
+				<nav class="footer-chapters" aria-label="Bagian Singgah">
+					<a href="#plan">Perjalanan</a><a href="#explore">Jelajah</a><a href="#passport">Paspor</a
+					><a href="#guide">Panduan</a>
+				</nav>
+				<div class="footer-links">
+					<a href="#top">Beranda</a><a href={resolve('/providers')}>Sumber &amp; atribusi</a><a
+						href={resolve('/app')}>Buka aplikasi</a
+					><a href={resolve('/explore/trails')}>Walking trails</a><a
+						href="https://github.com/rendr17/Singgah"
+						target="_blank"
+						rel="noopener noreferrer">GitHub ↗</a
+					><a href={appPanel('passport')}>Jurnal pribadi</a>
+					<a href={asset('/illustrations/landing/ATTRIBUTION.md')}>Kredit ilustrasi</a>
+				</div>
+				<p class="footer-note">
+					Jelajah transit Jakarta.<br />Data punya sumber. Cerita tetap punya kamu.
+				</p>
+				<a class="wordmark footer-wordmark" href="#top">Singgah</a>
 			</div>
-			<div>
-				<h2>Produk</h2>
-				<a href="#features">Fitur</a>
-				<a href="#passport">Transit Passport</a>
-				<a href="#city-explorer">Jelajah Kota</a>
-			</div>
-			<div>
-				<h2>Proyek</h2>
-				<a href="#about">Tentang</a>
-				<a href="https://github.com/rendr17/Singgah" target="_blank" rel="noreferrer">GitHub</a>
-				<a href="https://github.com/rendr17/Singgah" target="_blank" rel="noreferrer">Open Source</a
-				>
-			</div>
-			<div>
-				<h2>Sumber</h2>
-				<a href={resolve('/providers')}>Penyedia data &amp; atribusi</a>
+			<div class="footer-window">
+				<img
+					src="/illustrations/singgah-pixel-street-v2.webp"
+					alt="Ilustrasi asli Singgah: jalan dan transit di Jakarta"
+					width="1672"
+					height="941"
+					loading="lazy"
+				/>
+				<div>
+					<p>Kota terasa lebih dekat<br /><span>saat jalannya jelas.</span></p>
+					<a class="button button--light" href={appPanel('plan')}>Cari Jalan</a>
+				</div>
 			</div>
 		</div>
-		<div class="footer-bottom container">
-			<span>Singgah · Jakarta</span><a href="#top">Kembali ke atas ↑</a>
-		</div>
+		<p class="footer-bottom">
+			Dibuat untuk perjalanan dan cerita di Jakarta. <a href="#top">Kembali ke atas ↑</a>
+		</p>
 	</footer>
 </div>
 
 <style>
 	:global(html) {
-		scroll-padding-top: 5rem;
+		scroll-padding-top: 110px;
 	}
-
 	.landing {
-		--landing-heading: var(--sg-font-display);
-		--landing-label: var(--sg-font-label);
+		--landing-enter: 600ms;
+		--landing-paper: var(--sg-surface);
+		--landing-blue: var(--sg-story-blue);
+		--landing-blue-soft: var(--sg-story-blue-soft);
 		color: var(--sg-text);
 		background: var(--sg-canvas);
-		font-family: var(--sg-font-body);
 		overflow: clip;
 	}
-
 	.container {
-		width: min(calc(100% - 2.5rem), 82rem);
+		width: min(calc(100% - 40px), 1080px);
 		margin-inline: auto;
 	}
-
 	h1,
 	h2,
 	h3 {
-		font-family: var(--landing-heading);
+		font-weight: 400;
 		letter-spacing: -0.035em;
 	}
-
+	h2 {
+		margin: 0;
+		font-size: 40px;
+		line-height: 1.15;
+	}
+	h2 > span {
+		color: var(--sg-text-muted);
+	}
+	a {
+		text-decoration: none;
+	}
+	.button {
+		display: inline-flex;
+		justify-content: center;
+		align-items: center;
+		min-height: var(--sg-target-min);
+		padding: 0 14px;
+		border: 1px solid var(--sg-border);
+		border-radius: 8px;
+		font-size: 14px;
+		font-weight: 500;
+		line-height: 1.4;
+		text-decoration: none;
+		white-space: nowrap;
+		transition:
+			background var(--sg-motion-fast),
+			box-shadow var(--sg-motion-fast);
+	}
+	.button--light {
+		background: var(--sg-canvas);
+		color: var(--sg-text);
+		box-shadow:
+			inset 0 1px var(--sg-surface),
+			0 1px 3px color-mix(in srgb, var(--sg-text) 8%, transparent);
+	}
+	.button--light:hover {
+		background: var(--sg-surface);
+	}
+	.button--dark {
+		border-color: var(--sg-text-muted);
+		background: color-mix(in srgb, var(--sg-text) 85%, var(--sg-surface));
+		color: var(--sg-surface);
+		box-shadow:
+			inset 0 1px 1px color-mix(in srgb, var(--sg-surface) 30%, transparent),
+			0 2px 4px color-mix(in srgb, var(--sg-text) 18%, transparent);
+	}
+	.button--dark:hover {
+		background: var(--sg-text);
+	}
+	.button--glass {
+		border-color: color-mix(in srgb, var(--sg-surface) 25%, transparent);
+		background: color-mix(in srgb, var(--sg-hero-deep) 35%, transparent);
+		color: var(--sg-surface);
+		box-shadow: inset 0 1px color-mix(in srgb, var(--sg-surface) 18%, transparent);
+	}
+	.button--glass:hover {
+		background: color-mix(in srgb, var(--sg-hero-deep) 55%, transparent);
+	}
 	.site-header {
 		position: fixed;
-		top: 0;
-		left: 0;
-		right: 0;
+		inset: 0 0 auto;
 		z-index: 20;
-		color: white;
-		background: transparent;
+		color: var(--sg-surface);
 		border-bottom: 1px solid transparent;
 		transition:
-			background-color 280ms ease,
-			color 280ms ease,
-			border-color 280ms ease;
+			background var(--sg-motion-base),
+			color var(--sg-motion-base);
 	}
-
-	.site-header--solid {
-		color: var(--sg-text);
-		background: var(--sg-canvas);
-		border-bottom-color: var(--sg-border);
-	}
-
 	.site-header__inner {
-		width: min(calc(100% - 2.5rem), 82rem);
-		min-height: 5.65rem;
+		max-width: 1440px;
 		margin-inline: auto;
-		display: grid;
-		grid-template-columns: auto 1fr auto;
-		align-items: center;
-		gap: clamp(1rem, 3vw, 3rem);
-	}
-
-	.brand {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.55rem;
-		color: inherit;
-		font-family: var(--landing-heading);
-		font-size: 1.25rem;
-		font-weight: 600;
-		text-decoration: none;
-	}
-
-	.brand img {
-		width: 2.25rem;
-		height: 2.25rem;
-		border-radius: 0.55rem;
-	}
-
-	.desktop-nav {
+		padding: 24px 20px 22px;
 		display: flex;
 		align-items: center;
-		justify-content: center;
-		gap: clamp(0.75rem, 2vw, 1.8rem);
+		gap: 12px;
 	}
-
-	.desktop-nav a,
-	.mobile-menu nav a {
-		min-height: 2.75rem;
+	.wordmark {
+		font:
+			30px/1 Georgia,
+			'Times New Roman',
+			serif;
+		color: inherit;
+		letter-spacing: -0.04em;
 		display: inline-flex;
 		align-items: center;
+		min-height: var(--sg-target-min);
+	}
+	.desktop-nav {
+		margin-left: auto;
+		display: flex;
+		align-items: center;
+		gap: 12px;
+	}
+	.nav-group,
+	.nav-surface {
+		display: flex;
+		align-items: center;
+		min-height: var(--sg-target-min);
+		border: 1px solid color-mix(in srgb, var(--sg-surface) 16%, transparent);
+		border-radius: 8px;
+		background: color-mix(in srgb, var(--sg-hero-deep) 76%, transparent);
+		box-shadow:
+			inset 0 1px color-mix(in srgb, var(--sg-surface) 15%, transparent),
+			0 1px 4px color-mix(in srgb, var(--sg-text) 10%, transparent);
+	}
+	.nav-group {
+		padding-inline: 8px;
+	}
+	.nav-group > span {
+		padding-inline: 12px;
+		font-size: 14px;
+		color: color-mix(in srgb, var(--sg-surface) 75%, transparent);
+	}
+	.nav-group a,
+	.nav-surface {
+		padding-inline: 16px;
+		font-size: 14px;
 		color: inherit;
-		font-size: 0.925rem;
-		font-weight: 500;
-		text-decoration: none;
-		transition: color var(--sg-motion-fast) var(--sg-ease-standard);
+		white-space: nowrap;
 	}
-
-	.desktop-nav a:hover,
-	.mobile-menu nav a:hover {
-		opacity: 0.68;
-	}
-
-	.header-cta,
-	.mobile-menu__cta {
-		min-height: 2.75rem;
-		padding: 0 1rem;
+	.nav-group a {
+		min-height: var(--sg-target-min);
 		display: inline-flex;
 		align-items: center;
-		justify-content: center;
-		gap: 0.6rem;
-		border: 1px solid currentColor;
-		border-radius: var(--sg-radius-button);
-		color: inherit;
-		font-weight: 500;
-		text-decoration: none;
-		transition:
-			background-color var(--sg-motion-fast) var(--sg-ease-standard),
-			color var(--sg-motion-fast) var(--sg-ease-standard);
+		position: relative;
 	}
-
-	.header-cta:hover,
-	.mobile-menu__cta:hover {
-		background: white;
-		color: var(--sg-text) !important;
+	.nav-group a + a::before {
+		content: '';
+		position: absolute;
+		left: 0;
+		height: 12px;
+		border-left: 1px solid color-mix(in srgb, var(--sg-surface) 20%, transparent);
 	}
-
-	.site-header--solid .header-cta {
-		border-color: var(--sg-text);
+	.nav-group a:hover,
+	.nav-surface:hover {
+		background: color-mix(in srgb, var(--sg-surface) 12%, transparent);
+		border-radius: 5px;
+	}
+	.site-header--solid {
+		background: var(--sg-canvas);
 		color: var(--sg-text);
+		border-color: var(--sg-border);
 	}
-
-	.site-header--solid .header-cta:hover {
-		background: var(--sg-text);
-		color: white !important;
+	.site-header--solid .nav-group,
+	.site-header--solid .nav-surface {
+		background: var(--sg-surface-muted);
+		border-color: var(--sg-border);
+		box-shadow: inset 0 1px var(--sg-surface);
 	}
-
+	.site-header--solid .nav-group > span {
+		color: var(--sg-text-muted);
+	}
+	.site-header--solid .nav-group a + a::before {
+		border-color: var(--sg-border);
+	}
+	.site-header--solid .nav-group a:hover,
+	.site-header--solid .nav-surface:hover {
+		background: var(--sg-surface);
+	}
+	.header-cta {
+		min-width: 130px;
+	}
 	.mobile-menu {
 		display: none;
 		position: relative;
 	}
-
 	.mobile-menu summary {
-		min-height: 2.75rem;
-		padding: 0 0.75rem;
+		display: grid;
+		place-items: center;
+		width: var(--sg-target-min);
+		height: var(--sg-target-min);
 		list-style: none;
-		display: inline-flex;
-		align-items: center;
-		gap: 0.55rem;
-		border: 1px solid currentColor;
-		border-radius: var(--sg-radius-button);
-		font-weight: 500;
 		cursor: pointer;
+		border-radius: 8px;
+		border: 1px solid color-mix(in srgb, var(--sg-surface) 30%, transparent);
+		background: color-mix(in srgb, var(--sg-hero-deep) 25%, transparent);
 	}
-
 	.mobile-menu summary::-webkit-details-marker {
 		display: none;
 	}
-
 	.mobile-menu summary svg {
-		width: 1.2rem;
-		height: 1.2rem;
-		fill: none;
-		stroke: currentColor;
-		stroke-width: 1.8;
-		stroke-linecap: round;
+		width: 24px;
+		height: 24px;
 	}
-
 	.mobile-menu nav {
 		position: absolute;
-		top: calc(100% + 0.5rem);
 		right: 0;
-		width: min(18rem, calc(100vw - 2rem));
-		padding: 0.75rem;
+		top: calc(100% + 12px);
+		width: min(280px, calc(100vw - 40px));
+		padding: 8px;
 		display: grid;
-		gap: 0.15rem;
 		border: 1px solid var(--sg-border);
-		border-radius: var(--sg-radius-card);
-		background: var(--sg-surface);
+		border-radius: 8px;
+		background: var(--sg-canvas);
 		box-shadow: var(--sg-shadow-overlay);
-	}
-
-	.mobile-menu nav a {
 		color: var(--sg-text);
-		padding-inline: 0.75rem;
-		border-radius: var(--sg-radius-button);
 	}
-
-	.mobile-menu__cta {
-		margin-top: 0.35rem;
-		color: var(--sg-text) !important;
+	.mobile-menu nav a {
+		display: flex;
+		align-items: center;
+		min-height: var(--sg-target-min);
+		padding-inline: 12px;
+		font-size: 14px;
+		color: inherit;
+		border-radius: 4px;
 	}
-
+	.mobile-menu nav a:hover {
+		background: var(--sg-surface-muted);
+	}
+	.site-header--solid .mobile-menu summary {
+		border-color: var(--sg-border);
+		background: var(--sg-surface-muted);
+	}
 	.hero {
-		min-height: max(100svh, 43rem);
+		--hero-font: 'Poppins', var(--sg-font-body);
 		position: relative;
 		isolation: isolate;
-		overflow: hidden;
+		min-height: max(100svh, 620px);
+		margin-bottom: 69px;
+		color: var(--sg-surface);
 		background: var(--sg-hero);
-		color: white;
+		font-family: var(--hero-font);
 	}
-
-	.hero__world,
-	.hero__world::after {
-		position: absolute;
-		inset: 0;
-	}
-
 	.hero__world {
+		position: absolute;
+		inset: 0;
+		overflow: hidden;
 		z-index: -1;
-		contain: paint;
-		transform: translateZ(0);
-	}
-
-	.hero__world img,
-	.hero__world video {
-		width: 100%;
-		height: 100%;
-		display: block;
-		object-fit: cover;
-		object-position: center 53%;
-		backface-visibility: hidden;
-	}
-
-	.hero__world video {
-		position: absolute;
-		inset: 0;
-		opacity: var(--hero-video-opacity, 0);
-		transition: opacity 360ms var(--sg-ease-standard);
-		will-change: opacity;
-	}
-
-	.hero__world::after {
-		background:
-			linear-gradient(
-				90deg,
-				color-mix(in srgb, var(--sg-hero-deep) 52%, transparent) 0%,
-				color-mix(in srgb, var(--sg-hero-deep) 31%, transparent) 37%,
-				transparent 70%
-			),
-			linear-gradient(
-				0deg,
-				color-mix(in srgb, var(--sg-hero-deep) 32%, transparent),
-				transparent 28%
-			);
-		content: '';
-	}
-
-	.hero__content {
-		min-height: inherit;
-		position: relative;
-		padding-block: clamp(8.25rem, 17vh, 11rem) 4rem;
-	}
-
-	.hero__copy {
-		max-width: 36rem;
-	}
-
-	.eyebrow {
-		margin: 0 0 0.7rem;
-		color: var(--sg-brand);
-		font-family: var(--landing-label);
-		font-size: 0.68rem;
-		font-weight: 700;
-		letter-spacing: 0.1em;
-		line-height: 1.4;
-		text-transform: uppercase;
-	}
-
-	/* Cofounder-inspired chapter labels are compact and monospaced; the
-	   headline and body remain human-readable sans-serif. */
-	.product-window__label,
-	.place-category,
-	.preview-caption,
-	.journal-preview__top,
-	.trail-map__kicker {
-		font-family: var(--landing-label);
-	}
-
-	.eyebrow__dot {
-		width: 0.5rem;
-		height: 0.5rem;
-		margin-right: 0.4rem;
-		display: inline-block;
-		border-radius: 50%;
-		background: var(--sg-warm);
-	}
-
-	.hero h1 {
-		max-width: 13ch;
-		margin: 0;
-		font-size: clamp(3rem, 4vw, 3.65rem);
-		font-weight: 400;
-		line-height: 1.08;
-		letter-spacing: -0.045em;
-	}
-
-	.hero h1 span {
-		display: block;
-	}
-
-	.hero .eyebrow {
-		margin-bottom: 1.15rem;
-		color: white;
-		font-weight: 500;
-	}
-
-	.hero .eyebrow__dot {
-		background: var(--sg-warm);
-	}
-
-	.hero__description {
-		max-width: 30rem;
-		margin: 1.2rem 0 0;
-		color: color-mix(in srgb, var(--sg-brand-contrast) 94%, transparent);
-		font-size: clamp(1rem, 1.3vw, 1.1rem);
-		line-height: 1.5;
-	}
-
-	.hero__actions {
-		margin-top: 1.5rem;
-		display: flex;
-		align-items: center;
-		flex-wrap: wrap;
-		gap: 0.75rem;
-	}
-
-	.action {
-		min-height: 2.9rem;
-		padding: 0 1.25rem;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.75rem;
-		border: 1px solid transparent;
-		border-radius: var(--sg-radius-button);
-		font-weight: 500;
-		text-decoration: none;
-		transition:
-			background-color var(--sg-motion-fast) var(--sg-ease-standard),
-			color var(--sg-motion-fast) var(--sg-ease-standard),
-			transform var(--sg-motion-fast) var(--sg-ease-standard);
-	}
-
-	.action:hover {
-		transform: translateY(-1px);
-	}
-
-	.action--primary {
-		background: var(--sg-warm);
-		color: var(--sg-text);
-	}
-
-	.action--primary:hover {
-		background: white;
-	}
-
-	.action--secondary {
-		border-color: color-mix(in srgb, var(--sg-brand-contrast) 75%, transparent);
-		background: color-mix(in srgb, var(--sg-brand-contrast) 12%, transparent);
-		color: white;
-	}
-
-	.action--secondary:hover {
-		background: color-mix(in srgb, var(--sg-brand-contrast) 22%, transparent);
-	}
-
-	.hero__chips {
-		position: absolute;
-		inset: 0;
-		pointer-events: none;
-	}
-
-	.hero-chip {
-		width: 14rem;
-		padding: 0.9rem 1rem;
-		position: absolute;
-		display: grid;
-		grid-template-columns: auto 1fr;
-		column-gap: 0.7rem;
-		align-items: center;
-		border: 1px solid color-mix(in srgb, var(--sg-brand-contrast) 55%, transparent);
-		border-radius: 0.7rem;
-		background: color-mix(in srgb, var(--sg-brand-contrast) 70%, transparent);
-		box-shadow: 0 0.7rem 2.5rem color-mix(in srgb, var(--sg-hero-deep) 12%, transparent);
-		backdrop-filter: blur(12px);
-		color: var(--sg-text);
-	}
-
-	.hero-chip > span {
-		width: 1.9rem;
-		height: 1.9rem;
-		grid-row: span 2;
-		display: grid;
-		place-items: center;
-		border-radius: 0.4rem;
-		background: var(--sg-warm);
-		font-size: 0.7rem;
-	}
-
-	.hero-chip strong {
-		font-size: 0.84rem;
-		font-weight: 600;
-	}
-
-	.hero-chip small {
-		color: var(--sg-text-muted);
-		font-size: 0.68rem;
-	}
-
-	.hero-chip--one {
-		top: 32%;
-		left: 58%;
-	}
-	.hero-chip--two {
-		top: 52%;
-		left: 69%;
-	}
-	.hero-chip--three {
-		top: 69%;
-		left: 50%;
-	}
-
-	.hero__scroll {
-		position: absolute;
-		bottom: 2rem;
-		left: 0;
-		display: inline-flex;
-		gap: 0.75rem;
-		color: white;
-		font-size: 0.78rem;
-		text-decoration: none;
-	}
-
-	.hero__scroll span {
-		font-size: 1rem;
-	}
-
-	.hero::after {
-		position: absolute;
-		bottom: -1px;
-		left: 0;
-		right: 0;
-		height: 4rem;
-		background: linear-gradient(transparent, var(--sg-canvas));
-		pointer-events: none;
-		content: '';
-	}
-
-	.section {
-		padding-block: clamp(5rem, 8vw, 7.5rem);
-	}
-
-	.section--features {
-		background: var(--sg-canvas);
-	}
-
-	.section-heading {
-		margin-bottom: 3.5rem;
-		display: flex;
-		align-items: end;
-		justify-content: space-between;
-		gap: 2rem;
-	}
-
-	.section-heading h2,
-	.trail-copy h2 {
-		max-width: 18ch;
-		margin: 0;
-		font-size: clamp(2rem, 3.4vw, 3.25rem);
-		font-weight: 400;
-		line-height: 1.13;
-	}
-
-	.section-heading > p,
-	.trail-copy > p:not(.eyebrow) {
-		max-width: 35rem;
-		margin: 0;
-		color: var(--sg-text-muted);
-		font-size: 1.05rem;
-		line-height: 1.6;
-	}
-
-	.product-window {
-		margin: 0 auto clamp(5rem, 8vw, 8rem);
-		overflow: hidden;
-		border: 1px solid var(--sg-border);
-		border-radius: 0.55rem;
-		background: white;
-		box-shadow: 0 2rem 5rem color-mix(in srgb, var(--sg-text) 8%, transparent);
-	}
-
-	.product-window__bar {
-		min-height: 3.5rem;
-		padding-inline: 1.5rem;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 1rem;
-		border-bottom: 1px solid var(--sg-border);
-		color: var(--sg-text-muted);
-		font-size: 0.75rem;
-	}
-
-	.product-window__brand {
-		color: var(--sg-text);
-		font-size: 1rem;
-		font-weight: 600;
-	}
-
-	.product-window__body {
-		min-height: 34rem;
-		display: grid;
-		grid-template-columns: minmax(18rem, 0.39fr) minmax(0, 0.61fr);
-	}
-
-	.product-window__panel {
-		padding: clamp(1.5rem, 4vw, 3.5rem);
-		border-right: 1px solid var(--sg-border);
-	}
-
-	.product-window__label {
-		margin: 0;
-		color: var(--sg-brand);
-		font-size: 0.68rem;
-		font-weight: 600;
-		letter-spacing: 0.1em;
-	}
-
-	.product-window__panel h3 {
-		margin: 1.2rem 0 2.5rem;
-		font-size: clamp(2rem, 3vw, 2.8rem);
-		font-weight: 400;
-	}
-
-	.product-window__field {
-		min-height: 3.5rem;
-		margin-bottom: 0.65rem;
-		padding: 0 1rem;
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		border: 1px solid var(--sg-border);
-		border-radius: 0.4rem;
-		color: var(--sg-text-muted);
-		font-size: 0.92rem;
-		text-decoration: none;
-	}
-
-	.product-window__field span {
-		color: var(--sg-brand);
-		font-size: 1.3rem;
-	}
-
-	.product-window__field:hover {
-		border-color: var(--sg-brand);
-		color: var(--sg-text);
-	}
-
-	.product-window__button {
-		min-height: 3.3rem;
-		margin-top: 1.1rem;
-		padding-inline: 1rem;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		border-radius: 0.4rem;
-		background: var(--sg-text);
-		color: white;
-		font-size: 0.9rem;
-		text-decoration: none;
-	}
-
-	.product-window__button:hover {
-		background: var(--sg-brand);
-	}
-
-	.product-window__panel > p:last-child {
-		max-width: 19rem;
-		margin: 1.5rem 0 0;
-		color: var(--sg-text-muted);
-		font-size: 0.88rem;
-		line-height: 1.55;
-	}
-
-	.product-window__scene {
-		position: relative;
-		overflow: hidden;
-		background-color: var(--sg-scene-sky);
-		background-image:
-			linear-gradient(
-				90deg,
-				transparent 48%,
-				color-mix(in srgb, var(--sg-brand-contrast) 85%, transparent) 48%,
-				color-mix(in srgb, var(--sg-brand-contrast) 85%, transparent) 51%,
-				transparent 51%
-			),
-			linear-gradient(
-				transparent 48%,
-				color-mix(in srgb, var(--sg-brand-contrast) 85%, transparent) 48%,
-				color-mix(in srgb, var(--sg-brand-contrast) 85%, transparent) 51%,
-				transparent 51%
-			);
-		background-size: 5.5rem 5.5rem;
-	}
-
-	.product-window__scene::before {
-		width: 32rem;
-		height: 23rem;
-		position: absolute;
-		top: -8rem;
-		right: -10rem;
-		border-radius: 43%;
-		background: var(--sg-scene-leaf);
-		transform: rotate(-20deg);
-		content: '';
-	}
-
-	.product-window__route {
-		width: 55%;
-		height: 54%;
-		position: absolute;
-		top: 24%;
-		left: 18%;
-		border: 0.65rem solid var(--sg-scene-route);
-		border-left: 0;
-		border-radius: 0 6rem 6rem 0;
-		transform: rotate(-13deg);
-	}
-
-	.product-window__stop {
-		width: 1.5rem;
-		height: 1.5rem;
-		position: absolute;
-		z-index: 1;
-		border: 0.4rem solid var(--sg-scene-route);
-		border-radius: 50%;
-		background: white;
-		box-shadow: 0 0 0 0.4rem color-mix(in srgb, var(--sg-brand-contrast) 65%, transparent);
-	}
-
-	.product-window__stop--one {
-		top: 60%;
-		left: 17%;
-	}
-	.product-window__stop--two {
-		top: 24%;
-		left: 54%;
-	}
-	.product-window__stop--three {
-		top: 70%;
-		left: 68%;
-	}
-
-	.product-window__note {
-		min-width: 12rem;
-		padding: 0.9rem 1rem;
-		position: absolute;
-		right: 8%;
-		bottom: 11%;
-		display: grid;
-		gap: 0.2rem;
-		border: 1px solid var(--sg-border);
-		border-radius: 0.4rem;
-		background: white;
-		box-shadow: 0 0.8rem 2rem color-mix(in srgb, var(--sg-text) 10%, transparent);
-		font-size: 0.78rem;
-	}
-
-	.product-window__note span {
-		color: var(--sg-text-muted);
-	}
-
-	.feature-list {
-		border-bottom: 1px solid var(--sg-border);
-	}
-
-	.feature-row {
-		min-height: 8rem;
-		padding: 1.6rem 0.5rem;
-		display: grid;
-		grid-template-columns: 3rem minmax(0, 1fr) auto;
-		align-items: center;
-		gap: 1.5rem;
-		border-top: 1px solid var(--sg-border);
-		color: var(--sg-text);
-		text-decoration: none;
-		transition:
-			background-color 240ms ease,
-			box-shadow 240ms ease;
-	}
-
-	.feature-row:hover {
-		background: var(--sg-surface);
-		box-shadow: inset 3px 0 var(--sg-brand);
-	}
-	.feature-row__number {
-		align-self: start;
-		color: var(--sg-text-muted);
-		font-size: 0.85rem;
-	}
-	.feature-row__copy {
-		display: grid;
-		gap: 0.45rem;
-	}
-	.feature-row__copy strong {
-		font-size: clamp(1.45rem, 2vw, 2rem);
-		font-weight: 400;
-		letter-spacing: -0.03em;
-	}
-	.feature-row__copy > span {
-		max-width: 43rem;
-		color: var(--sg-text-muted);
-		line-height: 1.5;
-	}
-	.feature-row__link {
-		color: var(--sg-brand);
-		white-space: nowrap;
-		font-size: 0.85rem;
-	}
-
-	.text-link {
-		min-height: 2.75rem;
-		margin-top: auto;
-		display: inline-flex;
-		align-items: center;
-		gap: 0.55rem;
-		color: var(--sg-brand);
-		font-weight: 700;
-		text-decoration: none;
-	}
-
-	.text-link span {
-		color: var(--sg-warm);
-		transition: transform var(--sg-motion-fast) var(--sg-ease-standard);
-	}
-
-	.text-link:hover span {
-		transform: translate(2px, -2px);
-	}
-
-	.how-section {
-		background: var(--sg-canvas);
-	}
-
-	.section-heading--center {
-		align-items: center;
-		flex-direction: column;
-		gap: 1rem;
-		text-align: center;
-	}
-
-	.steps {
-		position: relative;
-		margin: 0;
-		padding: 0;
-		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
-		list-style: none;
-	}
-
-	.steps::before {
-		position: absolute;
-		top: 1.3rem;
-		left: 11%;
-		right: 11%;
-		border-top: 1px dashed var(--sg-border);
-		content: '';
-	}
-
-	.steps li {
-		position: relative;
-		padding: 0 1.5rem 0 0;
-	}
-
-	.step-number {
-		width: 2.65rem;
-		height: 2.65rem;
-		margin-bottom: 1rem;
-		position: relative;
-		z-index: 1;
-		display: grid;
-		place-items: center;
-		border: 1px solid var(--sg-brand);
-		border-radius: 50%;
-		background: var(--sg-canvas);
-		color: var(--sg-brand);
-		font-size: 0.82rem;
-		font-weight: 700;
-	}
-
-	.steps li h3 {
-		margin: 0;
-		font-size: 1.2rem;
-	}
-
-	.steps li p {
-		max-width: 16rem;
-		margin: 0.5rem 0 0;
-		color: var(--sg-text-muted);
-		line-height: 1.5;
-	}
-
-	.explorer-section {
-		background: var(--sg-canvas);
-	}
-
-	.place-grid {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 1rem;
-	}
-
-	.place-card {
-		display: block;
-		padding: 0;
-		overflow: hidden;
-		border: 1px solid var(--sg-border);
-		border-radius: var(--sg-radius-card);
-		color: var(--sg-text);
-		text-decoration: none;
-		transition: border-color var(--sg-motion-fast) var(--sg-ease-standard);
-	}
-
-	.place-card:hover {
-		border-color: var(--sg-brand);
-	}
-
-	.place-art {
-		min-height: 12rem;
-		aspect-ratio: 1.7;
-		position: relative;
-		display: grid;
-		place-items: center;
-		overflow: hidden;
-		background: var(--sg-scene-sand);
-	}
-
-	.place-art--park {
-		background: var(--sg-scene-park);
-	}
-
-	.place-art--museum {
-		background: var(--sg-scene-museum);
-	}
-
-	.place-art__block {
-		position: absolute;
-		bottom: 0;
-		width: 17%;
-		background: color-mix(in srgb, var(--sg-brand) 14%, transparent);
-	}
-
-	.place-art__block--one {
-		left: 10%;
-		height: 33%;
-	}
-
-	.place-art__block--two {
-		right: 12%;
-		height: 48%;
-		background: color-mix(in srgb, var(--sg-accent) 16%, transparent);
-	}
-
-	.place-art__sun {
-		width: 3.5rem;
-		height: 3.5rem;
-		position: absolute;
-		top: 18%;
-		right: 18%;
-		border-radius: 50%;
-		background: var(--sg-scene-sun);
-	}
-
-	.place-art svg {
-		width: 4rem;
-		height: 4rem;
-		position: relative;
-		z-index: 1;
-		stroke: var(--sg-brand);
-		stroke-width: 2.5;
-		stroke-linecap: round;
-		stroke-linejoin: round;
-	}
-
-	.place-art__pin {
-		width: 1.25rem;
-		height: 1.55rem;
-		position: absolute;
-		left: 24%;
-		top: 24%;
-		border-radius: 60% 60% 60% 0;
-		background: var(--sg-warm);
-		transform: rotate(-45deg);
-	}
-
-	.place-art__pin span {
-		width: 0.4rem;
-		height: 0.4rem;
-		position: absolute;
-		top: 0.35rem;
-		left: 0.4rem;
-		border-radius: 50%;
-		background: var(--sg-surface);
-	}
-
-	.place-card__body {
-		padding: 1.1rem 1.2rem 1.25rem;
-	}
-
-	.place-category {
-		margin: 0 0 0.45rem;
-		color: var(--sg-brand);
-		font-size: 0.78rem;
-		font-weight: 700;
-	}
-
-	.place-card h3 {
-		margin: 0;
-		font-size: 1.25rem;
-	}
-
-	.place-description {
-		margin: 0.75rem 0 1.25rem;
-		color: var(--sg-text-muted);
-		font-size: 0.95rem;
-		line-height: 1.5;
-	}
-
-	.place-card__action {
-		color: var(--sg-brand);
-		font-size: 0.9rem;
-		font-weight: 600;
-	}
-
-	.explorer-link {
-		margin-top: 1rem;
-	}
-
-	.passport-section {
-		background: var(--sg-canvas);
-	}
-
-	.passport-grid {
-		display: grid;
-		grid-template-columns: 1.1fr 0.9fr;
-		align-items: stretch;
-		gap: 1rem;
-	}
-
-	:global(.passport-preview),
-	:global(.journal-preview) {
-		min-width: 0;
-		padding: clamp(1.25rem, 3vw, 2rem);
-		border-radius: var(--sg-radius-card);
-	}
-
-	.preview-caption,
-	.journal-preview__top {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 1rem;
-		color: var(--sg-text-muted);
-		font-size: 0.7rem;
-		font-weight: 700;
-		letter-spacing: 0.09em;
-	}
-
-	.passport-preview__head {
-		min-height: 9.5rem;
-		margin-top: 1.25rem;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 1rem;
-	}
-
-	.passport-preview__head h3,
-	:global(.journal-preview h3) {
-		margin: 0;
-		font-size: clamp(1.5rem, 2.7vw, 2.25rem);
-		line-height: 1.15;
-	}
-
-	.passport-preview__head > div > p:last-child {
-		margin: 0.6rem 0 0;
-		color: var(--sg-text-muted);
-	}
-
-	.passport-preview__head img {
-		width: clamp(6rem, 12vw, 9rem);
-		height: clamp(6rem, 12vw, 9rem);
-		flex: none;
-		object-fit: contain;
-	}
-
-	.passport-progress {
-		padding-top: 1rem;
-		border-top: 1px solid var(--sg-border);
-	}
-
-	.passport-progress > div:first-child {
-		display: flex;
-		align-items: baseline;
-		gap: 0.45rem;
-	}
-
-	.passport-progress > div:first-child strong {
-		color: var(--sg-brand);
-		font-family: var(--landing-heading);
-		font-size: 1.35rem;
-	}
-
-	.passport-progress > div:first-child span {
-		color: var(--sg-text-muted);
-		font-size: 0.85rem;
-	}
-
-	.passport-stamps {
-		margin-top: 0.75rem;
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.45rem;
-	}
-
-	.passport-stamps span {
-		padding: 0.3rem 0.55rem;
-		border: 1px solid var(--sg-border);
-		border-radius: 0.45rem;
-		color: var(--sg-text-muted);
-		font-size: 0.75rem;
-	}
-
-	:global(.journal-preview) {
-		display: flex;
-		flex-direction: column;
-		background: var(--sg-nyaman);
-	}
-
-	.journal-preview__top {
-		margin-bottom: auto;
-	}
-
-	.journal-mark {
-		width: 0.9rem;
-		height: 0.9rem;
-		border-radius: 0 50% 50% 50%;
-		background: var(--sg-warm);
-		transform: rotate(45deg);
-	}
-
-	:global(.journal-preview > .eyebrow) {
-		margin-top: 1.8rem;
-		font-size: 0.7rem;
-		letter-spacing: 0.08em;
-	}
-
-	:global(.journal-preview h3) {
-		max-width: 14ch;
-	}
-
-	.journal-quote {
-		max-width: 25rem;
-		margin: 1.1rem 0 2rem;
-		color: var(--sg-text-muted);
-		font-size: 1.05rem;
-		font-style: italic;
-		line-height: 1.6;
-	}
-
-	.journal-preview__footer {
-		margin-top: auto;
-		padding-top: 0.9rem;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 1rem;
-		border-top: 1px solid var(--sg-border);
-		font-size: 0.8rem;
-	}
-
-	.journal-preview__footer > span {
-		color: var(--sg-text-muted);
-	}
-
-	.journal-preview__footer a {
-		color: var(--sg-brand);
-		font-weight: 700;
-		text-decoration: none;
-	}
-
-	.trail-section {
-		background: var(--sg-canvas);
-	}
-
-	.trail-layout {
-		display: grid;
-		grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
-		align-items: center;
-		gap: clamp(2rem, 6vw, 6rem);
-	}
-
-	.trail-copy h2 {
-		max-width: 13ch;
-	}
-
-	.trail-copy > p:not(.eyebrow) {
-		margin-top: 1rem;
-	}
-
-	.trail-copy > .text-link {
-		margin-top: 1rem;
-	}
-
-	.trail-map {
-		padding: clamp(1rem, 2.5vw, 1.75rem);
-		border: 1px solid var(--sg-border);
-		border-radius: var(--sg-radius-card);
-		background: var(--sg-surface);
-	}
-
-	.trail-map__heading {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 1rem;
-	}
-
-	.trail-map__kicker {
-		color: var(--sg-brand);
-		font-size: 0.7rem;
-		font-weight: 700;
-		letter-spacing: 0.1em;
-	}
-
-	.trail-map__heading h3 {
-		margin: 0.3rem 0 0;
-		font-size: 1.45rem;
-	}
-
-	.trail-map__heading img {
-		width: 5.5rem;
-		height: 5.5rem;
-		flex: none;
-		object-fit: contain;
-	}
-
-	.trail-stops {
-		margin: 0.5rem 0 0;
-		padding: 0;
-		list-style: none;
-	}
-
-	.trail-stops li {
-		min-height: 3.4rem;
-		position: relative;
-		padding-left: 1.9rem;
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-	}
-
-	.trail-stops li:not(:last-child)::before {
-		position: absolute;
-		top: 1.75rem;
-		bottom: -0.05rem;
-		left: 0.55rem;
-		border-left: 2px solid var(--sg-brand);
-		content: '';
-	}
-
-	.trail-stop__node {
-		width: 0.75rem;
-		height: 0.75rem;
-		position: absolute;
-		left: 0.2rem;
-		border: 2px solid var(--sg-brand);
-		border-radius: 50%;
-		background: var(--sg-surface);
-	}
-
-	.trail-stops li:first-child .trail-stop__node {
-		background: var(--sg-brand);
-	}
-
-	.trail-stops li strong {
-		font-size: 0.95rem;
-	}
-
-	.trail-stops li small {
-		margin-left: auto;
-		color: var(--sg-text-muted);
-		font-size: 0.78rem;
-	}
-
-	.final-section {
-		padding-block: 0;
 		background: var(--sg-hero);
 	}
-
-	.final-cta {
-		min-height: 42rem;
-		position: relative;
-		overflow: hidden;
-		color: white;
-	}
-
-	.final-cta__copy {
-		max-width: 40rem;
-		margin-left: max(1.25rem, calc((100vw - 82rem) / 2));
-		padding-block: clamp(7rem, 13vw, 10rem);
-		position: relative;
-		z-index: 2;
-	}
-
-	.final-cta .eyebrow {
-		color: white;
-	}
-
-	.final-cta h2 {
-		margin: 0;
-		font-size: clamp(2.1rem, 4.5vw, 4rem);
-		font-weight: 400;
-		line-height: 1.05;
-		letter-spacing: -0.055em;
-	}
-
-	.final-cta__copy > p:not(.eyebrow) {
-		margin: 1rem 0 0;
-		color: color-mix(in srgb, var(--sg-brand-contrast) 92%, transparent);
-		font-size: 1.05rem;
-	}
-
-	.action--light {
-		background: var(--sg-warm);
-		color: var(--sg-text);
-	}
-
-	.action--light:hover {
-		background: white;
-	}
-
-	.action--outline-light {
-		border-color: color-mix(in srgb, var(--sg-brand-contrast) 55%, transparent);
-		color: white;
-	}
-
-	.action--outline-light:hover {
-		background: color-mix(in srgb, var(--sg-brand-contrast) 10%, transparent);
-	}
-
-	.final-cta__art {
-		position: absolute;
-		inset: 0;
-		z-index: 0;
-	}
-
-	.final-cta__art img {
-		width: 100%;
-		height: 100%;
-		object-fit: cover;
-		object-position: center 28%;
-		filter: saturate(0.95);
-	}
-
-	.final-cta__art::after {
+	.hero__world::after {
+		content: '';
 		position: absolute;
 		inset: 0;
 		background: linear-gradient(
 			90deg,
-			color-mix(in srgb, var(--sg-hero-deep) 70%, transparent),
-			color-mix(in srgb, var(--sg-hero-deep) 32%, transparent) 55%,
-			transparent
+			color-mix(in srgb, var(--sg-hero-deep) 34%, transparent) 0%,
+			color-mix(in srgb, var(--sg-hero-deep) 34%, transparent) 38%,
+			transparent 67%
+		);
+	}
+	.hero::after {
+		content: '';
+		position: absolute;
+		inset-inline: 0;
+		bottom: -40px;
+		height: 72px;
+		background: var(--sg-canvas);
+		mask: url('/illustrations/pixel-fringe.svg') repeat-x left bottom / 512px 72px;
+		pointer-events: none;
+	}
+	.hero__content {
+		max-width: 1440px;
+		padding: 150px 20px 50px;
+		margin-inline: auto;
+	}
+	.hero h1 {
+		max-width: 640px;
+		font-family: var(--hero-font);
+		font-size: 46px;
+		font-weight: 500;
+		line-height: 1.14;
+		margin: 0;
+		letter-spacing: -0.025em;
+		text-shadow: 0 1px 3px color-mix(in srgb, var(--sg-hero-deep) 15%, transparent);
+	}
+	.hero__content > p {
+		max-width: 520px;
+		margin: 20px 0 0;
+		font-size: 16px;
+		line-height: 1.4;
+		font-weight: 400;
+		text-shadow: 0 1px 3px var(--sg-hero-deep);
+	}
+	.hero__actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 12px;
+		margin-top: 24px;
+	}
+	.hero__motion {
+		position: absolute;
+		right: 20px;
+		bottom: 48px;
+		font-size: 12px;
+		background: color-mix(in srgb, var(--sg-hero-deep) 85%, transparent);
+	}
+	.hero__caption {
+		position: absolute;
+		left: 20px;
+		bottom: 48px;
+		margin: 0;
+		padding: 6px 9px;
+		border-radius: 4px;
+		background: color-mix(in srgb, var(--sg-hero-deep) 85%, transparent);
+		font: 10px/1.5 var(--sg-font-label);
+	}
+	.hero :focus-visible,
+	.site-header:not(.site-header--solid) :focus-visible {
+		outline-color: var(--sg-surface);
+	}
+	.hero__notes {
+		position: absolute;
+		top: 33%;
+		left: 57%;
+		display: grid;
+		gap: 8px;
+		transform: perspective(900px) rotateY(-10deg) rotateZ(-2deg);
+		pointer-events: none;
+	}
+	.hero__notes > div {
+		position: relative;
+		overflow: hidden;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		width: clamp(290px, 24vw, 360px);
+		min-height: 38px;
+		padding: 8px 12px;
+		border: 1px solid color-mix(in srgb, var(--sg-surface) 15%, transparent);
+		border-radius: 6px;
+		background: color-mix(in srgb, var(--sg-hero-deep) 80%, transparent);
+		box-shadow: inset 0 1px color-mix(in srgb, var(--sg-surface) 12%, transparent);
+		font-size: 12px;
+		font-weight: 400;
+		animation: hero-step-loop 12s ease-in-out infinite;
+	}
+	.hero__notes > div:nth-child(2) {
+		animation-delay: -4s;
+	}
+	.hero__notes > div:nth-child(2)::after {
+		animation-delay: -4s;
+	}
+	.hero__notes > div:nth-child(2)::before {
+		animation-delay: -4s;
+	}
+	.hero__notes > div:nth-child(3) {
+		animation-delay: -8s;
+	}
+	.hero__notes > div:nth-child(3)::after {
+		animation-delay: -8s;
+	}
+	.hero__notes > div:nth-child(3)::before {
+		animation-delay: -8s;
+	}
+	.hero:has(:global(.hero-scene.is-paused)) .hero__notes > div {
+		animation-play-state: paused;
+	}
+	.hero:has(:global(.hero-scene.is-paused)) .hero__notes > div::before {
+		animation-play-state: paused;
+	}
+	.hero:has(:global(.hero-scene.is-paused)) .hero__notes > div::after {
+		animation-play-state: paused;
+	}
+	@keyframes hero-step-loop {
+		0%,
+		3%,
+		20%,
+		100% {
+			background: color-mix(in srgb, var(--sg-hero-deep) 94%, transparent);
+			border-color: color-mix(in srgb, var(--sg-surface) 18%, transparent);
+			transform: none;
+			box-shadow: inset 0 1px color-mix(in srgb, var(--sg-surface) 12%, transparent);
+		}
+		5%,
+		18% {
+			background: color-mix(in srgb, var(--sg-hero-deep) 70%, transparent);
+			border-color: color-mix(in srgb, var(--sg-surface) 68%, transparent);
+			transform: translateX(7px) scale(1.01);
+			box-shadow:
+				inset 0 1px color-mix(in srgb, var(--sg-surface) 30%, transparent),
+				0 4px 14px color-mix(in srgb, var(--sg-hero-deep) 18%, transparent);
+		}
+	}
+	.hero__notes > div::before {
+		position: absolute;
+		z-index: 0;
+		inset-block: -40%;
+		left: 0;
+		width: 38%;
+		background: linear-gradient(
+			110deg,
+			transparent 12%,
+			color-mix(in srgb, var(--sg-surface) 28%, transparent) 50%,
+			transparent 88%
 		);
 		content: '';
+		opacity: 0;
+		transform: translateX(-145%) skewX(-16deg);
+		animation: hero-step-sheen 12s ease-in-out infinite;
+		pointer-events: none;
 	}
-
-	.final-cta__app {
-		width: clamp(16rem, 27vw, 26rem);
-		min-height: 19rem;
-		padding: 1.5rem;
+	.hero__notes > div::after {
 		position: absolute;
+		z-index: 2;
+		inset-inline: 0;
+		bottom: 0;
+		height: 2px;
+		background: var(--sg-scene-leaf);
+		content: '';
+		transform: scaleX(0);
+		transform-origin: left center;
+		animation: hero-step-progress 12s linear infinite;
+		pointer-events: none;
+	}
+	.hero__notes i,
+	.hero__notes span,
+	.hero__notes strong {
+		position: relative;
 		z-index: 1;
-		right: 7%;
-		bottom: 12%;
-		display: grid;
-		align-content: start;
-		gap: 1rem;
-		border: 1px solid color-mix(in srgb, var(--sg-brand-contrast) 55%, transparent);
-		border-radius: 0.55rem;
-		background: color-mix(in srgb, var(--sg-brand-contrast) 91%, transparent);
-		box-shadow: 0 1.5rem 4rem color-mix(in srgb, var(--sg-hero-deep) 16%, transparent);
-		color: var(--sg-text);
 	}
-
-	.final-cta__app strong {
-		font-size: 1.35rem;
+	@keyframes hero-step-sheen {
+		0%,
+		4%,
+		100% {
+			opacity: 0;
+			transform: translateX(-145%) skewX(-16deg);
+		}
+		5% {
+			opacity: 0.7;
+		}
+		17% {
+			opacity: 0.45;
+			transform: translateX(280%) skewX(-16deg);
+		}
+		20% {
+			opacity: 0;
+			transform: translateX(330%) skewX(-16deg);
+		}
+	}
+	@keyframes hero-step-progress {
+		0%,
+		5%,
+		100% {
+			transform: scaleX(0);
+		}
+		18% {
+			transform: scaleX(1);
+		}
+		20% {
+			transform: scaleX(0);
+		}
+	}
+	.hero__notes i {
+		width: 5px;
+		height: 5px;
+		background: var(--sg-scene-leaf);
+		flex: none;
+	}
+	.hero__notes span {
+		color: color-mix(in srgb, var(--sg-surface) 88%, transparent);
+	}
+	.hero__notes strong {
+		font-size: 12px;
 		font-weight: 600;
 	}
-	.final-cta__app > span:not(.final-cta__app-line) {
-		margin-bottom: 0.8rem;
-		color: var(--sg-text-muted);
-		font-size: 0.85rem;
+	.transit-strip {
+		padding: 38px 20px 28px;
+		text-align: center;
 	}
-	.final-cta__app-line {
-		min-height: 2.4rem;
-		padding-inline: 0.7rem;
+	.transit-strip__marks {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		max-width: 730px;
+		margin-inline: auto;
+		gap: 16px;
+	}
+	.transit-strip__marks a {
+		min-height: 84px;
+		padding: 16px;
 		display: flex;
 		align-items: center;
-		border: 1px solid var(--sg-border);
-		border-radius: 0.4rem;
-		background: var(--sg-scene-soft);
-		color: var(--sg-text-muted);
-		font-size: 0.75rem;
-	}
-	.final-cta__app-line:last-child {
 		justify-content: center;
-		background: var(--sg-warm);
-		border-color: var(--sg-warm);
-		color: var(--sg-text);
-		font-weight: 600;
+		gap: 10px;
+		border: 1px solid var(--sg-border);
+		border-radius: 10px;
+		background: color-mix(in srgb, var(--sg-surface) 40%, var(--sg-canvas));
+		box-shadow:
+			inset 0 1px var(--sg-surface),
+			0 0 0 3px color-mix(in srgb, var(--sg-surface) 55%, transparent);
+		color: var(--sg-text-muted);
+		font-size: 13px;
 	}
-
-	.site-footer {
-		padding-block: 3rem 1rem;
+	.transit-strip__marks a:hover {
 		background: var(--sg-surface);
-		border-top: 1px solid var(--sg-border);
 	}
-
-	.footer-grid {
-		padding-bottom: 2.5rem;
+	.transit-strip__marks svg {
+		width: 24px;
+		height: 24px;
+		flex: none;
+	}
+	.transit-strip > p {
+		font-size: 12px;
+		color: var(--sg-text-muted);
+		margin: 32px 0 0;
+	}
+	.transit-strip > p a {
+		color: inherit;
+		text-decoration: underline;
+		text-underline-offset: 3px;
+	}
+	.section {
+		padding-block: 88px;
+	}
+	.overview h2 {
+		text-align: center;
+	}
+	.overview__preview {
+		margin-top: clamp(56px, 7vw, 88px);
+		perspective: 1400px;
+	}
+	.overview__principles {
 		display: grid;
-		grid-template-columns: 1.4fr repeat(3, 1fr);
-		gap: clamp(1.5rem, 4vw, 4rem);
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 32px;
+		margin-top: 40px;
 	}
-
-	.footer-brand .brand {
-		margin-bottom: 0.6rem;
-	}
-
-	.footer-brand p {
-		margin: 0.3rem 0;
+	.overview__principles p {
+		margin: 0;
+		font-size: 14px;
+		line-height: 1.5;
 		color: var(--sg-text-muted);
 	}
-
-	.footer-brand .footer-note {
-		max-width: 15rem;
-		margin-top: 1rem;
-		color: var(--sg-brand);
-		font-family: var(--sg-font-display);
-		font-size: 0.9rem;
-		font-style: italic;
+	.overview__principles strong {
+		color: var(--sg-text);
+		font-weight: 500;
 	}
-
-	.footer-grid h2 {
-		margin: 0 0 0.65rem;
-		font-family: var(--sg-font-body);
-		font-size: 0.85rem;
-		font-weight: 700;
-		letter-spacing: 0;
+	.overview__cta {
+		display: flex;
+		justify-content: center;
+		align-items: center;
+		gap: 48px;
+		margin-top: 40px;
 	}
-
-	.footer-grid > div:not(:first-child) > a {
-		min-height: 2.25rem;
+	.overview__cta p {
+		max-width: 440px;
+		color: var(--sg-text-muted);
+		font-size: 14px;
+		margin: 0;
+	}
+	.features {
+		padding-top: 112px;
+	}
+	.features__intro {
+		max-width: 480px;
+	}
+	.eyebrow {
+		font: 10px/1.5 var(--sg-font-label);
+		letter-spacing: 0.12em;
+		color: var(--sg-text-muted);
+		margin: 0 0 16px;
+	}
+	.features__intro > p:last-child,
+	.feature__copy > p:not(.eyebrow) {
+		font-size: 14px;
+		line-height: 1.6;
+		color: var(--sg-text-muted);
+		margin: 24px 0 0;
+	}
+	.feature {
+		display: grid;
+		grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+		align-items: center;
+		gap: clamp(40px, 5vw, 72px);
+		margin-top: clamp(112px, 12vw, 168px);
+		min-height: 510px;
+		scroll-margin-top: 120px;
+	}
+	.feature--reverse {
+		grid-template-columns: minmax(0, 1fr) 340px;
+	}
+	.feature--reverse .feature__copy {
+		order: 2;
+	}
+	.feature__copy h3 {
+		margin: 0;
+		font-size: 36px;
+		line-height: 1.12;
+	}
+	.feature__details {
+		display: grid;
+		gap: 8px;
+		margin-top: 32px;
+	}
+	.feature__details details {
+		border: 1px solid var(--sg-border);
+		border-radius: 6px;
+		background: color-mix(in srgb, var(--sg-surface) 70%, var(--sg-canvas));
+	}
+	.feature__details summary {
 		display: flex;
 		align-items: center;
+		gap: 10px;
+		min-height: var(--sg-target-min);
+		padding: 8px 12px;
+		list-style: none;
+		cursor: pointer;
+		font-size: 12px;
+	}
+	.feature__details summary::-webkit-details-marker {
+		display: none;
+	}
+	.topic-number {
+		font: 10px var(--sg-font-label);
 		color: var(--sg-text-muted);
-		font-size: 0.9rem;
-		text-decoration: none;
 	}
-
-	.footer-grid > div:not(:first-child) > a:hover,
-	.footer-bottom a:hover {
-		color: var(--sg-brand);
+	.topic-plus {
+		margin-left: auto;
+		position: relative;
+		width: 10px;
+		height: 10px;
+		color: var(--sg-text-muted);
 	}
-
-	.footer-grid > div:last-child p {
-		max-width: 14rem;
+	.topic-plus::before,
+	.topic-plus::after {
+		content: '';
+		position: absolute;
+		top: 4px;
+		width: 10px;
+		border-top: 1px solid currentColor;
+	}
+	.topic-plus::after {
+		transform: rotate(90deg);
+	}
+	.feature__details details[open] .topic-plus::after {
+		display: none;
+	}
+	.feature__details summary:hover {
+		background: var(--sg-surface-muted);
+		border-radius: 6px;
+	}
+	.feature__details details > p {
 		margin: 0;
+		padding: 0 12px 16px;
+		font-size: 12px;
+		line-height: 1.6;
 		color: var(--sg-text-muted);
-		font-size: 0.9rem;
+	}
+	.feature__preview {
+		min-width: 0;
+		perspective: 1200px;
+	}
+	.feature--reverse .feature__preview {
+		max-width: 460px;
+	}
+	.feature__preview :global(.preview:not(.preview--network)) {
+		background: transparent;
+		box-shadow: none;
+		border-color: transparent;
+	}
+	.feature__preview :global(.preview__bar) {
+		display: none;
+	}
+	.center-heading {
+		text-align: center;
+	}
+	.center-heading p {
+		font-size: 14px;
+		color: var(--sg-text-muted);
+		margin: 24px 0;
+		line-height: 1.6;
+	}
+	.guide {
+		padding-top: 112px;
+		padding-bottom: 160px;
+		background-image:
+			linear-gradient(color-mix(in srgb, var(--sg-border) 20%, transparent) 1px, transparent 1px),
+			linear-gradient(
+				90deg,
+				color-mix(in srgb, var(--sg-border) 20%, transparent) 1px,
+				transparent 1px
+			);
+		background-size: 96px 96px;
+	}
+	.books {
+		display: grid;
+		grid-template-columns: repeat(2, 290px);
+		justify-content: center;
+		gap: 64px 80px;
+		margin-top: 128px;
+	}
+	.book-link {
+		color: var(--sg-text);
+		min-width: 0;
+	}
+	.book {
+		position: relative;
+		min-height: 350px;
+		padding: 36px 24px 20px 36px;
+		display: flex;
+		flex-direction: column;
+		border: 1px solid var(--sg-border);
+		border-radius: 4px 12px 12px 4px;
+		background: var(--landing-paper);
+		box-shadow:
+			inset 15px 0 12px -15px var(--sg-border),
+			0 6px 0 -1px var(--sg-canvas),
+			0 7px 0 -1px var(--sg-border),
+			0 12px 0 -2px var(--sg-canvas),
+			0 13px 0 -2px var(--sg-border),
+			0 20px 24px -12px color-mix(in srgb, var(--sg-text) 10%, transparent);
+		transition:
+			transform var(--landing-enter) var(--sg-ease-enter),
+			box-shadow var(--landing-enter) var(--sg-ease-enter);
+		transform-origin: 20% 70%;
+	}
+	.book h3 {
+		margin: 0;
+		font-size: 20px;
+		line-height: 1.1;
+	}
+	.book hr {
+		margin-block: 28px 16px;
+		border-color: var(--sg-border);
+	}
+	.book__chapter {
+		font: 8px/1.7 var(--sg-font-label);
+		color: var(--sg-text-muted);
+	}
+	.book > svg {
+		align-self: center;
+		width: 100px;
+		height: 100px;
+		margin: 25px 0;
+		color: var(--sg-border-strong);
+	}
+	.book__footer {
+		display: flex;
+		justify-content: space-between;
+		margin-top: auto;
+		font-size: 9px;
+		color: var(--sg-text-muted);
+	}
+	.book-link__caption {
+		display: block;
+		text-align: center;
+		font: 12px var(--sg-font-label);
+		color: var(--sg-text-muted);
+		margin-top: 40px;
+	}
+	.book-link:hover .book {
+		transform: perspective(900px) rotateY(-7deg) rotateZ(-2deg) translateY(-7px);
+	}
+	.product-demo {
+		padding-block: 190px 210px;
+		background: linear-gradient(180deg, var(--landing-blue), var(--landing-blue-soft));
+		color: var(--sg-surface);
+	}
+	.product-demo .center-heading h2 > span {
+		color: var(--sg-surface);
+	}
+	.product-demo .center-heading p {
+		color: var(--sg-text);
+	}
+	.demo-tabs {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		width: min(750px, 100%);
+		margin: 40px auto 48px;
+	}
+	.demo-tabs button {
+		text-align: left;
+		padding: 4px 16px;
+		min-height: var(--sg-target-min);
+		border-left: 1px solid color-mix(in srgb, var(--sg-surface) 35%, transparent);
+		color: var(--sg-text);
+		cursor: pointer;
+		font-size: 12px;
 		line-height: 1.5;
 	}
-
-	.footer-bottom {
-		min-height: 3.5rem;
-		padding-top: 0.5rem;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 1rem;
-		border-top: 1px solid var(--sg-border);
-		color: var(--sg-text-muted);
-		font-size: 0.8rem;
+	.demo-tabs strong {
+		display: block;
+		font-weight: 500;
+		margin-bottom: 3px;
 	}
-
-	.footer-bottom a {
-		min-height: 2.5rem;
+	.demo-tabs button > span {
+		display: block;
+	}
+	.demo-tabs button[aria-selected='true'],
+	.demo-tabs button:hover {
+		border-left-width: 3px;
+		background: color-mix(in srgb, var(--sg-surface) 20%, transparent);
+	}
+	.demo-tabs button:focus-visible {
+		outline-color: var(--sg-hero-deep);
+	}
+	.demo-stage {
+		max-width: 800px;
+		margin-inline: auto;
+		min-height: 620px;
+		padding: 7px;
+		border: 1px solid color-mix(in srgb, var(--sg-surface) 55%, transparent);
+		border-radius: 14px;
+		background: color-mix(in srgb, var(--sg-surface) 20%, transparent);
+		box-shadow: 0 0 0 4px color-mix(in srgb, var(--sg-surface) 15%, transparent);
+	}
+	.demo-stage[hidden] {
+		display: none;
+	}
+	.demo-stage :global(.preview) {
+		min-height: 604px;
+		background: var(--sg-canvas);
+		display: flex;
+		flex-direction: column;
+	}
+	.demo-stage :global(.workspace) {
+		flex: 1;
+		grid-template-columns: minmax(0, 1fr) 37%;
+	}
+	.demo-stage :global(.editorial-sheet),
+	.demo-stage :global(.passport-sheet) {
+		margin-block: auto;
+		width: min(100%, 510px);
+	}
+	.demo-stage :global(.preview__disclaimer) {
+		margin-top: auto;
+		padding-top: 12px;
+	}
+	.city-section {
+		padding-block: 112px;
+		text-align: center;
+	}
+	.city-section h2 {
+		font-size: 30px;
+	}
+	.city-word-grid {
+		margin: 64px auto 32px;
+		font: 14px/2.4 var(--sg-font-label);
+		letter-spacing: 0.55em;
+		color: var(--sg-text-muted);
+	}
+	.city-section__link {
+		min-height: var(--sg-target-min);
 		display: inline-flex;
 		align-items: center;
+		gap: 8px;
+		font-size: 13px;
+		color: var(--sg-text);
+	}
+	.city-section__link:hover {
+		text-decoration: underline;
+		text-underline-offset: 4px;
+	}
+	.site-footer {
+		padding-top: 120px;
+	}
+	.footer-layout {
+		display: grid;
+		grid-template-columns: 1fr 280px;
+		align-items: start;
+		gap: 80px;
+	}
+	.footer-copy h2 {
+		font-size: 32px;
+	}
+	.footer-chapters {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px 16px;
+		margin-top: 40px;
+	}
+	.footer-chapters a,
+	.footer-links a {
+		font-size: 12px;
 		color: var(--sg-text-muted);
-		text-decoration: none;
+		min-height: var(--sg-target-min);
+		display: inline-flex;
+		align-items: center;
 	}
-
-	@media (max-width: 900px) {
-		.site-header__inner {
-			grid-template-columns: auto 1fr auto;
-		}
-
-		.desktop-nav {
-			display: none;
-		}
-
-		.mobile-menu {
-			display: block;
-		}
-
-		.hero__copy {
-			max-width: 32rem;
-		}
-
-		.hero-chip--one {
-			left: auto;
-			right: 4%;
-		}
-
-		.hero-chip--two {
-			left: auto;
-			right: 10%;
-		}
-
-		.hero-chip--three {
-			display: none;
-		}
-
-		.section-heading {
-			align-items: flex-start;
-			flex-direction: column;
-			gap: 0.75rem;
-		}
-
-		.steps li {
-			padding-right: 0.9rem;
-		}
+	.footer-links {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 170px));
+		margin-top: 12px;
 	}
-
-	@media (max-width: 700px) {
-		.container,
-		.site-header__inner {
-			width: min(calc(100% - 2rem), 82rem);
-		}
-
-		.site-header__inner {
-			min-height: 4.4rem;
-			grid-template-columns: 1fr auto auto;
-			gap: 0.5rem;
-		}
-
+	.footer-chapters a:hover,
+	.footer-links a:hover {
+		color: var(--sg-text);
+		text-decoration: underline;
+		text-underline-offset: 4px;
+	}
+	.footer-note {
+		margin-top: 32px;
+		font-size: 10px;
+		line-height: 1.8;
+		color: var(--sg-text-muted);
+	}
+	.footer-wordmark {
+		margin-top: 24px;
+		font-size: 24px;
+	}
+	.footer-window {
+		min-height: 380px;
+		border: 1px solid var(--sg-border);
+		border-radius: 12px;
+		padding: 12px;
+		background: var(--sg-surface);
+		box-shadow:
+			inset 0 0 0 3px var(--sg-canvas),
+			0 2px 8px color-mix(in srgb, var(--sg-text) 4%, transparent);
+		display: flex;
+		flex-direction: column;
+	}
+	.footer-window > img {
+		width: 100%;
+		height: 210px;
+		object-fit: cover;
+		border-radius: 6px;
+	}
+	.footer-window > div {
+		padding: 16px 4px 4px;
+	}
+	.footer-window p {
+		font-size: 18px;
+		line-height: 1.2;
+		margin-bottom: 16px;
+	}
+	.footer-window p > span {
+		color: var(--sg-text-muted);
+	}
+	.footer-window .button {
+		min-height: var(--sg-target-min);
+		font-size: 12px;
+	}
+	.footer-bottom {
+		text-align: center;
+		padding: 112px 20px 28px;
+		font-size: 10px;
+		color: var(--sg-text-muted);
+	}
+	.footer-bottom a {
+		color: inherit;
+		min-height: var(--sg-target-min);
+		display: inline-flex;
+		align-items: center;
+		margin-left: 16px;
+	}
+	@media (max-width: 999px) {
 		.desktop-nav {
 			display: none;
 		}
 		.header-cta {
-			min-height: 2.65rem;
-			padding-inline: 0.6rem;
-			display: inline-flex;
-			font-size: 0.75rem;
+			margin-left: auto;
 		}
-
 		.mobile-menu {
 			display: block;
 		}
-		.mobile-menu summary {
-			padding-inline: 0.65rem;
+		.site-header__inner {
+			padding-block: 18px;
 		}
-		.mobile-menu summary span {
+		.hero h1 {
+			font-size: 38px;
+		}
+		.hero__notes {
 			display: none;
 		}
-
-		.hero {
-			min-height: max(100svh, 45rem);
+		h2 {
+			font-size: 32px;
 		}
-		.hero__world img,
-		.hero__world video {
-			object-position: 37% center;
+		.feature,
+		.feature--reverse {
+			grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+			gap: 32px;
+		}
+		.feature--reverse {
+			grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+		}
+		.feature__copy h3 {
+			font-size: 30px;
+		}
+		.city-word-grid {
+			font-size: 12px;
+			letter-spacing: 0.4em;
+		}
+	}
+	@media (max-width: 767px) {
+		.wordmark {
+			font-size: 24px;
+		}
+		.header-cta {
+			min-width: 0;
+			font-size: 13px;
+			padding-inline: 12px;
+		}
+		.hero {
+			min-height: max(100svh, 720px);
+		}
+		.hero__content {
+			padding-top: 166px;
 		}
 		.hero__world::after {
 			background: linear-gradient(
 				180deg,
-				color-mix(in srgb, var(--sg-hero-deep) 34%, transparent),
-				color-mix(in srgb, var(--sg-hero-deep) 24%, transparent) 50%,
-				color-mix(in srgb, var(--sg-hero-deep) 18%, transparent)
+				color-mix(in srgb, var(--sg-hero-deep) 40%, transparent) 0%,
+				color-mix(in srgb, var(--sg-hero-deep) 40%, transparent) 46%,
+				transparent 66%
 			);
 		}
-		.hero__content {
-			padding-block: clamp(10rem, 20vh, 12rem) 3rem;
-		}
-		.hero__copy {
-			max-width: 25rem;
-		}
-
 		.hero h1 {
-			max-width: 13ch;
-			font-size: clamp(2.15rem, 8.8vw, 2.8rem);
+			font-size: clamp(28px, 8.2vw, 34px);
+			line-height: 1.18;
 		}
-
-		.hero__description {
-			max-width: 19rem;
-			margin-top: 1.1rem;
-			font-size: 1rem;
+		.hero__content > p {
+			max-width: 340px;
+			margin-top: 24px;
 		}
-
-		.hero__actions {
-			gap: 0.45rem;
-		}
-
-		.hero__actions .action {
-			min-height: 2.8rem;
-			padding-inline: 0.85rem;
-			font-size: 0.8rem;
-		}
-
-		.hero-chip--one,
-		.hero-chip--three {
+		.desktop-break {
 			display: none;
 		}
-		.hero-chip--two {
-			top: auto;
-			bottom: 18%;
-			left: auto;
-			right: 0;
+		.hero__actions {
+			margin-top: 24px;
+			gap: 12px;
 		}
-		.hero__scroll {
-			bottom: 1.5rem;
+		.hero__caption {
+			bottom: 34px;
+			font-size: 8px;
 		}
-
-		.section {
-			padding-block: 3.5rem;
+		.hero__motion {
+			bottom: 66px;
+			font-size: 10px;
 		}
-
-		.section-heading {
-			margin-bottom: 1.5rem;
+		.transit-strip {
+			padding-top: 32px;
 		}
-
-		.section-heading h2,
-		.trail-copy h2 {
-			font-size: clamp(1.9rem, 8vw, 2.65rem);
-		}
-
-		.product-window {
-			margin-bottom: 3rem;
-		}
-		.product-window__bar {
-			padding-inline: 1rem;
-		}
-		.product-window__body {
-			grid-template-columns: 1fr;
-		}
-		.product-window__panel {
-			padding: 1.5rem;
-			border-right: 0;
-			border-bottom: 1px solid var(--sg-border);
-		}
-		.product-window__panel h3 {
-			margin-block: 0.8rem 1.5rem;
-		}
-		.product-window__scene {
-			min-height: 17rem;
-		}
-		.feature-row {
-			grid-template-columns: 2rem minmax(0, 1fr);
-			align-items: start;
-			gap: 0.7rem;
-		}
-		.feature-row__link {
-			grid-column: 2;
-		}
-
-		.section-heading--center {
-			align-items: flex-start;
-		}
-
-		.steps {
-			grid-template-columns: 1fr;
-			gap: 1.4rem;
-		}
-
-		.steps::before {
-			top: 1.4rem;
-			bottom: 1.4rem;
-			left: 1.25rem;
-			right: auto;
-			border-top: 0;
-			border-left: 1px dashed var(--sg-border);
-		}
-
-		.steps li {
-			min-height: 4.5rem;
-			padding: 0 0 0 3.75rem;
-		}
-
-		.step-number {
-			position: absolute;
-			left: 0;
-			top: 0;
-			margin: 0;
-		}
-
-		.steps li p {
-			max-width: 100%;
-		}
-
-		.place-grid {
-			grid-auto-columns: minmax(16rem, 82vw);
-			grid-auto-flow: column;
-			grid-template-columns: none;
-			overflow-x: auto;
-			padding-bottom: 0.5rem;
-			scroll-snap-type: x mandatory;
-			overscroll-behavior-inline: contain;
-		}
-
-		.place-grid > * {
-			scroll-snap-align: start;
-		}
-
-		.passport-grid,
-		.trail-layout {
-			grid-template-columns: 1fr;
-		}
-
-		.passport-grid {
-			gap: 0.75rem;
-		}
-
-		.trail-layout {
-			gap: 1.75rem;
-		}
-
-		.final-cta {
-			min-height: 44rem;
-		}
-		.final-cta__copy {
-			max-width: 28rem;
-			margin-inline: 1rem;
-			padding-block: 5rem;
-		}
-		.final-cta__art img {
-			object-position: 37% center;
-		}
-		.final-cta__art::after {
-			background: linear-gradient(
-				180deg,
-				color-mix(in srgb, var(--sg-hero-deep) 72%, transparent),
-				color-mix(in srgb, var(--sg-hero-deep) 22%, transparent)
-			);
-		}
-
-		.final-cta h2 {
-			font-size: clamp(2rem, 9vw, 3rem);
-		}
-
-		.final-cta__app {
-			width: min(17rem, calc(100% - 2rem));
-			min-height: 11rem;
-			right: 1rem;
-			bottom: 1rem;
-		}
-
-		.footer-grid {
+		.transit-strip__marks {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
-			gap: 1.5rem;
+			gap: 16px;
 		}
-
-		.footer-brand {
-			grid-column: 1 / -1;
+		.transit-strip__marks a {
+			font-size: 11px;
+			padding: 12px;
+		}
+		.transit-strip > p {
+			line-height: 1.6;
+		}
+		.section {
+			padding-block: 72px;
+		}
+		h2 {
+			font-size: 28px;
+		}
+		.overview__preview {
+			margin-top: 56px;
+		}
+		.overview__principles {
+			grid-template-columns: 1fr;
+			gap: 20px;
+			margin-top: 32px;
+		}
+		.overview__cta {
+			flex-direction: column;
+			align-items: flex-start;
+			gap: 20px;
+			margin-top: 32px;
+		}
+		.feature,
+		.feature--reverse {
+			grid-template-columns: 1fr;
+			gap: 48px;
+			margin-top: 112px;
+			min-height: 0;
+		}
+		.feature--reverse .feature__copy {
+			order: 0;
+		}
+		.feature--reverse .feature__preview {
+			max-width: none;
+		}
+		.feature__copy h3 {
+			max-width: 19ch;
+			font-size: 30px;
+		}
+		.guide {
+			padding-top: 88px;
+			padding-bottom: 112px;
+		}
+		.books {
+			grid-template-columns: minmax(0, 290px);
+			gap: 64px;
+			margin-top: 80px;
+		}
+		.product-demo {
+			padding-block: 112px;
+		}
+		.demo-tabs {
+			gap: 4px;
+			margin-block: 40px;
+		}
+		.demo-tabs button {
+			padding: 8px;
+			font-size: 11px;
+		}
+		.demo-tabs button > span {
+			display: none;
+		}
+		.demo-stage {
+			min-height: 760px;
+			padding: 5px;
+		}
+		.demo-stage :global(.preview) {
+			min-height: 748px;
+		}
+		.demo-stage :global(.workspace) {
+			grid-template-columns: 1fr;
+		}
+		.demo-stage :global(.inspector__body) {
+			min-height: 300px;
+		}
+		.city-section {
+			padding-block: 88px;
+		}
+		.city-section h2 {
+			font-size: 28px;
+		}
+		.city-word-grid {
+			font-size: 9px;
+			letter-spacing: 0.16em;
+			line-height: 2.8;
+			margin-top: 48px;
+			white-space: nowrap;
+		}
+		.site-footer {
+			padding-top: 56px;
+		}
+		.footer-layout {
+			grid-template-columns: 1fr;
+			gap: 64px;
+		}
+		.footer-copy h2 {
+			font-size: 30px;
+		}
+		.footer-window {
+			width: min(280px, 100%);
+		}
+		.footer-bottom {
+			padding-top: 80px;
+			line-height: 1.7;
 		}
 	}
+	@media (prefers-reduced-motion: no-preference) {
+		.hero__content > * {
+			animation: landing-enter var(--landing-enter) var(--sg-ease-enter) both;
+		}
+		.hero__content > h1 {
+			animation-delay: 100ms;
+		}
+		.hero__content > p {
+			animation-delay: 500ms;
+		}
+		.hero__actions {
+			animation-delay: 900ms;
+		}
 
-	@keyframes hero-enter {
+		.feature:global([data-in-view='true']) > .feature__copy,
+		.features__intro:global([data-in-view='true']),
+		.overview:global([data-in-view='true']) h2,
+		.overview__principles:global([data-in-view='true']),
+		.overview__cta:global([data-in-view='true']),
+		.book-link:global([data-in-view='true']),
+		.guide:global([data-in-view='true']) .center-heading,
+		.product-demo:global([data-in-view='true']) .center-heading,
+		.city-section:global([data-in-view='true']) .center-heading {
+			animation: landing-enter var(--landing-enter) var(--sg-ease-enter) both;
+		}
+		.feature:global([data-in-view='true']) > .feature__preview,
+		.overview__preview:global([data-in-view='true']) {
+			animation: preview-enter 800ms var(--sg-ease-enter) both;
+			animation-delay: 150ms;
+		}
+		.feature:global([data-in-view='true']) .feature__details > details {
+			animation: landing-enter var(--landing-enter) var(--sg-ease-enter) both;
+			animation-delay: 200ms;
+		}
+		.feature:global([data-in-view='true']) .feature__details > details:nth-child(2) {
+			animation-delay: 280ms;
+		}
+		.feature:global([data-in-view='true']) .feature__details > details:nth-child(3) {
+			animation-delay: 360ms;
+		}
+		.feature:global([data-in-view='true']) .feature__details > details:nth-child(4) {
+			animation-delay: 440ms;
+		}
+		.demo-stage:not([hidden]) {
+			animation: landing-enter 360ms var(--sg-ease-enter) both;
+		}
+	}
+	@keyframes landing-enter {
 		from {
 			opacity: 0;
-			transform: translateY(1rem);
+			transform: translateY(16px);
 		}
 		to {
 			opacity: 1;
-			transform: translateY(0);
+			transform: none;
 		}
 	}
-
-	@keyframes route-reveal {
+	@keyframes preview-enter {
 		from {
-			clip-path: inset(0 100% 0 0);
+			opacity: 0;
+			transform: translateY(28px) rotateX(4deg) scale(0.98);
 		}
 		to {
-			clip-path: inset(0);
+			opacity: 1;
+			transform: none;
 		}
 	}
-
-	@media (prefers-reduced-motion: no-preference) {
-		.hero__copy > * {
-			animation: hero-enter 600ms cubic-bezier(0.23, 1, 0.32, 1) both;
-		}
-		.hero__copy > .eyebrow {
-			animation-delay: 100ms;
-		}
-		.hero__copy > h1 {
-			animation-delay: 300ms;
-		}
-		.hero__copy > .hero__description {
-			animation-delay: 540ms;
-		}
-		.hero__copy > .hero__actions {
-			animation-delay: 780ms;
-		}
-		.hero-chip {
-			animation: hero-enter 650ms var(--sg-ease-enter) both;
-		}
-		.hero-chip--one {
-			animation-delay: 950ms;
-		}
-		.hero-chip--two {
-			animation-delay: 1200ms;
-		}
-		.hero-chip--three {
-			animation-delay: 1450ms;
-		}
-		.hero__scroll {
-			animation: hero-enter 700ms ease 1.5s both;
-		}
-		.landing :global(.section[data-in-view='true'] .product-window__route) {
-			animation: route-reveal var(--sg-motion-route) var(--sg-ease-enter) 300ms both;
-		}
-		.landing :global(.section[data-in-view='true'] .section-heading),
-		.landing :global(.section[data-in-view='true'] .trail-copy),
-		.landing :global(.section[data-in-view='true'] .final-cta__copy) {
-			animation: hero-enter 700ms cubic-bezier(0.23, 1, 0.32, 1) both;
-		}
-		.landing :global(.section[data-in-view='true'] .product-window),
-		.landing :global(.section[data-in-view='true'] .feature-list),
-		.landing :global(.section[data-in-view='true'] .steps),
-		.landing :global(.section[data-in-view='true'] .place-grid),
-		.landing :global(.section[data-in-view='true'] .passport-grid),
-		.landing :global(.section[data-in-view='true'] .trail-map) {
-			animation: hero-enter 850ms cubic-bezier(0.23, 1, 0.32, 1) 120ms both;
-		}
-	}
-
 	@media (prefers-reduced-motion: reduce) {
-		.hero__world video {
+		.hero__motion {
 			display: none;
 		}
-		.hero *,
-		.section * {
-			animation: none !important;
-			transition-duration: 0.01ms !important;
-		}
-	}
-
-	@media (max-width: 390px) {
-		.hero h1 {
-			font-size: clamp(2.45rem, 10.5vw, 2.9rem);
-		}
-
-		.footer-grid {
-			gap: 1.25rem 0.75rem;
+		.book-link:hover .book {
+			transform: none;
 		}
 	}
 </style>
